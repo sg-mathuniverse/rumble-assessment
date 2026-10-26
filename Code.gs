@@ -1,27 +1,698 @@
-/** Rumble Assessment backend. Configure IDs, run setupDatabase(), then deploy as Web App.
- * Starter only. Add verified authentication and server-side authorization before real student use.
+/**
+ * Rumble Assessment — Google Apps Script backend
+ *
+ * Setup:
+ * 1. Isi ID spreadsheet dan folder Drive pada CONFIG.
+ * 2. Jalankan setupDatabase() satu kali.
+ * 3. Deploy sebagai Web App untuk mengaktifkan endpoint.
+ *
+ * Catatan keamanan:
+ * Backend ini masih fondasi awal. Tambahkan autentikasi terverifikasi dan
+ * pemeriksaan izin server sebelum digunakan dengan data siswa sungguhan.
  */
-const CONFIG={SPREADSHEET_ID:'1PtFTRSFWjjoOkYzph7Elf6fziqMdwIqTi4p0HGsdlps',DRIVE_FOLDER_ID:'1_iKxvdIpBvbJp8r1cENloQroXMkMr9C8',APP_NAME:'Rumble Assessment'};
-const TABLES={Users:['userId','name','email','role','className','active','createdAt'],Assessments:['assessmentId','title','subject','className','duration','startAt','endAt','status','createdBy','createdAt','updatedAt'],Questions:['questionId','assessmentId','order','type','text','points','optionsJson','answerJson','rubric','pairsJson','imageUrl'],Attempts:['attemptId','assessmentId','studentId','startedAt','submittedAt','status','score','maxScore','focusLossCount','answersJson','teacherFeedback'],Events:['eventId','attemptId','studentId','eventType','eventAt','detailsJson'],Files:['fileId','attemptId','studentId','driveFileId','fileUrl','createdAt']};
-function doGet(){return out_({ok:true,app:CONFIG.APP_NAME,message:'API ready'});}
-function doPost(e){try{let b=JSON.parse(e&&e.postData&&e.postData.contents||'{}');return out_({ok:true,data:route_(String(b.action||''),b.payload||{})});}catch(x){return out_({ok:false,error:String(x&&x.message||x)});}}
-function route_(a,p){let m={health:()=>({app:CONFIG.APP_NAME,time:new Date().toISOString()}),createAssessment:()=>createAssessment_(p),listAssessments:()=>listAssessments_(p),getAssessment:()=>getAssessment_(p),submitAttempt:()=>submitAttempt_(p),listAttempts:()=>listAttempts_(p),gradeAttempt:()=>gradeAttempt_(p),logEvent:()=>logEvent_(p),listStudents:()=>rows_('Users').filter(u=>u.role==='student'),saveUser:()=>saveUser_(p),uploadAnswerImage:()=>uploadAnswerImage_(p)};if(!m[a])throw Error('Unknown action: '+a);return m[a]();}
-function setupDatabase(){let ss=db_();Object.keys(TABLES).forEach(n=>{let s=ss.getSheetByName(n);if(!s)s=ss.insertSheet(n);if(!s.getLastRow()){s.getRange(1,1,1,TABLES[n].length).setValues([TABLES[n]]);s.setFrozenRows(1);s.getRange(1,1,1,TABLES[n].length).setFontWeight('bold').setBackground('#142d4e').setFontColor('#fff');}});return 'Sheets siap: '+Object.keys(TABLES).join(', ');}
-function db_(){if(!CONFIG.SPREADSHEET_ID)throw Error('Isi CONFIG.SPREADSHEET_ID.');return SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);}
-function sh_(n){let s=db_().getSheetByName(n);if(!s)throw Error('Sheet '+n+' belum ada. Jalankan setupDatabase().');return s;}
-function out_(x){return ContentService.createTextOutput(JSON.stringify(x)).setMimeType(ContentService.MimeType.JSON);}
-function rows_(n){let v=sh_(n).getDataRange().getValues();if(v.length<2)return [];let h=v[0].map(String);return v.slice(1).filter(r=>r.some(x=>x!=='')).map(r=>{let o={};h.forEach((k,i)=>o[k]=r[i] instanceof Date?r[i].toISOString():r[i]);return o;});}
-function add_(n,o){sh_(n).appendRow(TABLES[n].map(k=>o[k]===undefined?'':o[k]));}
-function id_(p){return p+'-'+Utilities.getUuid().replace(/-/g,'').slice(0,12).toUpperCase();}
-function now_(){return new Date().toISOString();}
-function req_(v,l,max){let x=String(v||'').trim();if(!x)throw Error(l+' wajib diisi.');if(x.length>(max||500))throw Error(l+' terlalu panjang.');return x;}
-function parse_(v,f){try{return typeof v==='string'?JSON.parse(v||'null'):(v==null?f:v);}catch(e){return f;}}
-function createAssessment_(p){let title=req_(p.title,'Judul',180),qs=Array.isArray(p.questions)?p.questions:[];if(!qs.length||qs.length>200)throw Error('Jumlah soal harus 1–200.');let aid=id_('ASM'),t=now_();add_('Assessments',{assessmentId:aid,title,subject:String(p.subject||''),className:String(p.className||''),duration:Math.max(1,Math.min(300,Number(p.duration)||60)),startAt:String(p.startAt||''),endAt:String(p.endAt||''),status:'draft',createdBy:String(p.createdBy||''),createdAt:t,updatedAt:t});qs.forEach((q,i)=>{let type=String(q.type||'multiple_choice'),points=Number(q.points);if(!['multiple_choice','true_false','multi_select','matching','essay'].includes(type))throw Error('Tipe soal tidak valid: '+(i+1));if(!isFinite(points)||points<0||points>1000)throw Error('Bobot soal tidak valid: '+(i+1));add_('Questions',{questionId:id_('Q'),assessmentId:aid,order:i+1,type,text:String(q.text||''),points,optionsJson:JSON.stringify(q.options||[]),answerJson:JSON.stringify(q.answer===undefined?null:q.answer),rubric:String(q.rubric||''),pairsJson:JSON.stringify(q.pairs||''),imageUrl:String(q.imageUrl||'')});});return {id:aid,title,status:'draft',questionCount:qs.length};}
-function listAssessments_(p){let qs=rows_('Questions');return rows_('Assessments').filter(a=>(!p.status||a.status===p.status)&&(!p.className||a.className===p.className)).map(a=>Object.assign({},a,{questionCount:qs.filter(q=>q.assessmentId===a.assessmentId).length}));}
-function getAssessment_(p){let id=req_(p.id||p.assessmentId,'ID asesmen',100),a=rows_('Assessments').find(x=>x.assessmentId===id);if(!a)throw Error('Asesmen tidak ditemukan.');let questions=rows_('Questions').filter(q=>q.assessmentId===id).sort((x,y)=>Number(x.order)-Number(y.order)).map(q=>({id:q.questionId,order:Number(q.order),type:q.type,text:q.text,points:Number(q.points),options:parse_(q.optionsJson,[]),rubric:q.rubric,pairs:parse_(q.pairsJson,''),imageUrl:q.imageUrl}));return {assessment:a,questions};}
-function submitAttempt_(p){let aid=req_(p.assessmentId,'ID asesmen',100),sid=req_(p.studentId,'ID siswa',120),a=rows_('Assessments').find(x=>x.assessmentId===aid);if(!a||a.status!=='published')throw Error('Asesmen tidak ditemukan atau belum dipublikasikan.');let answers=p.answers||{},qs=rows_('Questions').filter(q=>q.assessmentId===aid),score=0,max=0,manual=false;qs.forEach(q=>{let pts=Number(q.points)||0;max+=pts;if(q.type==='essay'||q.type==='matching'){manual=true;return;}let key=parse_(q.answerJson,null),ans=answers[q.questionId];if(q.type==='multi_select'){let k=(Array.isArray(key)?key:[]).map(String).sort().join(','),v=(Array.isArray(ans)?ans:[]).map(String).sort().join(',');if(k&&k===v)score+=pts;}else if(String(key)===String(ans))score+=pts;});let attemptId=id_('ATT');add_('Attempts',{attemptId,assessmentId:aid,studentId:sid,startedAt:String(p.startedAt||now_()),submittedAt:now_(),status:manual?'needs_review':'graded',score,maxScore:max,focusLossCount:Math.max(0,Number(p.focusLossCount)||0),answersJson:JSON.stringify(answers),teacherFeedback:''});return {attemptId,status:manual?'needs_review':'graded',score,maxScore:max};}
-function listAttempts_(p){return rows_('Attempts').filter(a=>(!p.assessmentId||a.assessmentId===p.assessmentId)&&(!p.studentId||a.studentId===p.studentId)).map(a=>Object.assign({},a,{answers:parse_(a.answersJson,{})}));}
-function gradeAttempt_(p){let id=req_(p.attemptId,'ID pengerjaan',100),score=Number(p.score),max=Number(p.maxScore);if(!isFinite(score)||!isFinite(max)||score<0||max<score)throw Error('Nilai tidak valid.');let s=sh_('Attempts'),d=s.getDataRange().getValues(),h=d[0].map(String),ix=k=>h.indexOf(k);for(let i=1;i<d.length;i++)if(String(d[i][ix('attemptId')])===id){[['score',score],['maxScore',max],['status','graded'],['teacherFeedback',String(p.feedback||'')]].forEach(a=>s.getRange(i+1,ix(a[0])+1).setValue(a[1]));return {attemptId:id,score,maxScore:max,status:'graded'};}throw Error('Pengerjaan tidak ditemukan.');}
-function logEvent_(p){let attemptId=req_(p.attemptId,'ID pengerjaan',100),studentId=req_(p.studentId,'ID siswa',120);add_('Events',{eventId:id_('EVT'),attemptId,studentId,eventType:req_(p.eventType,'Jenis kejadian',80),eventAt:now_(),detailsJson:JSON.stringify(p.details||{})});return {logged:true};}
-function saveUser_(p){let email=req_(p.email,'Email',254).toLowerCase(),role=String(p.role||'student');if(!['teacher','student'].includes(role))throw Error('Peran tidak valid.');if(rows_('Users').some(u=>String(u.email).toLowerCase()===email))throw Error('Email sudah terdaftar.');let userId=id_('USR');add_('Users',{userId,name:req_(p.name,'Nama',120),email,role,className:String(p.className||''),active:true,createdAt:now_()});return {userId,email,role};}
-function uploadAnswerImage_(p){if(!CONFIG.DRIVE_FOLDER_ID)throw Error('Isi CONFIG.DRIVE_FOLDER_ID.');let mime=String(p.mimeType||'image/jpeg');if(!['image/jpeg','image/png','image/webp'].includes(mime))throw Error('Format harus JPG, PNG, atau WebP.');let base64=String(p.base64||'');if(!base64||base64.length>8*1024*1024)throw Error('Gambar kosong atau terlalu besar.');let file=DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID).createFile(Utilities.newBlob(Utilities.base64Decode(base64),mime,String(p.fileName||'jawaban.jpg').replace(/[\\/:*?"<>|]/g,'_')));let fileId=id_('FILE');add_('Files',{fileId,attemptId:req_(p.attemptId,'ID pengerjaan',100),studentId:req_(p.studentId,'ID siswa',120),driveFileId:file.getId(),fileUrl:file.getUrl(),createdAt:now_()});return {fileId,name:file.getName(),url:file.getUrl()};}
+
+const CONFIG = {
+  SPREADSHEET_ID: '1PtFTRSFWjjoOkYzph7Elf6fziqMdwIqTi4p0HGsdlps',
+  DRIVE_FOLDER_ID: '1_iKxvdIpBvbJp8r1cENloQroXMkMr9C8',
+  APP_NAME: 'Rumble Assessment'
+};
+
+const TABLES = {
+  Users: [
+    'userId', 'name', 'email', 'role', 'className', 'active', 'createdAt'
+  ],
+  Assessments: [
+    'assessmentId', 'title', 'subject', 'className', 'duration',
+    'startAt', 'endAt', 'status', 'createdBy', 'createdAt', 'updatedAt'
+  ],
+  Questions: [
+    'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
+    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl'
+  ],
+  Attempts: [
+    'attemptId', 'assessmentId', 'studentId', 'startedAt', 'submittedAt',
+    'status', 'score', 'maxScore', 'focusLossCount', 'answersJson',
+    'teacherFeedback'
+  ],
+  Events: [
+    'eventId', 'attemptId', 'studentId', 'eventType', 'eventAt', 'detailsJson'
+  ],
+  Files: [
+    'fileId', 'attemptId', 'studentId', 'driveFileId', 'fileUrl', 'createdAt'
+  ]
+};
+
+/**
+ * Endpoint GET untuk memeriksa apakah Web App aktif.
+ */
+function doGet() {
+  return outputJson_({
+    ok: true,
+    app: CONFIG.APP_NAME,
+    message: 'API ready'
+  });
+}
+
+/**
+ * Endpoint POST untuk permintaan API dari frontend.
+ */
+function doPost(e) {
+  try {
+    const body = JSON.parse(
+      e && e.postData && e.postData.contents
+        ? e.postData.contents
+        : '{}'
+    );
+
+    const result = routeAction_(
+      String(body.action || ''),
+      body.payload || {}
+    );
+
+    return outputJson_({ ok: true, data: result });
+  } catch (error) {
+    return outputJson_({
+      ok: false,
+      error: String(error && error.message ? error.message : error)
+    });
+  }
+}
+
+/**
+ * Mengarahkan permintaan ke fungsi yang sesuai.
+ */
+function routeAction_(action, payload) {
+  const actions = {
+    health: function () {
+      return {
+        app: CONFIG.APP_NAME,
+        time: new Date().toISOString()
+      };
+    },
+    createAssessment: function () {
+      return createAssessment_(payload);
+    },
+    listAssessments: function () {
+      return listAssessments_(payload);
+    },
+    getAssessment: function () {
+      return getAssessment_(payload);
+    },
+    submitAttempt: function () {
+      return submitAttempt_(payload);
+    },
+    listAttempts: function () {
+      return listAttempts_(payload);
+    },
+    gradeAttempt: function () {
+      return gradeAttempt_(payload);
+    },
+    logEvent: function () {
+      return logEvent_(payload);
+    },
+    listStudents: function () {
+      return listRows_('Users').filter(function (user) {
+        return user.role === 'student';
+      });
+    },
+    saveUser: function () {
+      return saveUser_(payload);
+    },
+    uploadAnswerImage: function () {
+      return uploadAnswerImage_(payload);
+    }
+  };
+
+  if (!actions[action]) {
+    throw new Error('Unknown action: ' + action);
+  }
+
+  return actions[action]();
+}
+
+/**
+ * Membuat tab dan header database yang dibutuhkan aplikasi.
+ * Aman dijalankan kembali: tab yang sudah memiliki data tidak direset.
+ */
+function setupDatabase() {
+  const spreadsheet = getSpreadsheet_();
+
+  Object.keys(TABLES).forEach(function (tableName) {
+    let sheet = spreadsheet.getSheetByName(tableName);
+
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet(tableName);
+    }
+
+    if (sheet.getLastRow() === 0) {
+      const headers = TABLES[tableName];
+
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.setFrozenRows(1);
+      sheet.getRange(1, 1, 1, headers.length)
+        .setFontWeight('bold')
+        .setBackground('#142d4e')
+        .setFontColor('#ffffff');
+      sheet.autoResizeColumns(1, headers.length);
+    }
+  });
+
+  return 'Sheets siap: ' + Object.keys(TABLES).join(', ');
+}
+
+/**
+ * Mengambil spreadsheet utama.
+ */
+function getSpreadsheet_() {
+  if (!CONFIG.SPREADSHEET_ID) {
+    throw new Error('Isi CONFIG.SPREADSHEET_ID terlebih dahulu.');
+  }
+
+  return SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+}
+
+/**
+ * Mengambil tab berdasarkan nama.
+ */
+function getSheet_(tableName) {
+  const sheet = getSpreadsheet_().getSheetByName(tableName);
+
+  if (!sheet) {
+    throw new Error(
+      'Sheet "' + tableName + '" belum ada. Jalankan setupDatabase().'
+    );
+  }
+
+  return sheet;
+}
+
+/**
+ * Membuat respons JSON untuk endpoint Apps Script.
+ */
+function outputJson_(value) {
+  return ContentService
+    .createTextOutput(JSON.stringify(value))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Membaca seluruh baris menjadi array objek.
+ */
+function listRows_(tableName) {
+  const values = getSheet_(tableName).getDataRange().getValues();
+
+  if (values.length < 2) {
+    return [];
+  }
+
+  const headers = values[0].map(String);
+
+  return values.slice(1)
+    .filter(function (row) {
+      return row.some(function (cell) {
+        return cell !== '';
+      });
+    })
+    .map(function (row) {
+      const item = {};
+
+      headers.forEach(function (header, index) {
+        const value = row[index];
+        item[header] = value instanceof Date
+          ? value.toISOString()
+          : value;
+      });
+
+      return item;
+    });
+}
+
+/**
+ * Menambahkan objek sebagai baris baru sesuai urutan header.
+ */
+function appendRow_(tableName, data) {
+  const headers = TABLES[tableName];
+
+  getSheet_(tableName).appendRow(
+    headers.map(function (header) {
+      return data[header] === undefined ? '' : data[header];
+    })
+  );
+}
+
+/**
+ * Membuat ID unik dengan awalan tertentu.
+ */
+function makeId_(prefix) {
+  return prefix + '-' +
+    Utilities.getUuid().replace(/-/g, '').slice(0, 12).toUpperCase();
+}
+
+/**
+ * Menghasilkan waktu saat ini dalam format ISO.
+ */
+function currentTimestamp_() {
+  return new Date().toISOString();
+}
+
+/**
+ * Memastikan nilai wajib tersedia dan tidak melebihi panjang maksimal.
+ */
+function requiredText_(value, label, maxLength) {
+  const text = String(value || '').trim();
+
+  if (!text) {
+    throw new Error(label + ' wajib diisi.');
+  }
+
+  if (text.length > (maxLength || 500)) {
+    throw new Error(label + ' terlalu panjang.');
+  }
+
+  return text;
+}
+
+/**
+ * Membaca JSON dengan nilai fallback bila kosong atau tidak valid.
+ */
+function parseJson_(value, fallback) {
+  try {
+    if (typeof value === 'string') {
+      return JSON.parse(value || 'null');
+    }
+
+    return value == null ? fallback : value;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+/**
+ * Membuat asesmen baru dan menyimpan soal-soalnya.
+ */
+function createAssessment_(payload) {
+  const title = requiredText_(payload.title, 'Judul', 180);
+  const questions = Array.isArray(payload.questions)
+    ? payload.questions
+    : [];
+
+  if (questions.length < 1 || questions.length > 200) {
+    throw new Error('Jumlah soal harus antara 1 dan 200.');
+  }
+
+  const assessmentId = makeId_('ASM');
+  const timestamp = currentTimestamp_();
+
+  appendRow_('Assessments', {
+    assessmentId: assessmentId,
+    title: title,
+    subject: String(payload.subject || ''),
+    className: String(payload.className || ''),
+    duration: Math.max(1, Math.min(300, Number(payload.duration) || 60)),
+    startAt: String(payload.startAt || ''),
+    endAt: String(payload.endAt || ''),
+    status: 'draft',
+    createdBy: String(payload.createdBy || ''),
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+
+  questions.forEach(function (question, index) {
+    const type = String(question.type || 'multiple_choice');
+    const points = Number(question.points);
+
+    const allowedTypes = [
+      'multiple_choice',
+      'true_false',
+      'multi_select',
+      'matching',
+      'essay'
+    ];
+
+    if (allowedTypes.indexOf(type) === -1) {
+      throw new Error('Tipe soal tidak valid pada soal nomor ' + (index + 1));
+    }
+
+    if (!isFinite(points) || points < 0 || points > 1000) {
+      throw new Error('Bobot soal tidak valid pada soal nomor ' + (index + 1));
+    }
+
+    appendRow_('Questions', {
+      questionId: makeId_('Q'),
+      assessmentId: assessmentId,
+      order: index + 1,
+      type: type,
+      text: String(question.text || ''),
+      points: points,
+      optionsJson: JSON.stringify(question.options || []),
+      answerJson: JSON.stringify(
+        question.answer === undefined ? null : question.answer
+      ),
+      rubric: String(question.rubric || ''),
+      pairsJson: JSON.stringify(question.pairs || ''),
+      imageUrl: String(question.imageUrl || '')
+    });
+  });
+
+  return {
+    id: assessmentId,
+    title: title,
+    status: 'draft',
+    questionCount: questions.length
+  };
+}
+
+/**
+ * Mengambil daftar asesmen, dengan filter opsional.
+ */
+function listAssessments_(payload) {
+  const questions = listRows_('Questions');
+
+  return listRows_('Assessments')
+    .filter(function (assessment) {
+      const matchesStatus = !payload.status ||
+        assessment.status === payload.status;
+      const matchesClass = !payload.className ||
+        assessment.className === payload.className;
+
+      return matchesStatus && matchesClass;
+    })
+    .map(function (assessment) {
+      const item = Object.assign({}, assessment);
+
+      item.questionCount = questions.filter(function (question) {
+        return question.assessmentId === assessment.assessmentId;
+      }).length;
+
+      return item;
+    });
+}
+
+/**
+ * Mengambil detail asesmen beserta soal tanpa mengirim kunci jawaban.
+ * Kunci jawaban hanya digunakan di sisi server saat penilaian.
+ */
+function getAssessment_(payload) {
+  const assessmentId = requiredText_(
+    payload.id || payload.assessmentId,
+    'ID asesmen',
+    100
+  );
+
+  const assessment = listRows_('Assessments').find(function (item) {
+    return item.assessmentId === assessmentId;
+  });
+
+  if (!assessment) {
+    throw new Error('Asesmen tidak ditemukan.');
+  }
+
+  const questions = listRows_('Questions')
+    .filter(function (question) {
+      return question.assessmentId === assessmentId;
+    })
+    .sort(function (a, b) {
+      return Number(a.order) - Number(b.order);
+    })
+    .map(function (question) {
+      return {
+        id: question.questionId,
+        order: Number(question.order),
+        type: question.type,
+        text: question.text,
+        points: Number(question.points),
+        options: parseJson_(question.optionsJson, []),
+        rubric: question.rubric,
+        pairs: parseJson_(question.pairsJson, ''),
+        imageUrl: question.imageUrl
+      };
+    });
+
+  return {
+    assessment: assessment,
+    questions: questions
+  };
+}
+
+/**
+ * Menerima jawaban dan menghitung nilai otomatis untuk tipe objektif.
+ * Esai dan menjodohkan diberi status needs_review untuk pemeriksaan guru.
+ */
+function submitAttempt_(payload) {
+  const assessmentId = requiredText_(payload.assessmentId, 'ID asesmen', 100);
+  const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
+
+  const assessment = listRows_('Assessments').find(function (item) {
+    return item.assessmentId === assessmentId;
+  });
+
+  if (!assessment || assessment.status !== 'published') {
+    throw new Error('Asesmen tidak ditemukan atau belum dipublikasikan.');
+  }
+
+  const answers = payload.answers || {};
+  const questions = listRows_('Questions').filter(function (question) {
+    return question.assessmentId === assessmentId;
+  });
+
+  let score = 0;
+  let maxScore = 0;
+  let needsReview = false;
+
+  questions.forEach(function (question) {
+    const points = Number(question.points) || 0;
+    const correctAnswer = parseJson_(question.answerJson, null);
+    const studentAnswer = answers[question.questionId];
+
+    maxScore += points;
+
+    if (question.type === 'essay' || question.type === 'matching') {
+      needsReview = true;
+      return;
+    }
+
+    if (question.type === 'multi_select') {
+      const expected = (Array.isArray(correctAnswer) ? correctAnswer : [])
+        .map(String)
+        .sort()
+        .join(',');
+
+      const submitted = (Array.isArray(studentAnswer) ? studentAnswer : [])
+        .map(String)
+        .sort()
+        .join(',');
+
+      if (expected && expected === submitted) {
+        score += points;
+      }
+
+      return;
+    }
+
+    if (String(correctAnswer) === String(studentAnswer)) {
+      score += points;
+    }
+  });
+
+  const attemptId = makeId_('ATT');
+
+  appendRow_('Attempts', {
+    attemptId: attemptId,
+    assessmentId: assessmentId,
+    studentId: studentId,
+    startedAt: String(payload.startedAt || currentTimestamp_()),
+    submittedAt: currentTimestamp_(),
+    status: needsReview ? 'needs_review' : 'graded',
+    score: score,
+    maxScore: maxScore,
+    focusLossCount: Math.max(0, Number(payload.focusLossCount) || 0),
+    answersJson: JSON.stringify(answers),
+    teacherFeedback: ''
+  });
+
+  return {
+    attemptId: attemptId,
+    status: needsReview ? 'needs_review' : 'graded',
+    score: score,
+    maxScore: maxScore
+  };
+}
+
+/**
+ * Mengambil hasil pengerjaan dengan filter opsional.
+ */
+function listAttempts_(payload) {
+  return listRows_('Attempts')
+    .filter(function (attempt) {
+      const matchesAssessment = !payload.assessmentId ||
+        attempt.assessmentId === payload.assessmentId;
+      const matchesStudent = !payload.studentId ||
+        attempt.studentId === payload.studentId;
+
+      return matchesAssessment && matchesStudent;
+    })
+    .map(function (attempt) {
+      return Object.assign({}, attempt, {
+        answers: parseJson_(attempt.answersJson, {})
+      });
+    });
+}
+
+/**
+ * Menyimpan nilai akhir dan umpan balik dari guru.
+ */
+function gradeAttempt_(payload) {
+  const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
+  const score = Number(payload.score);
+  const maxScore = Number(payload.maxScore);
+
+  if (
+    !isFinite(score) ||
+    !isFinite(maxScore) ||
+    score < 0 ||
+    maxScore < score
+  ) {
+    throw new Error('Nilai tidak valid.');
+  }
+
+  const sheet = getSheet_('Attempts');
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(String);
+
+  const columnIndex = function (name) {
+    return headers.indexOf(name);
+  };
+
+  for (let rowIndex = 1; rowIndex < values.length; rowIndex++) {
+    if (
+      String(values[rowIndex][columnIndex('attemptId')]) === attemptId
+    ) {
+      sheet.getRange(rowIndex + 1, columnIndex('score') + 1).setValue(score);
+      sheet.getRange(rowIndex + 1, columnIndex('maxScore') + 1)
+        .setValue(maxScore);
+      sheet.getRange(rowIndex + 1, columnIndex('status') + 1)
+        .setValue('graded');
+      sheet.getRange(rowIndex + 1, columnIndex('teacherFeedback') + 1)
+        .setValue(String(payload.feedback || ''));
+
+      return {
+        attemptId: attemptId,
+        score: score,
+        maxScore: maxScore,
+        status: 'graded'
+      };
+    }
+  }
+
+  throw new Error('Pengerjaan tidak ditemukan.');
+}
+
+/**
+ * Mencatat peristiwa selama pengerjaan asesmen.
+ */
+function logEvent_(payload) {
+  const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
+  const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
+  const eventType = requiredText_(payload.eventType, 'Jenis kejadian', 80);
+
+  appendRow_('Events', {
+    eventId: makeId_('EVT'),
+    attemptId: attemptId,
+    studentId: studentId,
+    eventType: eventType,
+    eventAt: currentTimestamp_(),
+    detailsJson: JSON.stringify(payload.details || {})
+  });
+
+  return { logged: true };
+}
+
+/**
+ * Membuat pengguna sederhana.
+ * Autentikasi dan validasi izin perlu ditambahkan sebelum produksi.
+ */
+function saveUser_(payload) {
+  const email = requiredText_(payload.email, 'Email', 254).toLowerCase();
+  const role = String(payload.role || 'student');
+
+  if (['teacher', 'student'].indexOf(role) === -1) {
+    throw new Error('Peran tidak valid.');
+  }
+
+  const existingUser = listRows_('Users').some(function (user) {
+    return String(user.email).toLowerCase() === email;
+  });
+
+  if (existingUser) {
+    throw new Error('Email sudah terdaftar.');
+  }
+
+  const userId = makeId_('USR');
+
+  appendRow_('Users', {
+    userId: userId,
+    name: requiredText_(payload.name, 'Nama', 120),
+    email: email,
+    role: role,
+    className: String(payload.className || ''),
+    active: true,
+    createdAt: currentTimestamp_()
+  });
+
+  return {
+    userId: userId,
+    email: email,
+    role: role
+  };
+}
+
+/**
+ * Menyimpan foto jawaban ke folder Drive yang sudah dikonfigurasi.
+ * Payload base64 dibatasi agar tidak menerima file terlalu besar.
+ */
+function uploadAnswerImage_(payload) {
+  if (!CONFIG.DRIVE_FOLDER_ID) {
+    throw new Error('Isi CONFIG.DRIVE_FOLDER_ID terlebih dahulu.');
+  }
+
+  const mimeType = String(payload.mimeType || 'image/jpeg');
+  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+
+  if (allowedMimeTypes.indexOf(mimeType) === -1) {
+    throw new Error('Format gambar harus JPG, PNG, atau WebP.');
+  }
+
+  const base64 = String(payload.base64 || '');
+
+  if (!base64 || base64.length > 8 * 1024 * 1024) {
+    throw new Error('Gambar kosong atau terlalu besar.');
+  }
+
+  const fileName = String(payload.fileName || 'jawaban.jpg')
+    .replace(/[\\/:*?"<>|]/g, '_');
+
+  const blob = Utilities.newBlob(
+    Utilities.base64Decode(base64),
+    mimeType,
+    fileName
+  );
+
+  const folder = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const file = folder.createFile(blob);
+  const fileId = makeId_('FILE');
+
+  appendRow_('Files', {
+    fileId: fileId,
+    attemptId: requiredText_(payload.attemptId, 'ID pengerjaan', 100),
+    studentId: requiredText_(payload.studentId, 'ID siswa', 120),
+    driveFileId: file.getId(),
+    fileUrl: file.getUrl(),
+    createdAt: currentTimestamp_()
+  });
+
+  return {
+    fileId: fileId,
+    name: file.getName(),
+    url: file.getUrl()
+  };
+}
