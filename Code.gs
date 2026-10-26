@@ -1,7 +1,7 @@
 /** Rumble Assessment backend. Configure IDs, run setupDatabase(), then deploy as Web App.
  * Starter only. Add verified authentication and server-side authorization before real student use.
  */
-const CONFIG={SPREADSHEET_ID:'',DRIVE_FOLDER_ID:'',APP_NAME:'Rumble Assessment'};
+const CONFIG={SPREADSHEET_ID:'1PtFTRSFWjjoOkYzph7Elf6fziqMdwIqTi4p0HGsdlps',DRIVE_FOLDER_ID:'1_iKxvdIpBvbJp8r1cENloQroXMkMr9C8',APP_NAME:'Rumble Assessment'};
 const TABLES={Users:['userId','name','email','role','className','active','createdAt'],Assessments:['assessmentId','title','subject','className','duration','startAt','endAt','status','createdBy','createdAt','updatedAt'],Questions:['questionId','assessmentId','order','type','text','points','optionsJson','answerJson','rubric','pairsJson','imageUrl'],Attempts:['attemptId','assessmentId','studentId','startedAt','submittedAt','status','score','maxScore','focusLossCount','answersJson','teacherFeedback'],Events:['eventId','attemptId','studentId','eventType','eventAt','detailsJson'],Files:['fileId','attemptId','studentId','driveFileId','fileUrl','createdAt']};
 function doGet(){return out_({ok:true,app:CONFIG.APP_NAME,message:'API ready'});}
 function doPost(e){try{let b=JSON.parse(e&&e.postData&&e.postData.contents||'{}');return out_({ok:true,data:route_(String(b.action||''),b.payload||{})});}catch(x){return out_({ok:false,error:String(x&&x.message||x)});}}
