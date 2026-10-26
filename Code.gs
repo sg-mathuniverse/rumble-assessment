@@ -43,18 +43,71 @@ const TABLES = {
 };
 
 /**
- * Endpoint GET untuk memeriksa apakah Web App aktif.
+ * Menyajikan antarmuka HTML yang sumber utamanya tetap index.html di GitHub.
+ * Cache singkat mengurangi permintaan berulang ke raw.githubusercontent.com.
  */
 function doGet() {
-  return outputJson_({
-    ok: true,
-    app: CONFIG.APP_NAME,
-    message: 'API ready'
-  });
+  const html = getFrontendHtml_();
+  return HtmlService.createHtmlOutput(html)
+    .setTitle(CONFIG.APP_NAME)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 /**
- * Endpoint POST untuk permintaan API dari frontend.
+ * Mengambil HTML terkini dari repositori GitHub.
+ * Perubahan GitHub dapat memerlukan hingga 5 menit untuk melewati cache.
+ */
+function getFrontendHtml_() {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'rumble_frontend_html_v1';
+  const cached = cache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/main/index.html';
+  const response = UrlFetchApp.fetch(url, {
+    muteHttpExceptions: true,
+    followRedirects: true
+  });
+  const status = response.getResponseCode();
+
+  if (status !== 200) {
+    throw new Error('Gagal mengambil index.html dari GitHub (HTTP ' + status + ').');
+  }
+
+  const html = response.getContentText();
+  if (!html || html.indexOf('id="app"') === -1) {
+    throw new Error('File index.html dari GitHub kosong atau formatnya tidak sesuai.');
+  }
+
+  cache.put(cacheKey, html, 300);
+  return html;
+}
+
+/**
+ * Jembatan frontend untuk google.script.run.
+ * Semua operasi data diproses di server, bukan melalui fetch lintas domain.
+ *
+ * PENTING: deployment yang dibatasi domain saja belum merupakan otorisasi
+ * per-peran. Tambahkan pemeriksaan izin guru/siswa sebelum memakai data nyata.
+ */
+function clientApi(action, payload) {
+  try {
+    const result = routeAction_(String(action || ''), payload || {});
+    return { ok: true, data: result };
+  } catch (error) {
+    return {
+      ok: false,
+      error: String(error && error.message ? error.message : error)
+    };
+  }
+}
+
+/**
+ * Endpoint POST lama dipertahankan sementara agar integrasi lama tidak langsung
+ * hilang selama transisi. Frontend baru menggunakan clientApi melalui HTML Service.
  */
 function doPost(e) {
   try {
