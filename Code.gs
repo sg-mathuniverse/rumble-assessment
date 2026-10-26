@@ -151,6 +151,9 @@ function routeAction_(action, payload) {
     getAssessment: function () {
       return getAssessment_(payload);
     },
+    publishAssessment: function () {
+      return publishAssessment_(payload);
+    },
     submitAttempt: function () {
       return submitAttempt_(payload);
     },
@@ -485,6 +488,34 @@ function getAssessment_(payload) {
     assessment: assessment,
     questions: questions
   };
+}
+
+/**
+ * Mengubah status asesmen menjadi published agar tersedia untuk mode siswa.
+ * Tambahkan otorisasi berbasis identitas guru sebelum penggunaan produksi.
+ */
+function publishAssessment_(payload) {
+  const assessmentId = requiredText_(
+    payload.id || payload.assessmentId,
+    'ID asesmen',
+    100
+  );
+  const sheet = getSheet_('Assessments');
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) throw new Error('Asesmen tidak ditemukan.');
+  const headers = values[0].map(String);
+  const idCol = headers.indexOf('assessmentId');
+  const statusCol = headers.indexOf('status');
+  const updatedCol = headers.indexOf('updatedAt');
+  if (idCol < 0 || statusCol < 0) throw new Error('Kolom database asesmen tidak lengkap.');
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][idCol]) === assessmentId) {
+      sheet.getRange(i + 1, statusCol + 1).setValue('published');
+      if (updatedCol >= 0) sheet.getRange(i + 1, updatedCol + 1).setValue(currentTimestamp_());
+      return { id: assessmentId, status: 'published' };
+    }
+  }
+  throw new Error('Asesmen tidak ditemukan.');
 }
 
 /**
