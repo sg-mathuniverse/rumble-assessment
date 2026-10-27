@@ -23,7 +23,7 @@ const TABLES = {
   ],
   Assessments: [
     'assessmentId', 'title', 'subject', 'className', 'duration',
-    'startAt', 'endAt', 'passageText', 'status', 'createdBy', 'createdAt', 'updatedAt'
+    'startAt', 'endAt', 'passageText', 'passageImageUrl', 'status', 'createdBy', 'createdAt', 'updatedAt'
   ],
   Questions: [
     'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
@@ -380,6 +380,7 @@ function createAssessment_(payload) {
     startAt: String(payload.startAt || ''),
     endAt: String(payload.endAt || ''),
     passageText: String(payload.passageText || ''),
+    passageImageUrl: String(payload.passageImageUrl || ''),
     status: 'draft',
     createdBy: String(payload.createdBy || ''),
     createdAt: timestamp,
@@ -446,7 +447,7 @@ function uploadAssessmentImage_(payload) {
   const fileName = String(payload.fileName || 'gambar-soal.jpg').replace(/[\\/:*?"<>|]/g, '_').slice(0, 150);
   const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, fileName);
   const file = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID).createFile(blob);
-  return { url: file.getUrl(), fileId: file.getId(), name: file.getName() };
+  return { url: file.getUrl(), imageUrl: 'https://drive.google.com/uc?export=view&id=' + file.getId(), fileId: file.getId(), name: file.getName() };
 }
 
 function updateAssessment_(payload) {
@@ -473,6 +474,7 @@ function updateAssessment_(payload) {
     startAt: String(payload.startAt || ''),
     endAt: String(payload.endAt || ''),
     passageText: String(payload.passageText || ''),
+    passageImageUrl: String(payload.passageImageUrl || ''),
     updatedAt: currentTimestamp_()
   };
   Object.keys(updates).forEach(function (key) {
@@ -557,6 +559,7 @@ function getAssessment_(payload) {
     .map(function (question) {
       return {
         id: question.questionId,
+        answer: payload.includeAnswers ? parseJson_(question.answerJson, null) : undefined,
         order: Number(question.order),
         type: question.type,
         text: question.text,
