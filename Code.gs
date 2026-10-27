@@ -703,18 +703,38 @@ function submitAttempt_(payload) {
  * Mengambil hasil pengerjaan dengan filter opsional.
  */
 function listAttempts_(payload) {
+  const allQuestions = listRows_('Questions');
+  const assessments = listRows_('Assessments');
   return listRows_('Attempts')
     .filter(function (attempt) {
-      const matchesAssessment = !payload.assessmentId ||
-        attempt.assessmentId === payload.assessmentId;
-      const matchesStudent = !payload.studentId ||
-        attempt.studentId === payload.studentId;
-
+      const matchesAssessment = !payload.assessmentId || attempt.assessmentId === payload.assessmentId;
+      const matchesStudent = !payload.studentId || attempt.studentId === payload.studentId;
       return matchesAssessment && matchesStudent;
     })
     .map(function (attempt) {
+      const details = allQuestions
+        .filter(function (question) { return question.assessmentId === attempt.assessmentId; })
+        .sort(function (a, b) { return Number(a.order) - Number(b.order); })
+        .map(function (question) {
+          return {
+            id: question.questionId,
+            order: Number(question.order),
+            type: question.type,
+            text: question.text,
+            points: Number(question.points) || 0,
+            rubric: question.rubric,
+            rubricLevels: parseJson_(question.rubricLevelsJson, []),
+            subquestions: parseJson_(question.subquestionsJson, []),
+            options: parseJson_(question.optionsJson, []),
+            imageUrl: question.imageUrl,
+            optionImages: parseJson_(question.optionImagesJson, [])
+          };
+        });
+      const assessment = assessments.find(function (item) { return item.assessmentId === attempt.assessmentId; });
       return Object.assign({}, attempt, {
-        answers: parseJson_(attempt.answersJson, {})
+        assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
+        answers: parseJson_(attempt.answersJson, {}),
+        questionDetails: details
       });
     });
 }
