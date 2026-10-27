@@ -501,7 +501,9 @@ function updateAssessment_(payload) {
       answerJson: JSON.stringify(question.answer === undefined ? null : question.answer),
       rubric: String(question.rubric || ''), pairsJson: JSON.stringify(question.pairs || ''),
       imageUrl: String(question.imageUrl || ''),
-      optionImagesJson: JSON.stringify(question.optionImages || [])
+      optionImagesJson: JSON.stringify(question.optionImages || []),
+      subquestionsJson: JSON.stringify(question.subquestions || []),
+      rubricLevelsJson: JSON.stringify(question.rubricLevels || [])
     });
   });
   return { id: assessmentId, title: updates.title, status: 'draft', questionCount: questions.length };
