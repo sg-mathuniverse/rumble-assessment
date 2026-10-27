@@ -133,7 +133,7 @@ function renderMath(root){if(typeof renderMathInElement!=='function')return;try{
 function setSubAnswer(id,index,value){const current=s.answers[id]&&typeof s.answers[id]==='object'?s.answers[id]:{};current[String(index)]=value;s.answers[id]=current}
 function handleEquationPaste(event,el,kind,i,j){
  const cd=event.clipboardData;if(!cd)return;
- const items=Array.from(cd.items||[]);const imageItem=items.find(item=>item.kind==='file'&&/^image\\//.test(item.type));
+ const items=Array.from(cd.items||[]);const imageItem=items.find(item=>item.kind==='file'&&/^image\//.test(item.type));
  if(imageItem){
   if(kind==='passage'){event.preventDefault();const file=imageItem.getAsFile();if(file)uploadImageBlob(file,file.name||'gambar-bacaan.png','passage');return;}
   event.preventDefault();const file=imageItem.getAsFile();if(file)uploadImageBlob(file,file.name||'gambar-soal.png',kind,i,j);return;
