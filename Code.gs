@@ -27,7 +27,7 @@ const TABLES = {
   ],
   Questions: [
     'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
-    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson'
+    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson', 'subquestionsJson', 'rubricLevelsJson'
   ],
   Attempts: [
     'attemptId', 'assessmentId', 'studentId', 'startedAt', 'submittedAt',
@@ -147,6 +147,9 @@ function routeAction_(action, payload) {
     },
     updateAssessment: function () {
       return updateAssessment_(payload);
+    },
+    uploadAssessmentImage: function () {
+      return uploadAssessmentImage_(payload);
     },
     listAssessments: function () {
       return listAssessments_(payload);
@@ -417,7 +420,9 @@ function createAssessment_(payload) {
       rubric: String(question.rubric || ''),
       pairsJson: JSON.stringify(question.pairs || ''),
       imageUrl: String(question.imageUrl || ''),
-      optionImagesJson: JSON.stringify(question.optionImages || [])
+      optionImagesJson: JSON.stringify(question.optionImages || []),
+      subquestionsJson: JSON.stringify(question.subquestions || []),
+      rubricLevelsJson: JSON.stringify(question.rubricLevels || [])
     });
   });
 
@@ -432,6 +437,18 @@ function createAssessment_(payload) {
 /**
  * Mengambil daftar asesmen, dengan filter opsional.
  */
+function uploadAssessmentImage_(payload) {
+  if (!CONFIG.DRIVE_FOLDER_ID) throw new Error('Folder Drive belum dikonfigurasi.');
+  const mimeType = String(payload.mimeType || 'image/jpeg');
+  if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].indexOf(mimeType) === -1) throw new Error('Format gambar harus JPG, PNG, WebP, atau GIF.');
+  const base64 = String(payload.base64 || '');
+  if (!base64 || base64.length > 6 * 1024 * 1024) throw new Error('Gambar kosong atau terlalu besar (maksimal sekitar 4 MB).');
+  const fileName = String(payload.fileName || 'gambar-soal.jpg').replace(/[\\/:*?"<>|]/g, '_').slice(0, 150);
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, fileName);
+  const file = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID).createFile(blob);
+  return { url: file.getUrl(), fileId: file.getId(), name: file.getName() };
+}
+
 function updateAssessment_(payload) {
   setupDatabase();
   const assessmentId = requiredText_(payload.id || payload.assessmentId, 'ID asesmen', 100);
@@ -548,7 +565,9 @@ function getAssessment_(payload) {
         rubric: question.rubric,
         pairs: parseJson_(question.pairsJson, ''),
         imageUrl: question.imageUrl,
-        optionImages: parseJson_(question.optionImagesJson, [])
+        optionImages: parseJson_(question.optionImagesJson, []),
+        subquestions: parseJson_(question.subquestionsJson, []),
+        rubricLevels: parseJson_(question.rubricLevelsJson, [])
       };
     });
 
