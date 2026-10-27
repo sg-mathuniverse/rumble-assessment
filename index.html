@@ -31,7 +31,7 @@ function reports(){
  (!s.attemptsLoaded?'<p class="muted">Memuat pengerjaan...</p>':!attempts.length?'<p class="muted">Belum ada pengerjaan yang masuk.</p>':attempts.map(a=>{
   const id=esc(a.attemptId||''),answers=a.answers||{},qs=a.questionDetails||[];
   return '<div class="question"><div class="actions"><div><b>'+esc(a.studentId||'Siswa')+' · '+esc(a.assessmentTitle||a.assessmentId||'Asesmen')+'</b><p class="muted">'+esc(a.submittedAt||'')+' · Status: '+esc(a.status||'')+'</p></div><span class="pill '+(a.status==='graded'?'live':'')+'">'+esc(a.status||'')+'</span></div>'+
-   qs.map((q,i)=>{const val=answers[q.id];const answerText=val===undefined||val===null||val===''?'(Tidak dijawab)':typeof val==='object'?JSON.stringify(val):String(val);
+   qs.map((q,i)=>{const val=answers[q.id];const answerText=val===undefined||val===null||val===''?'(Tidak dijawab)':typeof val==='object'&&q.subquestions&&q.subquestions.length?q.subquestions.map((sub,j)=>sub+': '+(val[String(j)]||'(Tidak dijawab)')).join(String.fromCharCode(10)):typeof val==='object'?JSON.stringify(val):String(val);
     return '<div class="question"><b>Soal '+(i+1)+' · '+esc(q.points)+' poin maksimum</b><p>'+esc(q.text||'')+'</p>'+(q.subquestions&&q.subquestions.length?'<ul>'+q.subquestions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'')+'<p><b>Jawaban siswa:</b></p><div style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(answerText)+'</div>'+((q.rubricLevels&&q.rubricLevels.length)?'<p><b>Panduan rubrik:</b></p><ol>'+q.rubricLevels.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ol>':'')+'</div>';
    }).join('')+
    '<div class="formgrid"><div class="field"><label>Nilai akhir</label><input id="gradeScore_'+id+'" type="number" min="0" max="'+esc(a.maxScore||0)+'" step="0.5" value="'+esc(a.score||0)+'"></div><div class="field"><label>Nilai maksimum</label><input id="gradeMax_'+id+'" type="number" min="0" value="'+esc(a.maxScore||0)+'"></div></div><div class="field"><label>Umpan balik guru</label><textarea id="gradeFeedback_'+id+'" rows="2">'+esc(a.teacherFeedback||'')+'</textarea></div><div class="actions"><button class="btn primary" onclick="saveGrade(\''+id+'\')">Simpan nilai akhir</button></div></div>';
@@ -137,7 +137,7 @@ async function saveA(){
 }
 function defaultRubricLevels(points,subquestions){
  const max=Math.max(1,Math.min(20,Number(points)||1));
- return Array.from({length:max+1},(_,score)=>score===0?'0 = Tidak menjawab':score===1?'1 = Menjawab tetapi tidak relevan':score===max?score+' = Seluruh bagian dijawab benar':score+' = Menjawab benar '+(score-1)+' subpertanyaan');
+ return Array.from({length:max+1},(_,score)=>score===0?'0 = Tidak menjawab':score===max?score+' = Seluruh bagian dijawab benar':score===1?'1 = Menjawab tetapi tidak relevan':score+' = Menjawab benar '+(score-1)+' subpertanyaan');
 }
 function updatePoints(i,value){const q=s.qs[i];q.points=Number(value)||0;if(q.type==='essay'&&!q._rubricEdited)q.rubricLevels=defaultRubricLevels(q.points,q.subquestions);}
 async function editAssessment(id){
