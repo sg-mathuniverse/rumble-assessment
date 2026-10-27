@@ -162,7 +162,7 @@ function uploadOptionImage(event,i,j){const file=event.target.files&&event.targe
 function uploadPassageImage(event){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'passage')}
 async function uploadImageBlob(file,name,kind,i,j){
  if(file.size>4*1024*1024){toast('Ukuran gambar maksimal 4 MB.');return}
- if(!/^image\\/(jpeg|png|webp|gif)$/.test(file.type)){toast('Gunakan gambar JPG, PNG, WebP, atau GIF.');return}
+ if(!/^image\/(jpeg|png|webp|gif)$/.test(file.type)){toast('Gunakan gambar JPG, PNG, WebP, atau GIF.');return}
  try{
   const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Gagal membaca gambar'));reader.readAsDataURL(file)});
   const base64=String(dataUrl).split(',')[1]||'';
