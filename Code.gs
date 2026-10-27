@@ -447,6 +447,11 @@ function uploadAssessmentImage_(payload) {
   const fileName = String(payload.fileName || 'gambar-soal.jpg').replace(/[\\/:*?"<>|]/g, '_').slice(0, 150);
   const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, fileName);
   const file = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID).createFile(blob);
+  try {
+    file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (sharingError) {
+    // Some school domains restrict link sharing; keep the file in the configured school Drive.
+  }
   return { url: file.getUrl(), imageUrl: 'https://drive.google.com/uc?export=view&id=' + file.getId(), fileId: file.getId(), name: file.getName() };
 }
 
