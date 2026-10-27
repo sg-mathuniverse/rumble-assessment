@@ -23,11 +23,11 @@ const TABLES = {
   ],
   Assessments: [
     'assessmentId', 'title', 'subject', 'className', 'duration',
-    'startAt', 'endAt', 'status', 'createdBy', 'createdAt', 'updatedAt'
+    'startAt', 'endAt', 'passageText', 'status', 'createdBy', 'createdAt', 'updatedAt'
   ],
   Questions: [
     'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
-    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl'
+    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson'
   ],
   Attempts: [
     'attemptId', 'assessmentId', 'studentId', 'startedAt', 'submittedAt',
@@ -145,6 +145,9 @@ function routeAction_(action, payload) {
     createAssessment: function () {
       return createAssessment_(payload);
     },
+    updateAssessment: function () {
+      return updateAssessment_(payload);
+    },
     listAssessments: function () {
       return listAssessments_(payload);
     },
@@ -200,16 +203,23 @@ function setupDatabase() {
       sheet = spreadsheet.insertSheet(tableName);
     }
 
+    const requiredHeaders = TABLES[tableName];
     if (sheet.getLastRow() === 0) {
-      const headers = TABLES[tableName];
-
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.getRange(1, 1, 1, requiredHeaders.length).setValues([requiredHeaders]);
       sheet.setFrozenRows(1);
-      sheet.getRange(1, 1, 1, headers.length)
+      sheet.getRange(1, 1, 1, requiredHeaders.length)
         .setFontWeight('bold')
         .setBackground('#142d4e')
         .setFontColor('#ffffff');
-      sheet.autoResizeColumns(1, headers.length);
+      sheet.autoResizeColumns(1, requiredHeaders.length);
+    } else {
+      const existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+      requiredHeaders.forEach(function (header) {
+        if (existingHeaders.indexOf(header) === -1) {
+          sheet.getRange(1, sheet.getLastColumn() + 1).setValue(header);
+          existingHeaders.push(header);
+        }
+      });
     }
   });
 
@@ -287,13 +297,11 @@ function listRows_(tableName) {
  * Menambahkan objek sebagai baris baru sesuai urutan header.
  */
 function appendRow_(tableName, data) {
-  const headers = TABLES[tableName];
-
-  getSheet_(tableName).appendRow(
-    headers.map(function (header) {
-      return data[header] === undefined ? '' : data[header];
-    })
-  );
+  const sheet = getSheet_(tableName);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  sheet.appendRow(headers.map(function (header) {
+    return data[header] === undefined ? '' : data[header];
+  }));
 }
 
 /**
@@ -347,6 +355,7 @@ function parseJson_(value, fallback) {
  * Membuat asesmen baru dan menyimpan soal-soalnya.
  */
 function createAssessment_(payload) {
+  setupDatabase();
   const title = requiredText_(payload.title, 'Judul', 180);
   const questions = Array.isArray(payload.questions)
     ? payload.questions
@@ -367,6 +376,7 @@ function createAssessment_(payload) {
     duration: Math.max(1, Math.min(300, Number(payload.duration) || 60)),
     startAt: String(payload.startAt || ''),
     endAt: String(payload.endAt || ''),
+    passageText: String(payload.passageText || ''),
     status: 'draft',
     createdBy: String(payload.createdBy || ''),
     createdAt: timestamp,
@@ -406,7 +416,8 @@ function createAssessment_(payload) {
       ),
       rubric: String(question.rubric || ''),
       pairsJson: JSON.stringify(question.pairs || ''),
-      imageUrl: String(question.imageUrl || '')
+      imageUrl: String(question.imageUrl || ''),
+      optionImagesJson: JSON.stringify(question.optionImages || [])
     });
   });
 
@@ -421,6 +432,62 @@ function createAssessment_(payload) {
 /**
  * Mengambil daftar asesmen, dengan filter opsional.
  */
+function updateAssessment_(payload) {
+  setupDatabase();
+  const assessmentId = requiredText_(payload.id || payload.assessmentId, 'ID asesmen', 100);
+  const questions = Array.isArray(payload.questions) ? payload.questions : [];
+  if (!questions.length || questions.length > 200) throw new Error('Jumlah soal harus antara 1 dan 200.');
+  const assessmentSheet = getSheet_('Assessments');
+  const aValues = assessmentSheet.getDataRange().getValues();
+  const aHeaders = aValues[0].map(String);
+  const idCol = aHeaders.indexOf('assessmentId');
+  let rowNumber = -1;
+  for (let i = 1; i < aValues.length; i++) if (String(aValues[i][idCol]) === assessmentId) { rowNumber = i + 1; break; }
+  if (rowNumber < 0) throw new Error('Asesmen tidak ditemukan.');
+  const statusCol = aHeaders.indexOf('status');
+  if (statusCol >= 0 && String(aValues[rowNumber - 1][statusCol]) === 'published') {
+    throw new Error('Asesmen yang sudah dipublikasikan tidak dapat diedit. Buat salinan/draft baru agar hasil siswa sebelumnya tetap aman.');
+  }
+  const updates = {
+    title: requiredText_(payload.title, 'Judul', 180),
+    subject: String(payload.subject || ''),
+    className: String(payload.className || ''),
+    duration: Math.max(1, Math.min(300, Number(payload.duration) || 60)),
+    startAt: String(payload.startAt || ''),
+    endAt: String(payload.endAt || ''),
+    passageText: String(payload.passageText || ''),
+    updatedAt: currentTimestamp_()
+  };
+  Object.keys(updates).forEach(function (key) {
+    const col = aHeaders.indexOf(key);
+    if (col >= 0) assessmentSheet.getRange(rowNumber, col + 1).setValue(updates[key]);
+  });
+  const qSheet = getSheet_('Questions');
+  const qValues = qSheet.getDataRange().getValues();
+  const qHeaders = qValues[0].map(String);
+  const qAssessmentCol = qHeaders.indexOf('assessmentId');
+  for (let i = qValues.length - 1; i >= 1; i--) {
+    if (String(qValues[i][qAssessmentCol]) === assessmentId) qSheet.deleteRow(i + 1);
+  }
+  questions.forEach(function (question, index) {
+    const type = String(question.type || 'multiple_choice');
+    const points = Number(question.points);
+    const allowedTypes = ['multiple_choice','true_false','multi_select','matching','essay'];
+    if (allowedTypes.indexOf(type) === -1) throw new Error('Tipe soal tidak valid pada soal nomor ' + (index + 1));
+    if (!isFinite(points) || points < 0 || points > 1000) throw new Error('Bobot soal tidak valid pada soal nomor ' + (index + 1));
+    appendRow_('Questions', {
+      questionId: makeId_('Q'), assessmentId: assessmentId, order: index + 1, type: type,
+      text: String(question.text || ''), points: points,
+      optionsJson: JSON.stringify(question.options || []),
+      answerJson: JSON.stringify(question.answer === undefined ? null : question.answer),
+      rubric: String(question.rubric || ''), pairsJson: JSON.stringify(question.pairs || ''),
+      imageUrl: String(question.imageUrl || ''),
+      optionImagesJson: JSON.stringify(question.optionImages || [])
+    });
+  });
+  return { id: assessmentId, title: updates.title, status: 'draft', questionCount: questions.length };
+}
+
 function listAssessments_(payload) {
   const questions = listRows_('Questions');
 
@@ -480,7 +547,8 @@ function getAssessment_(payload) {
         options: parseJson_(question.optionsJson, []),
         rubric: question.rubric,
         pairs: parseJson_(question.pairsJson, ''),
-        imageUrl: question.imageUrl
+        imageUrl: question.imageUrl,
+        optionImages: parseJson_(question.optionImagesJson, [])
       };
     });
 
