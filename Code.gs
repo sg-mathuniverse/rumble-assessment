@@ -419,6 +419,7 @@ function saveQuestionBundle_(payload) {
 }
 
 function listQuestionBundles_(payload) {
+  setupDatabase();
   return listRows_('QuestionBundles')
     .filter(function (bundle) {
       return !payload.status || String(bundle.status) === String(payload.status);
@@ -432,6 +433,7 @@ function listQuestionBundles_(payload) {
 }
 
 function getQuestionBundle_(payload) {
+  setupDatabase();
   const bundleId = requiredText_(payload.bundleId || payload.id, 'ID bundel', 100);
   const bundle = listRows_('QuestionBundles').find(function (item) {
     return String(item.bundleId) === bundleId;
