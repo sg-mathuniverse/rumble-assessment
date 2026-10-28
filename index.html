@@ -192,13 +192,13 @@ async function uploadImageBlob(file,name,kind,i,j){
  try{
   const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Gagal membaca gambar'));reader.readAsDataURL(file)});
   const base64=String(dataUrl).split(',')[1]||'';
-  const result=await api('uploadAssessmentImage',{fileName:name,mimeType:file.type,base64});
+  const result=await api('uploadAssessmentImage',{fileName:name,mimeType:file.type,base64,kind,assessmentId:s.editingId||((s.currentAssessment||{}).assessment||{}).assessmentId||''});
   if(!result||!result.ok)throw Error(result&&result.error?result.error:'Upload gambar gagal');
   const url=result.data.imageUrl||result.data.url;
   if(kind==='question'&&s.qs[i])s.qs[i].imageUrl=url;
   else if(kind==='option'&&s.qs[i]){s.qs[i].optionImages=s.qs[i].optionImages||[];s.qs[i].optionImages[j]=url;}
   else if(kind==='passage'&&s.meta)s.meta.passageImageUrl=url;
-  render();toast('Gambar berhasil diunggah ke Drive.');
+  render();if(result.data.warning)toast('Gambar tersimpan. '+result.data.warning);else toast('Gambar berhasil diunggah ke Drive: '+(result.data.folder||'folder gambar'));
  }catch(e){toast('Gagal mengunggah gambar: '+e.message)}
 }
 function render(){let p=s.page,c=p==='overview'?overview():p==='assessments'?assessments():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='progress'?progress():settings();document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Learning, measured.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Versi awal · Preview</footer></aside><main class="main"><header class="top"><span class="muted">Workspace / '+p+'</span><span>'+s.role+' <select onchange="role(this.value)"><option value="teacher" '+(s.role==='teacher'?'selected':'')+'>Guru</option><option value="student" '+(s.role==='student'?'selected':'')+'>Siswa</option></select></span></header><div class="content">'+c+'</div></main></div>';document.querySelectorAll('.question p,.math-content,.passage-content').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));}
