@@ -590,25 +590,25 @@ function uploadAssessmentImage_(payload) {
  * Memindahkan file gambar asesmen ke sampah Drive.
  * Hanya file di dalam folder aplikasi yang boleh dihapus melalui endpoint ini.
  */
+function folderIsInsideRoot_(folder, rootId, depth) {
+  if (folder.getId() === rootId) return true;
+  if ((depth || 0) >= 20) return false;
+  const parents = folder.getParents();
+  while (parents.hasNext()) {
+    if (folderIsInsideRoot_(parents.next(), rootId, (depth || 0) + 1)) return true;
+  }
+  return false;
+}
+
 function deleteAssessmentImage_(payload) {
   const fileId = requiredText_(payload.fileId, 'ID gambar', 200);
   const rootId = CONFIG.DRIVE_FOLDER_ID;
   if (!rootId) throw new Error('Folder Drive belum dikonfigurasi.');
   const file = DriveApp.getFileById(fileId);
-  let parents = file.getParents();
+  const parents = file.getParents();
   let found = false;
-  let checked = 0;
-  while (parents.hasNext() && checked < 20) {
-    const parent = parents.next();
-    if (parent.getId() === rootId) { found = true; break; }
-    const ancestors = parent.getParents();
-    while (ancestors.hasNext() && checked < 20) {
-      const ancestor = ancestors.next();
-      if (ancestor.getId() === rootId) { found = true; break; }
-      checked++;
-    }
-    if (found) break;
-    checked++;
+  while (parents.hasNext()) {
+    if (folderIsInsideRoot_(parents.next(), rootId, 0)) { found = true; break; }
   }
   if (!found) throw new Error('File tidak berada di folder Drive Rumble Assessment.');
   file.setTrashed(true);
