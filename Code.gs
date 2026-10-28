@@ -494,6 +494,7 @@ function createAssessment_(payload) {
     const allowedTypes = [
       'multiple_choice',
       'true_false',
+      'true_false_multi',
       'multi_select',
       'matching',
       'essay'
