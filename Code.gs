@@ -25,6 +25,7 @@ const TABLES = {
     'assessmentId', 'title', 'subject', 'className', 'duration',
     'startAt', 'endAt', 'passageText', 'passageImageUrl', 'status', 'createdBy', 'createdAt', 'updatedAt'
   ],
+  QuestionBundles: ['bundleId','title','subject','description','passageText','passageImageUrl','questionsJson','status','createdBy','createdAt','updatedAt'],
   Questions: [
     'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
     'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson', 'subquestionsJson', 'rubricLevelsJson'
@@ -145,6 +146,9 @@ function routeAction_(action, payload) {
     createAssessment: function () {
       return createAssessment_(payload);
     },
+    saveQuestionBundle: function () { return saveQuestionBundle_(payload); },
+    listQuestionBundles: function () { return listQuestionBundles_(payload); },
+    getQuestionBundle: function () { return getQuestionBundle_(payload); },
     updateAssessment: function () {
       return updateAssessment_(payload);
     },
@@ -357,6 +361,96 @@ function parseJson_(value, fallback) {
 /**
  * Membuat asesmen baru dan menyimpan soal-soalnya.
  */
+
+/**
+ * Bank soal: satu bundel dapat digunakan untuk membuat banyak asesmen.
+ * Soal disimpan sebagai JSON agar semua tipe soal dan aset tetap terjaga.
+ */
+function saveQuestionBundle_(payload) {
+  setupDatabase();
+  const title = requiredText_(payload.title, 'Judul bundel', 180);
+  const questions = Array.isArray(payload.questions) ? payload.questions : [];
+  if (!questions.length || questions.length > 200) {
+    throw new Error('Jumlah soal bundel harus antara 1 dan 200.');
+  }
+  questions.forEach(function (q, i) {
+    const type = String(q.type || 'multiple_choice');
+    const points = Number(q.points);
+    if (['multiple_choice','true_false','multi_select','matching','essay'].indexOf(type) < 0) {
+      throw new Error('Tipe soal tidak valid pada soal nomor ' + (i + 1));
+    }
+    if (!isFinite(points) || points < 0 || points > 1000) {
+      throw new Error('Bobot nilai tidak valid pada soal nomor ' + (i + 1));
+    }
+  });
+  const bundleId = String(payload.bundleId || payload.id || makeId_('BND'));
+  const sheet = getSheet_('QuestionBundles');
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const idCol = headers.indexOf('bundleId');
+  let rowNumber = -1;
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][idCol]) === bundleId) { rowNumber = i + 1; break; }
+  }
+  const now = currentTimestamp_();
+  const record = {
+    bundleId: bundleId,
+    title: title,
+    subject: String(payload.subject || ''),
+    description: String(payload.description || ''),
+    passageText: String(payload.passageText || ''),
+    passageImageUrl: String(payload.passageImageUrl || ''),
+    questionsJson: JSON.stringify(questions),
+    status: 'ready',
+    createdBy: String(payload.createdBy || ''),
+    createdAt: rowNumber > 0 ? String(values[rowNumber - 1][headers.indexOf('createdAt')] || now) : now,
+    updatedAt: now
+  };
+  if (rowNumber > 0) {
+    headers.forEach(function (header, col) {
+      if (Object.prototype.hasOwnProperty.call(record, header)) {
+        sheet.getRange(rowNumber, col + 1).setValue(record[header]);
+      }
+    });
+  } else {
+    appendRow_('QuestionBundles', record);
+  }
+  return { bundleId: bundleId, title: title, questionCount: questions.length, status: 'ready' };
+}
+
+function listQuestionBundles_(payload) {
+  return listRows_('QuestionBundles')
+    .filter(function (bundle) {
+      return !payload.status || String(bundle.status) === String(payload.status);
+    })
+    .map(function (bundle) {
+      const item = Object.assign({}, bundle);
+      item.questionCount = parseJson_(bundle.questionsJson, []).length;
+      delete item.questionsJson;
+      return item;
+    });
+}
+
+function getQuestionBundle_(payload) {
+  const bundleId = requiredText_(payload.bundleId || payload.id, 'ID bundel', 100);
+  const bundle = listRows_('QuestionBundles').find(function (item) {
+    return String(item.bundleId) === bundleId;
+  });
+  if (!bundle) throw new Error('Bundel soal tidak ditemukan.');
+  return {
+    bundle: {
+      bundleId: bundle.bundleId,
+      title: bundle.title,
+      subject: bundle.subject,
+      description: bundle.description,
+      passageText: bundle.passageText,
+      passageImageUrl: bundle.passageImageUrl,
+      status: bundle.status
+    },
+    questions: parseJson_(bundle.questionsJson, [])
+  };
+}
+
 function createAssessment_(payload) {
   setupDatabase();
   const title = requiredText_(payload.title, 'Judul', 180);
