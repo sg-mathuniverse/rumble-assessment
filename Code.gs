@@ -146,6 +146,7 @@ function routeAction_(action, payload) {
     createAssessment: function () {
       return createAssessment_(payload);
     },
+    deleteAssessment: function () { return deleteAssessment_(payload); },
     saveQuestionBundle: function () { return saveQuestionBundle_(payload); },
     listQuestionBundles: function () { return listQuestionBundles_(payload); },
     getQuestionBundle: function () { return getQuestionBundle_(payload); },
@@ -688,6 +689,44 @@ function updateAssessment_(payload) {
     });
   });
   return { id: assessmentId, title: updates.title, status: 'draft', questionCount: questions.length };
+}
+
+/**
+ * Menghapus asesmen draft dan soal-soalnya. Asesmen terpublikasi dilindungi.
+ */
+function deleteAssessment_(payload) {
+  setupDatabase();
+  const assessmentId = requiredText_(payload.id || payload.assessmentId, 'ID asesmen', 100);
+  const assessmentSheet = getSheet_('Assessments');
+  const values = assessmentSheet.getDataRange().getValues();
+  if (!values.length) throw new Error('Asesmen tidak ditemukan.');
+  const headers = values[0].map(String);
+  const idCol = headers.indexOf('assessmentId');
+  const statusCol = headers.indexOf('status');
+  let rowNumber = -1;
+  let status = '';
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][idCol]) === assessmentId) {
+      rowNumber = i + 1;
+      status = statusCol >= 0 ? String(values[i][statusCol]) : '';
+      break;
+    }
+  }
+  if (rowNumber < 0) throw new Error('Asesmen tidak ditemukan.');
+  if (status === 'published') throw new Error('Asesmen yang sudah dipublikasikan tidak dapat dihapus.');
+  const questionSheet = getSheet_('Questions');
+  const qValues = questionSheet.getDataRange().getValues();
+  if (qValues.length > 1) {
+    const qHeaders = qValues[0].map(String);
+    const qIdCol = qHeaders.indexOf('assessmentId');
+    for (let i = qValues.length - 1; i >= 1; i--) {
+      if (qIdCol >= 0 && String(qValues[i][qIdCol]) === assessmentId) {
+        questionSheet.deleteRow(i + 1);
+      }
+    }
+  }
+  assessmentSheet.deleteRow(rowNumber);
+  return { assessmentId: assessmentId, deleted: true };
 }
 
 function listAssessments_(payload) {
