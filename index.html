@@ -237,7 +237,8 @@ async function uploadImageBlob(file,name,kind,i,j){
  try{
   const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Gagal membaca gambar'));reader.readAsDataURL(file)});
   const base64=String(dataUrl).split(',')[1]||'';
-  const result=await api('uploadAssessmentImage',{fileName:name,mimeType:file.type,base64,kind,assessmentId:s.editingId||((s.currentAssessment||{}).assessment||{}).assessmentId||''});
+  const uploadKind=kind==='libraryPassage'?'passage':kind;
+  const result=await api('uploadAssessmentImage',{fileName:name,mimeType:file.type,base64,kind:uploadKind,assessmentId:s.editingId||((s.currentAssessment||{}).assessment||{}).assessmentId||''});
   if(!result||!result.ok)throw Error(result&&result.error?result.error:'Upload gambar gagal');
   const url=result.data.imageUrl||result.data.url;
   setImageUrl(kind,i,j,url);
