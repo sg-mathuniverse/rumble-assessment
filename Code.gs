@@ -438,21 +438,54 @@ function createAssessment_(payload) {
 /**
  * Mengambil daftar asesmen, dengan filter opsional.
  */
+function getOrCreateChildFolder_(parentFolder, folderName) {
+  const matches = parentFolder.getFoldersByName(folderName);
+  return matches.hasNext() ? matches.next() : parentFolder.createFolder(folderName);
+}
+
+/**
+ * Mengunggah gambar asesmen ke subfolder berdasarkan jenis gambar.
+ * Gambar soal hanya dibagikan ke pengguna domain sekolah, bukan publik.
+ */
 function uploadAssessmentImage_(payload) {
   if (!CONFIG.DRIVE_FOLDER_ID) throw new Error('Folder Drive belum dikonfigurasi.');
   const mimeType = String(payload.mimeType || 'image/jpeg');
-  if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].indexOf(mimeType) === -1) throw new Error('Format gambar harus JPG, PNG, WebP, atau GIF.');
+  if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].indexOf(mimeType) === -1) {
+    throw new Error('Format gambar harus JPG, PNG, WebP, atau GIF.');
+  }
   const base64 = String(payload.base64 || '');
-  if (!base64 || base64.length > 6 * 1024 * 1024) throw new Error('Gambar kosong atau terlalu besar (maksimal sekitar 4 MB).');
-  const fileName = String(payload.fileName || 'gambar-soal.jpg').replace(/[\\/:*?"<>|]/g, '_').slice(0, 150);
-  const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, fileName);
-  const file = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID).createFile(blob);
+  if (!base64 || base64.length > 6 * 1024 * 1024) {
+    throw new Error('Gambar kosong atau terlalu besar (maksimal sekitar 4 MB).');
+  }
+
+  const kind = String(payload.kind || 'question').toLowerCase();
+  const subfolderNames = { passage: 'Bacaan', question: 'Soal', option: 'Opsi Jawaban' };
+  if (!subfolderNames[kind]) throw new Error('Jenis gambar tidak valid.');
+
+  const safeName = String(payload.fileName || 'gambar-soal.jpg')
+    .replace(/[\\/:*?"<>|]/g, '_').slice(0, 150);
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const assessmentImages = getOrCreateChildFolder_(root, '01 - Gambar Asesmen');
+  const kindFolder = getOrCreateChildFolder_(assessmentImages, subfolderNames[kind]);
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, safeName);
+  const file = kindFolder.createFile(blob);
+
+  let domainSharingEnabled = true;
   try {
     file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
   } catch (sharingError) {
-    // Some school domains restrict link sharing; keep the file in the configured school Drive.
+    domainSharingEnabled = false;
   }
-  return { url: file.getUrl(), imageUrl: 'https://drive.google.com/uc?export=view&id=' + file.getId(), fileId: file.getId(), name: file.getName() };
+
+  return {
+    url: file.getUrl(),
+    imageUrl: 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1600',
+    fileId: file.getId(),
+    name: file.getName(),
+    folder: '01 - Gambar Asesmen/' + subfolderNames[kind],
+    domainSharingEnabled: domainSharingEnabled,
+    warning: domainSharingEnabled ? '' : 'Gambar tersimpan, tetapi izin berbagi domain tidak dapat diatur otomatis. Admin Google Workspace mungkin membatasi izin Drive.'
+  };
 }
 
 function updateAssessment_(payload) {
@@ -852,48 +885,37 @@ function saveUser_(payload) {
  * Payload base64 dibatasi agar tidak menerima file terlalu besar.
  */
 function uploadAnswerImage_(payload) {
-  if (!CONFIG.DRIVE_FOLDER_ID) {
-    throw new Error('Isi CONFIG.DRIVE_FOLDER_ID terlebih dahulu.');
-  }
-
+  if (!CONFIG.DRIVE_FOLDER_ID) throw new Error('Isi CONFIG.DRIVE_FOLDER_ID terlebih dahulu.');
   const mimeType = String(payload.mimeType || 'image/jpeg');
   const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
-
-  if (allowedMimeTypes.indexOf(mimeType) === -1) {
-    throw new Error('Format gambar harus JPG, PNG, atau WebP.');
-  }
+  if (allowedMimeTypes.indexOf(mimeType) === -1) throw new Error('Format gambar harus JPG, PNG, atau WebP.');
 
   const base64 = String(payload.base64 || '');
+  if (!base64 || base64.length > 8 * 1024 * 1024) throw new Error('Gambar kosong atau terlalu besar.');
 
-  if (!base64 || base64.length > 8 * 1024 * 1024) {
-    throw new Error('Gambar kosong atau terlalu besar.');
-  }
+  const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
+  const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
+  const assessmentId = String(payload.assessmentId || 'Asesmen-Tanpa-ID').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+  const safeAttemptId = attemptId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+  const fileName = String(payload.fileName || 'jawaban.jpg').replace(/[\\/:*?"<>|]/g, '_').slice(0, 150);
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, fileName);
 
-  const fileName = String(payload.fileName || 'jawaban.jpg')
-    .replace(/[\\/:*?"<>|]/g, '_');
-
-  const blob = Utilities.newBlob(
-    Utilities.base64Decode(base64),
-    mimeType,
-    fileName
-  );
-
-  const folder = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
-  const file = folder.createFile(blob);
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const answerRoot = getOrCreateChildFolder_(root, '02 - Jawaban Siswa');
+  const assessmentFolder = getOrCreateChildFolder_(answerRoot, assessmentId);
+  const attemptFolder = getOrCreateChildFolder_(assessmentFolder, safeAttemptId);
+  // Foto jawaban siswa sengaja tidak dibagikan melalui tautan domain/publik.
+  const file = attemptFolder.createFile(blob);
   const fileId = makeId_('FILE');
 
   appendRow_('Files', {
     fileId: fileId,
-    attemptId: requiredText_(payload.attemptId, 'ID pengerjaan', 100),
-    studentId: requiredText_(payload.studentId, 'ID siswa', 120),
+    attemptId: attemptId,
+    studentId: studentId,
     driveFileId: file.getId(),
     fileUrl: file.getUrl(),
     createdAt: currentTimestamp_()
   });
 
-  return {
-    fileId: fileId,
-    name: file.getName(),
-    url: file.getUrl()
-  };
+  return { fileId: fileId, name: file.getName(), url: file.getUrl(), folder: '02 - Jawaban Siswa/' + assessmentId + '/' + safeAttemptId };
 }
