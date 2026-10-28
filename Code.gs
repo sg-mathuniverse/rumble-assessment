@@ -560,9 +560,19 @@ function uploadAssessmentImage_(payload) {
     throw new Error('Gambar kosong atau terlalu besar (maksimal sekitar 4 MB).');
   }
 
-  const kind = String(payload.kind || 'question').toLowerCase();
-  const subfolderNames = { passage: 'Bacaan', question: 'Soal', option: 'Opsi Jawaban' };
-  if (!subfolderNames[kind]) throw new Error('Jenis gambar tidak valid.');
+  const rawKind = String(payload.kind || 'question').toLowerCase();
+  // Alias dari editor bundel dan tipe soal agar seluruh gambar masuk ke folder yang sesuai.
+  const kindAliases = {
+    librarypassage: 'passage', questionpassage: 'passage',
+    matchingleft: 'matchingleft', matchingright: 'matchingright', statement: 'statement'
+  };
+  const kind = kindAliases[rawKind] || rawKind;
+  const subfolderNames = {
+    passage: 'Bacaan', question: 'Soal', option: 'Opsi Jawaban',
+    statement: 'Pernyataan Benar Salah', matchingleft: 'Menjodohkan - Kolom Kiri',
+    matchingright: 'Menjodohkan - Kolom Kanan'
+  };
+  if (!subfolderNames[kind]) throw new Error('Jenis gambar tidak valid: ' + rawKind);
 
   const safeName = String(payload.fileName || 'gambar-soal.jpg')
     .replace(/[\\/:*?"<>|]/g, '_').slice(0, 150);
