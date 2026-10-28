@@ -377,7 +377,7 @@ function saveQuestionBundle_(payload) {
   questions.forEach(function (q, i) {
     const type = String(q.type || 'multiple_choice');
     const points = Number(q.points);
-    if (['multiple_choice','true_false','multi_select','matching','essay'].indexOf(type) < 0) {
+    if (['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type) < 0) {
       throw new Error('Tipe soal tidak valid pada soal nomor ' + (i + 1));
     }
     if (!isFinite(points) || points < 0 || points > 1000) {
@@ -656,7 +656,7 @@ function updateAssessment_(payload) {
   questions.forEach(function (question, index) {
     const type = String(question.type || 'multiple_choice');
     const points = Number(question.points);
-    const allowedTypes = ['multiple_choice','true_false','multi_select','matching','essay'];
+    const allowedTypes = ['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'];
     if (allowedTypes.indexOf(type) === -1) throw new Error('Tipe soal tidak valid pada soal nomor ' + (index + 1));
     if (!isFinite(points) || points < 0 || points > 1000) throw new Error('Bobot soal tidak valid pada soal nomor ' + (index + 1));
     appendRow_('Questions', {
@@ -809,6 +809,19 @@ function submitAttempt_(payload) {
 
     if (question.type === 'essay' || question.type === 'matching') {
       needsReview = true;
+      return;
+    }
+
+    if (question.type === 'true_false_multi') {
+      const expected = Array.isArray(correctAnswer) ? correctAnswer : [];
+      const submitted = studentAnswer && typeof studentAnswer === 'object' ? studentAnswer : {};
+      const count = expected.length;
+      if (count > 0) {
+        const perStatement = points / count;
+        expected.forEach(function (key, index) {
+          if (submitted[String(index)] !== undefined && String(submitted[String(index)]) === String(key)) score += perStatement;
+        });
+      }
       return;
     }
 
