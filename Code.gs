@@ -807,8 +807,20 @@ function submitAttempt_(payload) {
 
     maxScore += points;
 
-    if (question.type === 'essay' || question.type === 'matching') {
+    if (question.type === 'essay') {
       needsReview = true;
+      return;
+    }
+
+    if (question.type === 'matching') {
+      const pairs = parseJson_(question.pairsJson, []);
+      const submitted = studentAnswer && typeof studentAnswer === 'object' ? studentAnswer : {};
+      if (pairs.length > 0) {
+        const perPair = points / pairs.length;
+        pairs.forEach(function (pair, index) {
+          if (submitted[String(index)] !== undefined && String(submitted[String(index)]) === String(index)) score += perPair;
+        });
+      }
       return;
     }
 
