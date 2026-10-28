@@ -28,7 +28,7 @@ const TABLES = {
   QuestionBundles: ['bundleId','title','subject','description','passageText','passageImageUrl','questionsJson','status','createdBy','createdAt','updatedAt'],
   Questions: [
     'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
-    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson', 'subquestionsJson', 'rubricLevelsJson'
+    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson', 'subquestionsJson', 'rubricLevelsJson', 'passageText', 'passageImageUrl'
   ],
   Attempts: [
     'attemptId', 'assessmentId', 'studentId', 'startedAt', 'submittedAt',
@@ -520,7 +520,9 @@ function createAssessment_(payload) {
       imageUrl: String(question.imageUrl || ''),
       optionImagesJson: JSON.stringify(question.optionImages || []),
       subquestionsJson: JSON.stringify(question.subquestions || []),
-      rubricLevelsJson: JSON.stringify(question.rubricLevels || [])
+      rubricLevelsJson: JSON.stringify(question.rubricLevels || []),
+      passageText: String(question.passageText || ''),
+      passageImageUrl: String(question.passageImageUrl || '')
     });
   });
 
@@ -737,7 +739,9 @@ function getAssessment_(payload) {
         imageUrl: question.imageUrl,
         optionImages: parseJson_(question.optionImagesJson, []),
         subquestions: parseJson_(question.subquestionsJson, []),
-        rubricLevels: parseJson_(question.rubricLevelsJson, [])
+        rubricLevels: parseJson_(question.rubricLevelsJson, []),
+        passageText: String(question.passageText || ''),
+        passageImageUrl: String(question.passageImageUrl || '')
       };
     });
 
