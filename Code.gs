@@ -25,7 +25,7 @@ const TABLES = {
     'assessmentId', 'title', 'subject', 'className', 'duration',
     'startAt', 'endAt', 'passageText', 'passageImageUrl', 'status', 'createdBy', 'createdAt', 'updatedAt'
   ],
-  QuestionBundles: ['bundleId','title','subject','description','passageText','passageImageUrl','questionsJson','status','createdBy','createdAt','updatedAt'],
+  QuestionBundles: ['bundleId','title','subject','description','passageText','passageImageUrl','passagesJson','questionsJson','status','createdBy','createdAt','updatedAt'],
   Questions: [
     'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
     'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson', 'subquestionsJson', 'rubricLevelsJson', 'passageText', 'passageImageUrl'
@@ -401,6 +401,7 @@ function saveQuestionBundle_(payload) {
     description: String(payload.description || ''),
     passageText: String(payload.passageText || ''),
     passageImageUrl: String(payload.passageImageUrl || ''),
+    passagesJson: JSON.stringify(Array.isArray(payload.passages)?payload.passages:[]),
     questionsJson: JSON.stringify(questions),
     status: 'ready',
     createdBy: String(payload.createdBy || ''),
@@ -429,6 +430,7 @@ function listQuestionBundles_(payload) {
       const item = Object.assign({}, bundle);
       item.questionCount = parseJson_(bundle.questionsJson, []).length;
       delete item.questionsJson;
+      delete item.passagesJson;
       return item;
     });
 }
@@ -448,6 +450,7 @@ function getQuestionBundle_(payload) {
       description: bundle.description,
       passageText: bundle.passageText,
       passageImageUrl: bundle.passageImageUrl,
+      passages: parseJson_(bundle.passagesJson, []),
       status: bundle.status
     },
     questions: parseJson_(bundle.questionsJson, [])
