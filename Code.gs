@@ -155,6 +155,7 @@ function routeAction_(action, payload) {
     uploadAssessmentImage: function () {
       return uploadAssessmentImage_(payload);
     },
+    deleteAssessmentImage: function () { return deleteAssessmentImage_(payload); },
     listAssessments: function () {
       return listAssessments_(payload);
     },
@@ -582,6 +583,36 @@ function uploadAssessmentImage_(payload) {
     domainSharingEnabled: domainSharingEnabled,
     warning: domainSharingEnabled ? '' : 'Gambar tersimpan, tetapi izin berbagi domain tidak dapat diatur otomatis. Admin Google Workspace mungkin membatasi izin Drive.'
   };
+}
+
+
+/**
+ * Memindahkan file gambar asesmen ke sampah Drive.
+ * Hanya file di dalam folder aplikasi yang boleh dihapus melalui endpoint ini.
+ */
+function deleteAssessmentImage_(payload) {
+  const fileId = requiredText_(payload.fileId, 'ID gambar', 200);
+  const rootId = CONFIG.DRIVE_FOLDER_ID;
+  if (!rootId) throw new Error('Folder Drive belum dikonfigurasi.');
+  const file = DriveApp.getFileById(fileId);
+  let parents = file.getParents();
+  let found = false;
+  let checked = 0;
+  while (parents.hasNext() && checked < 20) {
+    const parent = parents.next();
+    if (parent.getId() === rootId) { found = true; break; }
+    const ancestors = parent.getParents();
+    while (ancestors.hasNext() && checked < 20) {
+      const ancestor = ancestors.next();
+      if (ancestor.getId() === rootId) { found = true; break; }
+      checked++;
+    }
+    if (found) break;
+    checked++;
+  }
+  if (!found) throw new Error('File tidak berada di folder Drive Rumble Assessment.');
+  file.setTrashed(true);
+  return { fileId: fileId, deleted: true };
 }
 
 function updateAssessment_(payload) {
