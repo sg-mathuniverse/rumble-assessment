@@ -213,7 +213,7 @@ async function saveA(){
   const r=await api(s.editingId?'updateAssessment':'createAssessment',payload);
   if(!r||!r.ok)throw Error(r&&r.error?r.error:'Respons backend tidak valid');
   await processPendingImageDeletes();toast(s.editingId?'Perubahan asesmen tersimpan.':'Draft tersimpan di backend.');s.pendingImageDeletes=[];
-  s.editingId=null;s.qs=[];s.meta={};s.currentAssessment=null;s.page='assessments';await loadAssessments();
+  s.editingId=null;s.qs=[];s.meta={};s.currentAssessment=null;s.assessmentEditorOpen=false;s.page='assessments';await loadAssessments();
  }catch(e){toast('Gagal menyimpan: '+e.message)}
 }
 function defaultRubricLevels(points,subquestions){
