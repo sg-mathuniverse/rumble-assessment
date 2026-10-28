@@ -143,6 +143,7 @@ function routeAction_(action, payload) {
         time: new Date().toISOString()
       };
     },
+    getCurrentUser: function () { return getCurrentUser_(); },
     createAssessment: function () {
       return createAssessment_(payload);
     },
@@ -1054,6 +1055,18 @@ function logEvent_(payload) {
  * Membuat pengguna sederhana.
  * Autentikasi dan validasi izin perlu ditambahkan sebelum produksi.
  */
+function getCurrentUser_() {
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  if (!email) return { authenticated: false, email: '', user: null, reason: 'email_unavailable' };
+  const user = listRows_('Users').find(function (item) { return String(item.email || '').trim().toLowerCase() === email; });
+  if (!user) return { authenticated: false, email: email, user: null, reason: 'not_registered' };
+  const active = user.active === true || String(user.active).toLowerCase() === 'true' || String(user.active) === '1';
+  if (!active) return { authenticated: false, email: email, user: null, reason: 'inactive' };
+  const role = String(user.role || '').trim().toLowerCase();
+  if (role !== 'teacher' && role !== 'student') return { authenticated: false, email: email, user: null, reason: 'invalid_role' };
+  return { authenticated: true, email: email, user: { userId: user.userId, name: user.name, email: email, role: role, className: user.className || '' } };
+}
+
 function saveUser_(payload) {
   const email = requiredText_(payload.email, 'Email', 254).toLowerCase();
   const role = String(payload.role || 'student');
