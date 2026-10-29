@@ -142,7 +142,7 @@ function rows(){
  return source.map(a=>{
   const id=esc(a.assessmentId||a.id||'');
   const status=String(a.status||'draft');
-  return '<div class="listitem"><div class="symbol">∑</div><div class="grow"><b>'+esc(a.title)+'</b><small>'+esc(a.subject||'Umum')+' · '+esc(a.className||'Kelas')+' · '+(a.duration||45)+' menit · '+(a.questionCount||0)+' soal</small></div><span class="pill '+((status==='Aktif'||status==='published')?'live':'')+'">'+esc(status)+'</span><button class="btn" onclick="openAssessment(\\''+id+'\\')">'+(s.role==='student'?'Buka':'Detail')+'</button>'+(s.role==='teacher'&&status!=='published'?'<button class="btn" onclick="deleteAssessment(\\''+id+'\\')">Hapus</button>':'')+'</div>';
+  return '<div class="listitem"><div class="symbol">∑</div><div class="grow"><b>'+esc(a.title)+'</b><small>'+esc(a.subject||'Umum')+' · '+esc(a.className||'Kelas')+' · '+(a.duration||45)+' menit · '+(a.questionCount||0)+' soal</small></div><span class="pill '+((status==='Aktif'||status==='published')?'live':'')+'">'+esc(status)+'</span><button class="btn" data-assessment-id="'+id+'" onclick="openAssessment(this.dataset.assessmentId)">'+(s.role==='student'?'Buka':'Detail')+'</button>'+(s.role==='teacher'&&status!=='published'?'<button class="btn" data-assessment-id="'+id+'" onclick="deleteAssessment(this.dataset.assessmentId)">Hapus</button>':'')+'</div>';
  }).join('');
 }
 function overview(){
