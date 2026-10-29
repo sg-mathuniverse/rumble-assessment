@@ -161,7 +161,7 @@ function routeAction_(action, payload) {
     'getQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
     'publishAssessment','gradeAttempt','listStudents'
   ];
-  const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage'];
+  const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt'];
   const shared = ['listAssessments','getAssessment','listAttempts'];
   if (teacherOnly.indexOf(action) >= 0 && user.role !== 'teacher') {
     throw new Error('Fitur ini hanya dapat digunakan oleh akun guru terverifikasi.');
@@ -192,6 +192,7 @@ function routeAction_(action, payload) {
     listAssessments: function () { return listAssessments_(trusted); },
     getAssessment: function () { return getAssessment_(Object.assign({}, trusted, { includeAnswers: user.role === 'teacher' && payload.includeAnswers === true })); },
     publishAssessment: function () { assertAssessmentOwner_(payload.id || payload.assessmentId, user); return publishAssessment_(trusted); },
+    startAttempt: function () { return startAttempt_(trusted); },
     submitAttempt: function () { return submitAttempt_(trusted); },
     listAttempts: function () {
       if (user.role === 'student') {
@@ -231,9 +232,11 @@ function routeAction_(action, payload) {
     uploadAnswerImage: function () {
       const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
       const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
-      if (!attempt || String(attempt.studentId) !== String(user.userId)) throw new Error('Pengerjaan tidak ditemukan untuk akun ini.');
+      if (!attempt || String(attempt.studentId) !== String(user.userId) || String(attempt.status) !== 'in_progress') throw new Error('Sesi pengerjaan tidak ditemukan atau sudah berakhir.');
       const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
       assertStudentAssessmentAccess_(assessment, user);
+      const started = new Date(attempt.startedAt).getTime(), durationMs = Number(assessment.duration) * 60000;
+      if (!isFinite(started) || !isFinite(durationMs) || Date.now() > started + durationMs) throw new Error('Waktu pengerjaan sudah habis. Foto tidak dapat diunggah.');
       return uploadAnswerImage_(Object.assign({}, trusted, { assessmentId: assessment.assessmentId }));
     }
   };
@@ -982,6 +985,44 @@ function publishAssessment_(payload) {
  * Menerima jawaban dan menghitung nilai otomatis untuk tipe objektif.
  * Esai dan menjodohkan diberi status needs_review untuk pemeriksaan guru.
  */
+/**
+ * Membuat atau melanjutkan sesi pengerjaan siswa yang tervalidasi.
+ */
+function startAttempt_(payload) {
+  const assessmentId = requiredText_(payload.assessmentId, 'ID asesmen', 100);
+  const user = payload.currentUser;
+  if (!user || user.role !== 'student' || !user.userId) throw new Error('Akun siswa terverifikasi diperlukan.');
+  const studentId = String(user.userId);
+  const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
+  assertStudentAssessmentAccess_(assessment, user);
+  const duration = Number(assessment.duration);
+  if (!isFinite(duration) || duration < 1) throw new Error('Durasi asesmen tidak valid.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const previous = listRows_('Attempts').find(function (attempt) {
+      return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
+    });
+    if (previous) {
+      if (String(previous.status) !== 'in_progress') throw new Error('Jawaban untuk asesmen ini sudah pernah dikirim.');
+      const started = new Date(previous.startedAt).getTime();
+      if (!isFinite(started)) throw new Error('Waktu mulai sesi tidak valid. Hubungi guru.');
+      if (Date.now() > started + duration * 60000 + 30000) throw new Error('Waktu pengerjaan sudah habis. Hubungi guru untuk bantuan.');
+      return { attemptId: String(previous.attemptId), startedAt: previous.startedAt, status: 'in_progress', duration: duration, resumed: true };
+    }
+    const attemptId = makeId_('ATT'), startedAt = currentTimestamp_();
+    const questions = listRows_('Questions').filter(function (question) { return String(question.assessmentId) === assessmentId; });
+    const maxScore = questions.reduce(function (sum, question) { return sum + (Number(question.points) || 0); }, 0);
+    appendRow_('Attempts', {
+      attemptId: attemptId, assessmentId: assessmentId, studentId: studentId,
+      startedAt: startedAt, submittedAt: '', status: 'in_progress', score: 0,
+      maxScore: maxScore, focusLossCount: 0, answersJson: '{}', teacherFeedback: ''
+    });
+    return { attemptId: attemptId, startedAt: startedAt, status: 'in_progress', duration: duration, resumed: false };
+  } finally { lock.releaseLock(); }
+}
+
 function submitAttempt_(payload) {
   const assessmentId = requiredText_(payload.assessmentId, 'ID asesmen', 100);
   const user = payload.currentUser;
@@ -999,7 +1040,13 @@ function submitAttempt_(payload) {
     const previous = listRows_('Attempts').find(function (attempt) {
       return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
     });
-    if (previous) throw new Error('Jawaban untuk asesmen ini sudah pernah dikirim.');
+    if (previous && String(previous.status) !== 'in_progress') throw new Error('Jawaban untuk asesmen ini sudah pernah dikirim.');
+    if (previous && previous.startedAt) {
+      const started = new Date(previous.startedAt).getTime();
+      const durationMs = Number(assessment.duration) * 60000;
+      if (!isFinite(started) || !isFinite(durationMs) || durationMs <= 0) throw new Error('Waktu sesi pengerjaan tidak valid.');
+      if (Date.now() > started + durationMs + 30000) throw new Error('Waktu pengerjaan sudah habis. Jawaban tidak dapat dikirim terlambat.');
+    }
   const answers = payload.answers && typeof payload.answers === 'object' ? payload.answers : {};
   const questions = listRows_('Questions').filter(function (question) {
     return question.assessmentId === assessmentId;
@@ -1071,25 +1118,36 @@ function submitAttempt_(payload) {
 
   // Jadwal dicek ulang tepat sebelum menyimpan agar pengumpulan yang melewati batas waktu ditolak.
   assertStudentAssessmentAccess_(assessment, user);
-  const attemptId = makeId_('ATT');
-
-  appendRow_('Attempts', {
-    attemptId: attemptId,
-    assessmentId: assessmentId,
-    studentId: studentId,
-    startedAt: '',
-    submittedAt: currentTimestamp_(),
-    status: needsReview ? 'needs_review' : 'graded',
-    score: score,
-    maxScore: maxScore,
-    focusLossCount: Math.max(0, Number(payload.focusLossCount) || 0),
-    answersJson: JSON.stringify(answers),
-    teacherFeedback: ''
-  });
+  const attemptId = previous ? String(previous.attemptId) : makeId_('ATT');
+  const attemptsSheet = getSheet_('Attempts');
+  const attemptValues = attemptsSheet.getDataRange().getValues();
+  const attemptHeaders = attemptValues[0].map(String);
+  const col = function (name) { return attemptHeaders.indexOf(name); };
+  const existingIndex = previous ? attemptValues.findIndex(function (row, index) {
+    return index > 0 && String(row[col('attemptId')]) === attemptId;
+  }) : -1;
+  const submittedAt = currentTimestamp_(), finalStatus = needsReview ? 'needs_review' : 'graded';
+  if (existingIndex > 0) {
+    const rowNumber = existingIndex + 1;
+    attemptsSheet.getRange(rowNumber, col('submittedAt') + 1).setValue(submittedAt);
+    attemptsSheet.getRange(rowNumber, col('status') + 1).setValue(finalStatus);
+    attemptsSheet.getRange(rowNumber, col('score') + 1).setValue(score);
+    attemptsSheet.getRange(rowNumber, col('maxScore') + 1).setValue(maxScore);
+    attemptsSheet.getRange(rowNumber, col('focusLossCount') + 1).setValue(Math.max(0, Number(payload.focusLossCount) || 0));
+    attemptsSheet.getRange(rowNumber, col('answersJson') + 1).setValue(JSON.stringify(answers));
+  } else {
+    appendRow_('Attempts', {
+      attemptId: attemptId, assessmentId: assessmentId, studentId: studentId,
+      startedAt: currentTimestamp_(), submittedAt: submittedAt, status: finalStatus,
+      score: score, maxScore: maxScore,
+      focusLossCount: Math.max(0, Number(payload.focusLossCount) || 0),
+      answersJson: JSON.stringify(answers), teacherFeedback: ''
+    });
+  }
 
   return {
     attemptId: attemptId,
-    status: needsReview ? 'needs_review' : 'graded',
+    status: finalStatus,
     score: score,
     maxScore: maxScore
   };
@@ -1108,7 +1166,7 @@ function listAttempts_(payload) {
     .filter(function (attempt) {
       const matchesAssessment = !payload.assessmentId || attempt.assessmentId === payload.assessmentId;
       const matchesStudent = !payload.studentId || attempt.studentId === payload.studentId;
-      return matchesAssessment && matchesStudent;
+      return matchesAssessment && matchesStudent && String(attempt.status) !== 'in_progress';
     })
     .map(function (attempt) {
       const details = allQuestions
