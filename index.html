@@ -127,7 +127,7 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script></head><body><div id="app"></div><div class="toast" id="toast"></div><script>
-const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
+const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
 const demo=[{id:'ASM-101',title:'Persamaan Kuadrat',subject:'Matematika',className:'Kelas IX-A',duration:60,status:'Aktif'},{id:'ASM-102',title:'Sistem Persamaan Linear',subject:'Matematika',className:'Kelas VIII-B',duration:45,status:'Draft'},{id:'ASM-103',title:'Fungsi dan Grafik',subject:'Matematika',className:'Kelas IX-B',duration:50,status:'Selesai'}];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(x){let e=document.getElementById('toast');e.textContent=x;e.style.display='block';setTimeout(()=>e.style.display='none',3200)}
@@ -136,7 +136,7 @@ function head(k,t,d,b=''){return '<div class="head"><div><div class="kicker">'+k
 function stat(l,n,d){return '<div class="card"><div class="statlabel">'+l+'</div><div class="num">'+n+'</div><div class="muted">'+d+'</div></div>'}
 function nav(){let a=s.role==='teacher' ? [['overview','▦ Ringkasan'],['bundles','▣ Bank soal'],['assessments','▤ Jadwal & asesmen'],['students','♙ Siswa'],['reports','▥ Analitik'],['settings','⚙ Pengaturan']] : [['progress','↗ Progres saya'],['assessments','▤ Jadwal ujian'],['settings','⚙ Pengaturan']];return a.map(function(x){return '<button class="'+(s.page===x[0]?'active':'')+'" onclick="go(\''+x[0]+'\')">'+x[1]+'</button>'}).join('')}
 function rows(){
- if(!s.loadedFromServer)return '<p class="muted">Mengambil asesmen dari server…</p>';
+ if(!s.loadedFromServer)return s.assessmentLoadError?'<div class="notice">Daftar asesmen gagal dimuat: '+esc(s.assessmentLoadError)+' <button class="btn" onclick="loadAssessments()">Coba lagi</button></div>':'<p class="muted">Mengambil asesmen dari server…</p>';
  const source=Array.isArray(s.items)?s.items:[];
  if(!source.length)return '<div class="notice">Belum ada asesmen yang tersedia untuk akun ini. Guru dapat membuat asesmen baru, sedangkan siswa hanya melihat asesmen sesuai kelas dan jadwal.</div>';
  return source.map(a=>{
@@ -299,10 +299,12 @@ async function testApi(){
  try{const r=await api('health');if(!r||!r.ok)throw Error(r&&r.error?r.error:'Respons backend tidak valid');toast('Koneksi Apps Script berhasil.')}
  catch(e){toast('Koneksi gagal: '+e.message)}
 }
+function localDateTimeToIso(value){if(!value)return '';const date=new Date(value);return isNaN(date.getTime())?'':date.toISOString()}
+function isoToLocalDateTime(value){if(!value)return '';const date=new Date(value);if(isNaN(date.getTime()))return String(value).slice(0,16);const local=new Date(date.getTime()-date.getTimezoneOffset()*60000);return local.toISOString().slice(0,16)}
 async function saveA(){
  const title=document.getElementById('title').value.trim();
  if(!title||!s.qs.length||!s.sourceBundleId){toast('Isi judul, pilih bundel soal dari Bank Soal, dan pastikan soal berhasil dimuat.');return}
- const payload={id:s.editingId||undefined,title,subject:document.getElementById('subject').value,className:document.getElementById('className').value,duration:Number(document.getElementById('duration').value)||60,startAt:document.getElementById('startAt').value,endAt:document.getElementById('endAt').value,passageText:(s.meta||{}).passageText||'',passageImageUrl:(s.meta||{}).passageImageUrl||'',questions:s.qs,status:'draft',sourceBundleId:s.sourceBundleId||'',sourceBundleTitle:s.sourceBundleTitle||''};
+ const payload={id:s.editingId||undefined,title,subject:document.getElementById('subject').value,className:document.getElementById('className').value,duration:Number(document.getElementById('duration').value)||60,startAt:localDateTimeToIso(document.getElementById('startAt').value),endAt:localDateTimeToIso(document.getElementById('endAt').value),passageText:(s.meta||{}).passageText||'',passageImageUrl:(s.meta||{}).passageImageUrl||'',questions:s.qs,status:'draft',sourceBundleId:s.sourceBundleId||'',sourceBundleTitle:s.sourceBundleTitle||''};
  try{
   const r=await api(s.editingId?'updateAssessment':'createAssessment',payload);
   if(!r||!r.ok)throw Error(r&&r.error?r.error:'Respons backend tidak valid');
@@ -321,7 +323,7 @@ async function editAssessment(id){
   if(!r||!r.ok)throw Error(r&&r.error?r.error:'Asesmen tidak tersedia');
   const d=r.data,a=d.assessment||{},isPublished=a.status==='published';
   s.editingId=isPublished?null:id;
-  s.meta={title:(isPublished?'Salinan - ':'')+(a.title||''),subject:a.subject||'Matematika',className:a.className||'',duration:a.duration||60,startAt:a.startAt||'',endAt:a.endAt||'',passageText:a.passageText||'',passageImageUrl:a.passageImageUrl||''};
+  s.meta={title:(isPublished?'Salinan - ':'')+(a.title||''),subject:a.subject||'Matematika',className:a.className||'',duration:a.duration||60,startAt:isoToLocalDateTime(a.startAt||''),endAt:isoToLocalDateTime(a.endAt||''),passageText:a.passageText||'',passageImageUrl:a.passageImageUrl||''};
   s.qs=(d.questions||[]).map(q=>({...q,answer:q.answer===undefined?'0':q.answer,options:q.options||[],optionImages:q.optionImages||[],subquestions:q.subquestions||[],subquestionImages:q.subquestionImages||[],rubricLevels:q.rubricLevels||[],_rubricEdited:!!(q.rubricLevels&&q.rubricLevels.length)}));
   s.currentAssessment=null;s.page='assessments';render();setTimeout(()=>document.getElementById('editor')?.scrollIntoView({behavior:'smooth'}),0);
   if(isPublished)toast('Asesmen terbit tidak diubah langsung. Salinan draft dibuat agar hasil siswa sebelumnya tetap aman.');
@@ -329,11 +331,12 @@ async function editAssessment(id){
 }
 
 async function loadAssessments(){
+ s.assessmentLoadError='';
  try{
   const r=await api('listAssessments',s.role==='student'?{status:'published'}:{});
   if(!r||!r.ok)throw Error(r&&r.error?r.error:'Respons backend tidak valid');
   s.items=Array.isArray(r.data)?r.data.map(a=>Object.assign({},a,{id:a.assessmentId||a.id})):[];s.loadedFromServer=true;render();
- }catch(e){console.warn('Rumble API:',e);toast('Belum dapat memuat asesmen dari server: '+e.message)}
+ }catch(e){console.warn('Rumble API:',e);s.assessmentLoadError=e.message||'Koneksi gagal';s.items=[];s.loadedFromServer=false;render();toast('Belum dapat memuat asesmen dari server: '+e.message)}
 }
 function previewMath(el){const box=el.nextElementSibling;if(!box||!box.classList.contains('math-preview'))return;box.textContent=el.value;renderMath(box)}
 function renderMath(root){if(typeof renderMathInElement!=='function')return;try{renderMathInElement(root,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\[',right:'\\]',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false}],throwOnError:false});}catch(e){}}
