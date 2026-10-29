@@ -1026,7 +1026,7 @@ function submitAttempt_(payload) {
     attemptId: attemptId,
     assessmentId: assessmentId,
     studentId: studentId,
-    startedAt: currentTimestamp_(),
+    startedAt: '',
     submittedAt: currentTimestamp_(),
     status: needsReview ? 'needs_review' : 'graded',
     score: score,
