@@ -394,7 +394,209 @@ async function loadAssessments(){
  }catch(e){console.warn('Rumble API:',e);s.assessmentLoadError=e.message||'Koneksi gagal';s.items=[];s.loadedFromServer=false;render();toast('Belum dapat memuat asesmen dari server: '+e.message)}
 }
 function previewMath(el){const box=el.nextElementSibling;if(!box||!box.classList.contains('math-preview'))return;box.textContent=el.value;renderMath(box)}
-function renderMath(root){if(typeof renderMathInElement!=='function')return;try{renderMathInElement(root,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\[',right:'\\]',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false}],throwOnError:false});}catch(e){}}
+function renderMath(root){if(!root)return;try{const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){if(node.nodeValue&&node.nodeValue.includes('\\u2061'))node.nodeValue=node.nodeValue.replace(/\\u2061/g,'');}}catch(e){}if(typeof renderMathInElement!=='function')return;try{renderMathInElement(root,{delimiters:[{left:'$',right:'$',display:true},{left:'\\[',right:'\\]',display:true},{left:'
+function setSubAnswer(id,index,value){const current=s.answers[id]&&typeof s.answers[id]==='object'?s.answers[id]:{};current[String(index)]=value;s.answers[id]=current;updateAnswerProgress()}
+function handleEquationPaste(event,el,kind,i,j){
+ const cd=event.clipboardData;if(!cd)return;
+ const items=Array.from(cd.items||[]);const imageItem=items.find(item=>item.kind==='file'&&/^image\//.test(item.type));
+ if(imageItem){
+  if(kind==='passage'){event.preventDefault();const file=imageItem.getAsFile();if(file)uploadImageBlob(file,file.name||'gambar-bacaan.png','passage');return;}
+  event.preventDefault();const file=imageItem.getAsFile();if(file)uploadImageBlob(file,file.name||'gambar-soal.png',kind,i,j);return;
+ }
+ let text=cd.getData('text/plain');
+ if(!text){const html=cd.getData('text/html');if(html){const tmp=document.createElement('div');tmp.innerHTML=html;text=tmp.textContent||tmp.innerText||'';}}
+ if(!text)return;
+ const hasMath=/[=^_]|[√∫≤≥×÷±]/.test(text)||text.includes('\\');
+ if(hasMath&&!text.includes('$')&&!text.includes('\\(')&&!text.includes('\\[')){
+  event.preventDefault();const start=el.selectionStart||0,end=el.selectionEnd||start;const value='\\('+text+'\\)';
+  if(typeof el.setRangeText==='function')el.setRangeText(value,start,end,'end');else el.value=el.value.slice(0,start)+value+el.value.slice(end);
+  if(kind==='question'&&s.qs[i])s.qs[i].text=el.value;
+  else if(kind==='questionPassage'&&s.qs[i])s.qs[i].passageText=el.value;
+  else if(kind==='libraryPassage'&&s.passages[i])s.passages[i].text=el.value;
+  else if(kind==='statement'&&s.qs[i]?.subquestions)s.qs[i].subquestions[j]=el.value;
+  else if(kind==='essaySubquestions'&&s.qs[i])s.qs[i].subquestions=el.value.split(String.fromCharCode(10)).filter(x=>x.trim());
+  else if(kind==='essayRubric'&&s.qs[i]){s.qs[i].rubricLevels=el.value.split(String.fromCharCode(10));s.qs[i]._rubricEdited=true;}
+  else if(kind==='option'&&s.qs[i])s.qs[i].options[j]=el.value;
+  else if(kind==='passage'&&s.meta)s.meta.passageText=el.value;
+  else if(kind==='matchingLeft'&&s.qs[i]?.pairs?.[j])s.qs[i].pairs[j].left=el.value;
+  else if(kind==='matchingRight'&&s.qs[i]?.pairs?.[j])s.qs[i].pairs[j].right=el.value;
+  else if(kind==='statement'&&s.qs[i]?.subquestions)s.qs[i].subquestions[j]=el.value;
+  previewMath(el);
+ }
+}
+function uploadQuestionImage(event,i){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'question',i)}
+function uploadQuestionPassageImage(event,i){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'questionPassage',i)}
+function uploadOptionImage(event,i,j){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'option',i,j)}
+function uploadPassageImage(event){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'passage')}
+function uploadLibraryPassageImage(event,i){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'libraryPassage',i)}
+function removeLibraryPassageImage(i){removeAssessmentImage('libraryPassage',i)}
+function uploadStatementImage(event,i,j){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'statement',i,j)}
+function uploadMatchingImage(event,i,j,side){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,side==='left'?'matchingLeft':'matchingRight',i,j)}
+function removeMatchingImage(i,j,side){removeAssessmentImage(side==='left'?'matchingLeft':'matchingRight',i,j)}
+function imageFileId(url){const match=String(url||'').match(/[?&]id=([^&]+)/)||String(url||'').match(/\/d\/([^/]+)/);return match?decodeURIComponent(match[1]):''}
+function imageUrlFor(kind,i,j){if(kind==='libraryPassage')return s.passages?.[i]?.imageUrl||'';if(kind==='passage')return (s.meta||{}).passageImageUrl||'';if(kind==='question')return s.qs[i]?.imageUrl||'';if(kind==='questionPassage')return s.qs[i]?.passageImageUrl||'';if(kind==='matchingLeft'||kind==='matchingRight')return s.qs[i]?.pairs?.[j]?.[kind==='matchingLeft'?'leftImageUrl':'rightImageUrl']||'';if(kind==='statement')return s.qs[i]?.subquestionImages?.[j]||'';return s.qs[i]?.optionImages?.[j]||''}
+function setImageUrl(kind,i,j,url){if(kind==='libraryPassage'&&s.passages?.[i])s.passages[i].imageUrl=url;else if(kind==='passage'){s.meta=s.meta||{};s.meta.passageImageUrl=url}else if(kind==='question'&&s.qs[i])s.qs[i].imageUrl=url;else if(kind==='questionPassage'&&s.qs[i])s.qs[i].passageImageUrl=url;else if(kind==='option'&&s.qs[i]){s.qs[i].optionImages=s.qs[i].optionImages||[];s.qs[i].optionImages[j]=url}else if((kind==='matchingLeft'||kind==='matchingRight')&&s.qs[i]&&s.qs[i].pairs&&s.qs[i].pairs[j])s.qs[i].pairs[j][kind==='matchingLeft'?'leftImageUrl':'rightImageUrl']=url;else if(kind==='statement'&&s.qs[i]){s.qs[i].subquestionImages=s.qs[i].subquestionImages||[];s.qs[i].subquestionImages[j]=url}}
+async function removeDriveImage(url){const fileId=imageFileId(url);if(!fileId)return;try{await api('deleteAssessmentImage',{fileId:fileId})}catch(e){console.warn('File lama belum dapat dipindahkan ke sampah Drive:',e.message)}}
+async function removeAssessmentImage(kind,i,j){const url=imageUrlFor(kind,i,j);if(!url)return;if(!confirm('Hapus gambar ini dari editor? File Drive akan dipindahkan ke sampah setelah bundel/asesmen berhasil disimpan.'))return;s.pendingImageDeletes=s.pendingImageDeletes||[];s.pendingImageDeletes.push(url);setImageUrl(kind,i,j,'');render();toast('Gambar ditandai untuk dihapus setelah penyimpanan.')} 
+async function processPendingImageDeletes(){const list=[...new Set(s.pendingImageDeletes||[])];s.pendingImageDeletes=[];for(const url of list){const id=imageFileId(url);if(!id)continue;try{const r=await api('deleteAssessmentImage',{fileId:id});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Gagal menghapus');}catch(e){console.warn('File gambar lama tidak terhapus otomatis:',e.message);toast('Perubahan tersimpan, tetapi satu gambar lama belum bisa dibuang dari Drive.')}}}
+async function uploadImageBlob(file,name,kind,i,j){
+ if(file.size>4*1024*1024){toast('Ukuran gambar maksimal 4 MB.');return}
+ if(!/^image\/(jpeg|png|webp|gif)$/.test(file.type)){toast('Gunakan gambar JPG, PNG, WebP, atau GIF.');return}
+ if(s.uploadingImage){toast('Tunggu hingga unggahan sebelumnya selesai.');return}
+ const previousUrl=imageUrlFor(kind,i,j);
+ s.uploadingImage=true;s.uploadingLabel='Mengunggah gambar '+(kind==='passage'?'bacaan':kind==='question'?'soal':kind==='questionPassage'?'bacaan soal':kind==='matchingLeft'?'kolom kiri':kind==='matchingRight'?'kolom kanan':'opsi jawaban')+'...';render();
+ try{
+  const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Gagal membaca gambar'));reader.readAsDataURL(file)});
+  const base64=String(dataUrl).split(',')[1]||'';
+  const uploadKind=kind==='libraryPassage'?'passage':kind;
+  const result=await api('uploadAssessmentImage',{fileName:name,mimeType:file.type,base64,kind:uploadKind,assessmentId:s.editingId||((s.currentAssessment||{}).assessment||{}).assessmentId||''});
+  if(!result||!result.ok)throw Error(result&&result.error?result.error:'Upload gambar gagal');
+  const url=result.data.imageUrl||result.data.url;
+  setImageUrl(kind,i,j,url);
+  if(previousUrl&&previousUrl!==url){s.pendingImageDeletes=s.pendingImageDeletes||[];s.pendingImageDeletes.push(previousUrl);}
+  toast(result.data.warning?'Gambar tersimpan. '+result.data.warning:'Gambar berhasil diunggah ke Drive.');
+ }catch(e){toast('Gagal mengunggah gambar: '+e.message)}
+ finally{s.uploadingImage=false;s.uploadingLabel='';render()}
+}
+
+function renderAccessGate(){const waiting=!s.authChecked;const title=waiting?'Memeriksa akun sekolah…':'Akses Rumble Assessment belum tersedia';let message='Tidak dapat memverifikasi akun. Periksa koneksi, lalu coba lagi.';if(waiting)message='Memastikan identitas dan izin sebelum membuka data asesmen.';else if(s.authReason==='inactive')message='Akun sekolah terdaftar tetapi belum aktif. Hubungi administrator sekolah.';else if(s.authReason==='not_registered')message='Email Google ini belum terdaftar pada daftar Users sekolah. Hubungi administrator untuk mendapatkan akses.';else if(s.authReason==='email_unavailable')message='Email Google tidak dapat diverifikasi. Buka aplikasi menggunakan akun Google sekolah yang sesuai.';return '<main class="auth-gate"><section class="auth-panel"><div class="auth-mark">R</div><div class="kicker">RUANG ASESMEN DIGITAL</div><h1>'+title+'</h1><p>'+message+'</p>'+(waiting?'<div class="auth-loader" role="status" aria-label="Memeriksa akun"></div>':'<button class="btn primary" onclick="retryAuth()">Coba verifikasi lagi</button>')+'<p class="footnote">Akses dibatasi untuk akun yang terdaftar. Data asesmen tidak ditampilkan sebelum identitas terverifikasi.</p></section></main>'}
+
+async function loadCurrentUser(){
+  try {
+    const response = await api('getCurrentUser');
+    if (!response || !response.ok) {
+      throw new Error(response && response.error ? response.error : 'Respons verifikasi akun tidak valid.');
+    }
+    const auth = response.data || {};
+    s.authChecked = true;
+    s.authenticated = auth.authenticated === true;
+    s.currentUser = auth.user || null;
+    s.authReason = auth.reason || '';
+    if (s.authenticated && s.currentUser) {
+      s.role = s.currentUser.role === 'student' ? 'student' : 'teacher';
+      s.page = s.role === 'student' ? 'progress' : 'overview';
+      render();
+      await loadAssessments();
+    } else {
+      render();
+    }
+  } catch (error) {
+    console.error('Rumble authentication:', error);
+    s.authChecked = true;
+    s.authenticated = false;
+    s.currentUser = null;
+    s.authReason = 'error';
+    render();
+    toast('Verifikasi akun gagal: ' + (error && error.message ? error.message : error));
+  }
+}
+
+async function retryAuth(){s.authChecked=false;s.authReason='';render();await loadCurrentUser()}
+function render(){if(!s.authChecked||!s.authenticated||!s.currentUser){document.getElementById('app').innerHTML=renderAccessGate();return}let p=s.page,c=p==='overview'?overview():p==='bundles'?bundlesPage():p==='assessments'?assessments():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='progress'?progress():settings();document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Belajar, ukur, tumbuh.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Aman · Terukur · Inklusif</footer></aside><main class="main"><header class="top"><span class="muted">Ruang kerja / '+esc(p)+'</span><span class="account-chip"><span class="account-dot"></span>'+((s.currentUser&&s.currentUser.name)?esc(s.currentUser.name)+' · ':'')+(s.role==='teacher'?'Guru':'Siswa')+' <span class="role-lock" title="Peran ditentukan akun sekolah">Terverifikasi</span></span></header><div class="content">'+c+'</div></main></div>';document.querySelectorAll('.question p,.question label,.question li,.math-content,.passage-content').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));if(s.page==='detail'&&s.role==='student')updateAnswerProgress();}
+render();
+loadCurrentUser();
+</script></body></html>,right:'
+function setSubAnswer(id,index,value){const current=s.answers[id]&&typeof s.answers[id]==='object'?s.answers[id]:{};current[String(index)]=value;s.answers[id]=current;updateAnswerProgress()}
+function handleEquationPaste(event,el,kind,i,j){
+ const cd=event.clipboardData;if(!cd)return;
+ const items=Array.from(cd.items||[]);const imageItem=items.find(item=>item.kind==='file'&&/^image\//.test(item.type));
+ if(imageItem){
+  if(kind==='passage'){event.preventDefault();const file=imageItem.getAsFile();if(file)uploadImageBlob(file,file.name||'gambar-bacaan.png','passage');return;}
+  event.preventDefault();const file=imageItem.getAsFile();if(file)uploadImageBlob(file,file.name||'gambar-soal.png',kind,i,j);return;
+ }
+ let text=cd.getData('text/plain');
+ if(!text){const html=cd.getData('text/html');if(html){const tmp=document.createElement('div');tmp.innerHTML=html;text=tmp.textContent||tmp.innerText||'';}}
+ if(!text)return;
+ const hasMath=/[=^_]|[√∫≤≥×÷±]/.test(text)||text.includes('\\');
+ if(hasMath&&!text.includes('$')&&!text.includes('\\(')&&!text.includes('\\[')){
+  event.preventDefault();const start=el.selectionStart||0,end=el.selectionEnd||start;const value='\\('+text+'\\)';
+  if(typeof el.setRangeText==='function')el.setRangeText(value,start,end,'end');else el.value=el.value.slice(0,start)+value+el.value.slice(end);
+  if(kind==='question'&&s.qs[i])s.qs[i].text=el.value;
+  else if(kind==='questionPassage'&&s.qs[i])s.qs[i].passageText=el.value;
+  else if(kind==='libraryPassage'&&s.passages[i])s.passages[i].text=el.value;
+  else if(kind==='statement'&&s.qs[i]?.subquestions)s.qs[i].subquestions[j]=el.value;
+  else if(kind==='essaySubquestions'&&s.qs[i])s.qs[i].subquestions=el.value.split(String.fromCharCode(10)).filter(x=>x.trim());
+  else if(kind==='essayRubric'&&s.qs[i]){s.qs[i].rubricLevels=el.value.split(String.fromCharCode(10));s.qs[i]._rubricEdited=true;}
+  else if(kind==='option'&&s.qs[i])s.qs[i].options[j]=el.value;
+  else if(kind==='passage'&&s.meta)s.meta.passageText=el.value;
+  else if(kind==='matchingLeft'&&s.qs[i]?.pairs?.[j])s.qs[i].pairs[j].left=el.value;
+  else if(kind==='matchingRight'&&s.qs[i]?.pairs?.[j])s.qs[i].pairs[j].right=el.value;
+  else if(kind==='statement'&&s.qs[i]?.subquestions)s.qs[i].subquestions[j]=el.value;
+  previewMath(el);
+ }
+}
+function uploadQuestionImage(event,i){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'question',i)}
+function uploadQuestionPassageImage(event,i){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'questionPassage',i)}
+function uploadOptionImage(event,i,j){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'option',i,j)}
+function uploadPassageImage(event){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'passage')}
+function uploadLibraryPassageImage(event,i){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'libraryPassage',i)}
+function removeLibraryPassageImage(i){removeAssessmentImage('libraryPassage',i)}
+function uploadStatementImage(event,i,j){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,'statement',i,j)}
+function uploadMatchingImage(event,i,j,side){const file=event.target.files&&event.target.files[0];if(file)uploadImageBlob(file,file.name,side==='left'?'matchingLeft':'matchingRight',i,j)}
+function removeMatchingImage(i,j,side){removeAssessmentImage(side==='left'?'matchingLeft':'matchingRight',i,j)}
+function imageFileId(url){const match=String(url||'').match(/[?&]id=([^&]+)/)||String(url||'').match(/\/d\/([^/]+)/);return match?decodeURIComponent(match[1]):''}
+function imageUrlFor(kind,i,j){if(kind==='libraryPassage')return s.passages?.[i]?.imageUrl||'';if(kind==='passage')return (s.meta||{}).passageImageUrl||'';if(kind==='question')return s.qs[i]?.imageUrl||'';if(kind==='questionPassage')return s.qs[i]?.passageImageUrl||'';if(kind==='matchingLeft'||kind==='matchingRight')return s.qs[i]?.pairs?.[j]?.[kind==='matchingLeft'?'leftImageUrl':'rightImageUrl']||'';if(kind==='statement')return s.qs[i]?.subquestionImages?.[j]||'';return s.qs[i]?.optionImages?.[j]||''}
+function setImageUrl(kind,i,j,url){if(kind==='libraryPassage'&&s.passages?.[i])s.passages[i].imageUrl=url;else if(kind==='passage'){s.meta=s.meta||{};s.meta.passageImageUrl=url}else if(kind==='question'&&s.qs[i])s.qs[i].imageUrl=url;else if(kind==='questionPassage'&&s.qs[i])s.qs[i].passageImageUrl=url;else if(kind==='option'&&s.qs[i]){s.qs[i].optionImages=s.qs[i].optionImages||[];s.qs[i].optionImages[j]=url}else if((kind==='matchingLeft'||kind==='matchingRight')&&s.qs[i]&&s.qs[i].pairs&&s.qs[i].pairs[j])s.qs[i].pairs[j][kind==='matchingLeft'?'leftImageUrl':'rightImageUrl']=url;else if(kind==='statement'&&s.qs[i]){s.qs[i].subquestionImages=s.qs[i].subquestionImages||[];s.qs[i].subquestionImages[j]=url}}
+async function removeDriveImage(url){const fileId=imageFileId(url);if(!fileId)return;try{await api('deleteAssessmentImage',{fileId:fileId})}catch(e){console.warn('File lama belum dapat dipindahkan ke sampah Drive:',e.message)}}
+async function removeAssessmentImage(kind,i,j){const url=imageUrlFor(kind,i,j);if(!url)return;if(!confirm('Hapus gambar ini dari editor? File Drive akan dipindahkan ke sampah setelah bundel/asesmen berhasil disimpan.'))return;s.pendingImageDeletes=s.pendingImageDeletes||[];s.pendingImageDeletes.push(url);setImageUrl(kind,i,j,'');render();toast('Gambar ditandai untuk dihapus setelah penyimpanan.')} 
+async function processPendingImageDeletes(){const list=[...new Set(s.pendingImageDeletes||[])];s.pendingImageDeletes=[];for(const url of list){const id=imageFileId(url);if(!id)continue;try{const r=await api('deleteAssessmentImage',{fileId:id});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Gagal menghapus');}catch(e){console.warn('File gambar lama tidak terhapus otomatis:',e.message);toast('Perubahan tersimpan, tetapi satu gambar lama belum bisa dibuang dari Drive.')}}}
+async function uploadImageBlob(file,name,kind,i,j){
+ if(file.size>4*1024*1024){toast('Ukuran gambar maksimal 4 MB.');return}
+ if(!/^image\/(jpeg|png|webp|gif)$/.test(file.type)){toast('Gunakan gambar JPG, PNG, WebP, atau GIF.');return}
+ if(s.uploadingImage){toast('Tunggu hingga unggahan sebelumnya selesai.');return}
+ const previousUrl=imageUrlFor(kind,i,j);
+ s.uploadingImage=true;s.uploadingLabel='Mengunggah gambar '+(kind==='passage'?'bacaan':kind==='question'?'soal':kind==='questionPassage'?'bacaan soal':kind==='matchingLeft'?'kolom kiri':kind==='matchingRight'?'kolom kanan':'opsi jawaban')+'...';render();
+ try{
+  const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Gagal membaca gambar'));reader.readAsDataURL(file)});
+  const base64=String(dataUrl).split(',')[1]||'';
+  const uploadKind=kind==='libraryPassage'?'passage':kind;
+  const result=await api('uploadAssessmentImage',{fileName:name,mimeType:file.type,base64,kind:uploadKind,assessmentId:s.editingId||((s.currentAssessment||{}).assessment||{}).assessmentId||''});
+  if(!result||!result.ok)throw Error(result&&result.error?result.error:'Upload gambar gagal');
+  const url=result.data.imageUrl||result.data.url;
+  setImageUrl(kind,i,j,url);
+  if(previousUrl&&previousUrl!==url){s.pendingImageDeletes=s.pendingImageDeletes||[];s.pendingImageDeletes.push(previousUrl);}
+  toast(result.data.warning?'Gambar tersimpan. '+result.data.warning:'Gambar berhasil diunggah ke Drive.');
+ }catch(e){toast('Gagal mengunggah gambar: '+e.message)}
+ finally{s.uploadingImage=false;s.uploadingLabel='';render()}
+}
+
+function renderAccessGate(){const waiting=!s.authChecked;const title=waiting?'Memeriksa akun sekolah…':'Akses Rumble Assessment belum tersedia';let message='Tidak dapat memverifikasi akun. Periksa koneksi, lalu coba lagi.';if(waiting)message='Memastikan identitas dan izin sebelum membuka data asesmen.';else if(s.authReason==='inactive')message='Akun sekolah terdaftar tetapi belum aktif. Hubungi administrator sekolah.';else if(s.authReason==='not_registered')message='Email Google ini belum terdaftar pada daftar Users sekolah. Hubungi administrator untuk mendapatkan akses.';else if(s.authReason==='email_unavailable')message='Email Google tidak dapat diverifikasi. Buka aplikasi menggunakan akun Google sekolah yang sesuai.';return '<main class="auth-gate"><section class="auth-panel"><div class="auth-mark">R</div><div class="kicker">RUANG ASESMEN DIGITAL</div><h1>'+title+'</h1><p>'+message+'</p>'+(waiting?'<div class="auth-loader" role="status" aria-label="Memeriksa akun"></div>':'<button class="btn primary" onclick="retryAuth()">Coba verifikasi lagi</button>')+'<p class="footnote">Akses dibatasi untuk akun yang terdaftar. Data asesmen tidak ditampilkan sebelum identitas terverifikasi.</p></section></main>'}
+
+async function loadCurrentUser(){
+  try {
+    const response = await api('getCurrentUser');
+    if (!response || !response.ok) {
+      throw new Error(response && response.error ? response.error : 'Respons verifikasi akun tidak valid.');
+    }
+    const auth = response.data || {};
+    s.authChecked = true;
+    s.authenticated = auth.authenticated === true;
+    s.currentUser = auth.user || null;
+    s.authReason = auth.reason || '';
+    if (s.authenticated && s.currentUser) {
+      s.role = s.currentUser.role === 'student' ? 'student' : 'teacher';
+      s.page = s.role === 'student' ? 'progress' : 'overview';
+      render();
+      await loadAssessments();
+    } else {
+      render();
+    }
+  } catch (error) {
+    console.error('Rumble authentication:', error);
+    s.authChecked = true;
+    s.authenticated = false;
+    s.currentUser = null;
+    s.authReason = 'error';
+    render();
+    toast('Verifikasi akun gagal: ' + (error && error.message ? error.message : error));
+  }
+}
+
+async function retryAuth(){s.authChecked=false;s.authReason='';render();await loadCurrentUser()}
+function render(){if(!s.authChecked||!s.authenticated||!s.currentUser){document.getElementById('app').innerHTML=renderAccessGate();return}let p=s.page,c=p==='overview'?overview():p==='bundles'?bundlesPage():p==='assessments'?assessments():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='progress'?progress():settings();document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Belajar, ukur, tumbuh.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Aman · Terukur · Inklusif</footer></aside><main class="main"><header class="top"><span class="muted">Ruang kerja / '+esc(p)+'</span><span class="account-chip"><span class="account-dot"></span>'+((s.currentUser&&s.currentUser.name)?esc(s.currentUser.name)+' · ':'')+(s.role==='teacher'?'Guru':'Siswa')+' <span class="role-lock" title="Peran ditentukan akun sekolah">Terverifikasi</span></span></header><div class="content">'+c+'</div></main></div>';document.querySelectorAll('.question p,.math-content,.passage-content').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));if(s.page==='detail'&&s.role==='student')updateAnswerProgress();}
+render();
+loadCurrentUser();
+</script></body></html>,display:false},{left:'\\(',right:'\\)',display:false}],throwOnError:false,strict:'ignore'});}catch(e){}}
 function setSubAnswer(id,index,value){const current=s.answers[id]&&typeof s.answers[id]==='object'?s.answers[id]:{};current[String(index)]=value;s.answers[id]=current;updateAnswerProgress()}
 function handleEquationPaste(event,el,kind,i,j){
  const cd=event.clipboardData;if(!cd)return;
