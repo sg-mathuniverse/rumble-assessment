@@ -444,7 +444,7 @@ function localDateTimeToIso(value){if(!value)return '';const date=new Date(value
 function isoToLocalDateTime(value){if(!value)return '';const date=new Date(value);if(isNaN(date.getTime()))return String(value).slice(0,16);const local=new Date(date.getTime()-date.getTimezoneOffset()*60000);return local.toISOString().slice(0,16)}
 async function saveA(){
  const title=document.getElementById('title').value.trim();
- if(!title||!s.qs.length||!s.sourceBundleId){toast('Isi judul, pilih bundel soal dari Bank Soal, dan pastikan soal berhasil dimuat.');return}
+ if(!title||!s.qs.length){toast('Isi judul asesmen dan pastikan minimal satu soal berhasil dimuat.');return}
  const payload={id:s.editingId||undefined,title,subject:document.getElementById('subject').value,className:document.getElementById('className').value,duration:Number(document.getElementById('duration').value)||60,startAt:localDateTimeToIso(document.getElementById('startAt').value),endAt:localDateTimeToIso(document.getElementById('endAt').value),passageText:(s.meta||{}).passageText||'',passageImageUrl:(s.meta||{}).passageImageUrl||'',questions:s.qs,status:'draft',sourceBundleId:s.sourceBundleId||'',sourceBundleTitle:s.sourceBundleTitle||''};
  try{
   const r=await api(s.editingId?'updateAssessment':'createAssessment',payload);
