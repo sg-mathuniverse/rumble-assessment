@@ -740,10 +740,13 @@ function deleteAssessmentImage_(payload) {
   const file = DriveApp.getFileById(fileId);
   const parents = file.getParents();
   let found = false;
+  let inAssessmentImageFolder = false;
   while (parents.hasNext()) {
-    if (folderIsInsideRoot_(parents.next(), rootId, 0)) { found = true; break; }
+    const parent = parents.next();
+    if (folderIsInsideRoot_(parent, rootId, 0)) found = true;
+    if (folderHasNameInsideRoot_(parent, rootId, '01 - Gambar Asesmen', 0)) inAssessmentImageFolder = true;
   }
-  if (!found || !folderHasNameInsideRoot_(parents.hasNext ? file.getParents().hasNext() ? file.getParents().next() : null : null, rootId, '01 - Gambar Asesmen', 0)) {
+  if (!found || !inAssessmentImageFolder) {
     throw new Error('Hanya gambar asesmen di folder gambar aplikasi yang dapat dihapus.');
   }
   const user = payload.currentUser;
