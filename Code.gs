@@ -887,7 +887,10 @@ function listAssessments_(payload) {
     .filter(function (assessment) {
       if (!user) return false;
       if (user.role === 'student') {
-        try { assertStudentAssessmentAccess_(assessment, user); } catch (error) { return false; }
+        const activeAttempt = listRows_('Attempts').some(function (attempt) {
+          return String(attempt.assessmentId) === String(assessment.assessmentId) && String(attempt.studentId) === String(user.userId) && String(attempt.status) === 'in_progress';
+        });
+        try { if (activeAttempt) assertStudentAssessmentIdentity_(assessment, user); else assertStudentAssessmentAccess_(assessment, user); } catch (error) { return false; }
       } else if (user.role === 'teacher' &&
           (!assessment.createdBy || String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase())) {
         return false;
@@ -927,7 +930,13 @@ function getAssessment_(payload) {
   }
   const user = payload.currentUser;
   if (!user) throw new Error('Identitas akun tidak tersedia.');
-  if (user.role === 'student') assertStudentAssessmentAccess_(assessment, user);
+  if (user.role === 'student') {
+    const activeAttempt = listRows_('Attempts').some(function (attempt) {
+      return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === String(user.userId) && String(attempt.status) === 'in_progress';
+    });
+    if (activeAttempt) assertStudentAssessmentIdentity_(assessment, user);
+    else assertStudentAssessmentAccess_(assessment, user);
+  }
   else if (user.role === 'teacher' &&
       (!assessment.createdBy || String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase())) {
     throw new Error('Akses ditolak. Asesmen lama tanpa pemilik terverifikasi perlu dimigrasikan oleh administrator.');
