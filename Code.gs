@@ -1069,6 +1069,8 @@ function submitAttempt_(payload) {
     }
   });
 
+  // Jadwal dicek ulang tepat sebelum menyimpan agar pengumpulan yang melewati batas waktu ditolak.
+  assertStudentAssessmentAccess_(assessment, user);
   const attemptId = makeId_('ATT');
 
   appendRow_('Attempts', {
