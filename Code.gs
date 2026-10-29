@@ -136,67 +136,118 @@ function doPost(e) {
  * Mengarahkan permintaan ke fungsi yang sesuai.
  */
 function routeAction_(action, payload) {
-  const actions = {
-    health: function () {
-      return {
-        app: CONFIG.APP_NAME,
-        time: new Date().toISOString()
-      };
-    },
-    getCurrentUser: function () { return getCurrentUser_(); },
-    createAssessment: function () {
-      return createAssessment_(payload);
-    },
-    deleteAssessment: function () { return deleteAssessment_(payload); },
-    saveQuestionBundle: function () { return saveQuestionBundle_(payload); },
-    listQuestionBundles: function () { return listQuestionBundles_(payload); },
-    getQuestionBundle: function () { return getQuestionBundle_(payload); },
-    updateAssessment: function () {
-      return updateAssessment_(payload);
-    },
-    uploadAssessmentImage: function () {
-      return uploadAssessmentImage_(payload);
-    },
-    deleteAssessmentImage: function () { return deleteAssessmentImage_(payload); },
-    listAssessments: function () {
-      return listAssessments_(payload);
-    },
-    getAssessment: function () {
-      return getAssessment_(payload);
-    },
-    publishAssessment: function () {
-      return publishAssessment_(payload);
-    },
-    submitAttempt: function () {
-      return submitAttempt_(payload);
-    },
-    listAttempts: function () {
-      return listAttempts_(payload);
-    },
-    gradeAttempt: function () {
-      return gradeAttempt_(payload);
-    },
-    logEvent: function () {
-      return logEvent_(payload);
-    },
-    listStudents: function () {
-      return listRows_('Users').filter(function (user) {
-        return user.role === 'student';
-      });
-    },
-    saveUser: function () {
-      return saveUser_(payload);
-    },
-    uploadAnswerImage: function () {
-      return uploadAnswerImage_(payload);
-    }
+  const publicActions = {
+    health: true,
+    getCurrentUser: true
   };
+  if (action === 'health') {
+    return { app: CONFIG.APP_NAME, time: new Date().toISOString() };
+  }
+  if (action === 'getCurrentUser') return getCurrentUser_();
 
-  if (!actions[action]) {
-    throw new Error('Unknown action: ' + action);
+  // Identitas berasal dari sesi Google server, bukan dari payload browser.
+  const auth = getCurrentUser_();
+  if (!auth || !auth.authenticated || !auth.user) {
+    throw new Error('Akses ditolak. Masuk menggunakan akun Google sekolah yang terdaftar dan aktif.');
+  }
+  const user = auth.user;
+  const trusted = Object.assign({}, payload || {}, {
+    currentUser: user,
+    studentId: user.role === 'student' ? String(user.userId || '') : String(payload.studentId || ''),
+    createdBy: user.email
+  });
+  const teacherOnly = [
+    'createAssessment','deleteAssessment','saveQuestionBundle','listQuestionBundles',
+    'getQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
+    'publishAssessment','gradeAttempt','listStudents'
+  ];
+  const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage'];
+  const shared = ['listAssessments','getAssessment','listAttempts'];
+  if (teacherOnly.indexOf(action) >= 0 && user.role !== 'teacher') {
+    throw new Error('Fitur ini hanya dapat digunakan oleh akun guru terverifikasi.');
+  }
+  if (studentOnly.indexOf(action) >= 0 && user.role !== 'student') {
+    throw new Error('Fitur ini hanya dapat digunakan oleh akun siswa terverifikasi.');
+  }
+  if (shared.indexOf(action) >= 0 && user.role !== 'teacher' && user.role !== 'student') {
+    throw new Error('Peran akun tidak diizinkan.');
+  }
+  if (action === 'saveUser') {
+    throw new Error('Pendaftaran pengguna dinonaktifkan melalui antarmuka. Minta administrator mengelola sheet Users.');
   }
 
+  const actions = {
+    createAssessment: function () { return createAssessment_(trusted); },
+    deleteAssessment: function () { assertAssessmentOwner_(payload.id || payload.assessmentId, user); return deleteAssessment_(trusted); },
+    saveQuestionBundle: function () { return saveQuestionBundle_(trusted); },
+    listQuestionBundles: function () { return listQuestionBundles_(trusted); },
+    getQuestionBundle: function () { return getQuestionBundle_(trusted); },
+    updateAssessment: function () { assertAssessmentOwner_(payload.id || payload.assessmentId, user); return updateAssessment_(trusted); },
+    uploadAssessmentImage: function () { return uploadAssessmentImage_(trusted); },
+    deleteAssessmentImage: function () { return deleteAssessmentImage_(trusted); },
+    listAssessments: function () { return listAssessments_(trusted); },
+    getAssessment: function () { return getAssessment_(Object.assign({}, trusted, { includeAnswers: user.role === 'teacher' && payload.includeAnswers === true })); },
+    publishAssessment: function () { assertAssessmentOwner_(payload.id || payload.assessmentId, user); return publishAssessment_(trusted); },
+    submitAttempt: function () { return submitAttempt_(trusted); },
+    listAttempts: function () {
+      if (user.role === 'student') {
+        trusted.studentId = String(user.userId || '');
+        delete trusted.assessmentId;
+      }
+      return listAttempts_(trusted);
+    },
+    gradeAttempt: function () { return gradeAttempt_(trusted); },
+    logEvent: function () { return logEvent_(trusted); },
+    listStudents: function () {
+      return listRows_('Users').filter(function (item) {
+        return String(item.role).toLowerCase() === 'student' &&
+          (item.active === true || String(item.active).toLowerCase() === 'true' || String(item.active) === '1');
+      }).map(function (item) {
+        return { userId: item.userId, name: item.name, email: item.email, className: item.className, active: item.active };
+      });
+    },
+    uploadAnswerImage: function () { return uploadAnswerImage_(trusted); }
+  };
+  if (!actions[action]) throw new Error('Unknown action: ' + action);
   return actions[action]();
+}
+
+/** Guru hanya boleh mengubah asesmen yang dibuat oleh akun tersebut.
+ * Asesmen lama tanpa createdBy tetap bisa dikelola setelah peninjauan manual.
+ */
+function assertAssessmentOwner_(assessmentId, user) {
+  const id = requiredText_(assessmentId, 'ID asesmen', 100);
+  const assessment = listRows_('Assessments').find(function (item) {
+    return String(item.assessmentId) === id;
+  });
+  if (!assessment) throw new Error('Asesmen tidak ditemukan.');
+  if (assessment.createdBy && String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
+    throw new Error('Akses ditolak. Asesmen ini dibuat oleh akun guru lain.');
+  }
+  return assessment;
+}
+
+function assessmentIsAvailableNow_(assessment, now) {
+  const current = now instanceof Date ? now.getTime() : new Date().getTime();
+  const start = assessment.startAt ? new Date(assessment.startAt).getTime() : NaN;
+  const end = assessment.endAt ? new Date(assessment.endAt).getTime() : NaN;
+  if (assessment.startAt && (!isFinite(start) || current < start)) return false;
+  if (assessment.endAt && (!isFinite(end) || current > end)) return false;
+  return true;
+}
+
+function assertStudentAssessmentAccess_(assessment, user) {
+  if (!assessment || String(assessment.status).toLowerCase() !== 'published') {
+    throw new Error('Asesmen tidak tersedia.');
+  }
+  const studentClass = String(user.className || '').trim().toLowerCase();
+  const assessmentClass = String(assessment.className || '').trim().toLowerCase();
+  if (!studentClass || !assessmentClass || studentClass !== assessmentClass) {
+    throw new Error('Asesmen ini tidak ditujukan untuk kelas akunmu.');
+  }
+  if (!assessmentIsAvailableNow_(assessment)) {
+    throw new Error('Asesmen belum dimulai atau waktu pengerjaannya sudah berakhir.');
+  }
 }
 
 /**
@@ -732,23 +783,24 @@ function deleteAssessment_(payload) {
 
 function listAssessments_(payload) {
   const questions = listRows_('Questions');
-
+  const user = payload.currentUser;
   return listRows_('Assessments')
     .filter(function (assessment) {
-      const matchesStatus = !payload.status ||
-        assessment.status === payload.status;
-      const matchesClass = !payload.className ||
-        assessment.className === payload.className;
-
+      if (!user) return false;
+      if (user.role === 'student') {
+        try { assertStudentAssessmentAccess_(assessment, user); } catch (error) { return false; }
+      }
+      const matchesStatus = !payload.status || String(assessment.status) === String(payload.status);
+      const matchesClass = user.role === 'student' ||
+        (!payload.className || String(assessment.className) === String(payload.className));
       return matchesStatus && matchesClass;
     })
     .map(function (assessment) {
       const item = Object.assign({}, assessment);
-
       item.questionCount = questions.filter(function (question) {
         return question.assessmentId === assessment.assessmentId;
       }).length;
-
+      delete item.createdBy;
       return item;
     });
 }
@@ -770,6 +822,13 @@ function getAssessment_(payload) {
 
   if (!assessment) {
     throw new Error('Asesmen tidak ditemukan.');
+  }
+  const user = payload.currentUser;
+  if (!user) throw new Error('Identitas akun tidak tersedia.');
+  if (user.role === 'student') assertStudentAssessmentAccess_(assessment, user);
+  else if (user.role === 'teacher' && assessment.createdBy &&
+      String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
+    throw new Error('Akses ditolak. Asesmen ini dibuat oleh akun guru lain.');
   }
 
   const questions = listRows_('Questions')
@@ -825,6 +884,13 @@ function publishAssessment_(payload) {
   if (idCol < 0 || statusCol < 0) throw new Error('Kolom database asesmen tidak lengkap.');
   for (let i = 1; i < values.length; i++) {
     if (String(values[i][idCol]) === assessmentId) {
+      const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
+      if (assessment && (!assessment.title || !assessment.className || !assessment.duration)) {
+        throw new Error('Judul, kelas, dan durasi wajib diisi sebelum dipublikasikan.');
+      }
+      if (assessment && assessment.startAt && !isFinite(new Date(assessment.startAt).getTime())) throw new Error('Waktu mulai asesmen tidak valid.');
+      if (assessment && assessment.endAt && !isFinite(new Date(assessment.endAt).getTime())) throw new Error('Waktu selesai asesmen tidak valid.');
+      if (assessment && assessment.startAt && assessment.endAt && new Date(assessment.endAt).getTime() <= new Date(assessment.startAt).getTime()) throw new Error('Waktu selesai harus setelah waktu mulai.');
       sheet.getRange(i + 1, statusCol + 1).setValue('published');
       if (updatedCol >= 0) sheet.getRange(i + 1, updatedCol + 1).setValue(currentTimestamp_());
       return { id: assessmentId, status: 'published' };
@@ -839,17 +905,23 @@ function publishAssessment_(payload) {
  */
 function submitAttempt_(payload) {
   const assessmentId = requiredText_(payload.assessmentId, 'ID asesmen', 100);
-  const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
+  const user = payload.currentUser;
+  if (!user || user.role !== 'student' || !user.userId) throw new Error('Akun siswa terverifikasi diperlukan.');
+  const studentId = String(user.userId);
 
   const assessment = listRows_('Assessments').find(function (item) {
     return item.assessmentId === assessmentId;
   });
+  assertStudentAssessmentAccess_(assessment, user);
 
-  if (!assessment || assessment.status !== 'published') {
-    throw new Error('Asesmen tidak ditemukan atau belum dipublikasikan.');
-  }
-
-  const answers = payload.answers || {};
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const previous = listRows_('Attempts').find(function (attempt) {
+      return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
+    });
+    if (previous) throw new Error('Jawaban untuk asesmen ini sudah pernah dikirim.');
+  const answers = payload.answers && typeof payload.answers === 'object' ? payload.answers : {};
   const questions = listRows_('Questions').filter(function (question) {
     return question.assessmentId === assessmentId;
   });
@@ -940,6 +1012,9 @@ function submitAttempt_(payload) {
     score: score,
     maxScore: maxScore
   };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
