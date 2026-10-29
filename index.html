@@ -394,7 +394,7 @@ async function loadAssessments(){
  }catch(e){console.warn('Rumble API:',e);s.assessmentLoadError=e.message||'Koneksi gagal';s.items=[];s.loadedFromServer=false;render();toast('Belum dapat memuat asesmen dari server: '+e.message)}
 }
 function previewMath(el){const box=el.nextElementSibling;if(!box||!box.classList.contains('math-preview'))return;box.textContent=el.value;renderMath(box)}
-function renderMath(root){if(!root)return;try{const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){if(node.nodeValue&&node.nodeValue.includes('\\u2061'))node.nodeValue=node.nodeValue.replace(/\\u2061/g,'');}}catch(e){}if(typeof renderMathInElement!=='function')return;try{renderMathInElement(root,{delimiters:[{left:'$',right:'$',display:true},{left:'\\[',right:'\\]',display:true},{left:'
+function renderMath(root){if(!root)return;try{const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node;const invisibleFunction=String.fromCharCode(8289);while((node=walker.nextNode())){if(node.nodeValue&&node.nodeValue.includes(invisibleFunction))node.nodeValue=node.nodeValue.split(invisibleFunction).join('');}}catch(e){}if(typeof renderMathInElement!=='function')return;try{renderMathInElement(root,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\[',right:'\\]',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false}],throwOnError:false,strict:'ignore'});}catch(e){}}
 function setSubAnswer(id,index,value){const current=s.answers[id]&&typeof s.answers[id]==='object'?s.answers[id]:{};current[String(index)]=value;s.answers[id]=current;updateAnswerProgress()}
 function handleEquationPaste(event,el,kind,i,j){
  const cd=event.clipboardData;if(!cd)return;
