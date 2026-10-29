@@ -234,7 +234,7 @@ function routeAction_(action, payload) {
       const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
       if (!attempt || String(attempt.studentId) !== String(user.userId) || String(attempt.status) !== 'in_progress') throw new Error('Sesi pengerjaan tidak ditemukan atau sudah berakhir.');
       const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
-      assertStudentAssessmentAccess_(assessment, user);
+      assertStudentAssessmentIdentity_(assessment, user);
       const started = new Date(attempt.startedAt).getTime(), durationMs = Number(assessment.duration) * 60000;
       if (!isFinite(started) || !isFinite(durationMs) || Date.now() > started + durationMs) throw new Error('Waktu pengerjaan sudah habis. Foto tidak dapat diunggah.');
       return uploadAnswerImage_(Object.assign({}, trusted, { assessmentId: assessment.assessmentId }));
@@ -280,7 +280,7 @@ function assessmentIsAvailableNow_(assessment, now) {
   return true;
 }
 
-function assertStudentAssessmentAccess_(assessment, user) {
+function assertStudentAssessmentIdentity_(assessment, user) {
   if (!assessment || String(assessment.status).toLowerCase() !== 'published') {
     throw new Error('Asesmen tidak tersedia.');
   }
@@ -289,6 +289,10 @@ function assertStudentAssessmentAccess_(assessment, user) {
   if (!studentClass || !assessmentClass || studentClass !== assessmentClass) {
     throw new Error('Asesmen ini tidak ditujukan untuk kelas akunmu.');
   }
+}
+
+function assertStudentAssessmentAccess_(assessment, user) {
+  assertStudentAssessmentIdentity_(assessment, user);
   if (!assessmentIsAvailableNow_(assessment)) {
     throw new Error('Asesmen belum dimulai atau waktu pengerjaannya sudah berakhir.');
   }
@@ -1032,7 +1036,14 @@ function submitAttempt_(payload) {
   const assessment = listRows_('Assessments').find(function (item) {
     return item.assessmentId === assessmentId;
   });
-  assertStudentAssessmentAccess_(assessment, user);
+  const existingAttempt = listRows_('Attempts').find(function (attempt) {
+    return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
+  });
+  if (existingAttempt && String(existingAttempt.status) === 'in_progress') {
+    assertStudentAssessmentIdentity_(assessment, user);
+  } else {
+    assertStudentAssessmentAccess_(assessment, user);
+  }
 
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -1116,8 +1127,13 @@ function submitAttempt_(payload) {
     }
   });
 
-  // Jadwal dicek ulang tepat sebelum menyimpan agar pengumpulan yang melewati batas waktu ditolak.
-  assertStudentAssessmentAccess_(assessment, user);
+  // Sesi aktif boleh dikirim setelah jam jadwal berakhir selama durasi pengerjaan belum habis.
+  // Identitas, kelas, status asesmen, dan batas durasi tetap divalidasi di sisi server.
+  if (previous && String(previous.status) === 'in_progress') {
+    assertStudentAssessmentIdentity_(assessment, user);
+  } else {
+    assertStudentAssessmentAccess_(assessment, user);
+  }
   const attemptId = previous ? String(previous.attemptId) : makeId_('ATT');
   const attemptsSheet = getSheet_('Attempts');
   const attemptValues = attemptsSheet.getDataRange().getValues();
