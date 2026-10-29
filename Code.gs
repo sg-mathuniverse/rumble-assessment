@@ -229,7 +229,7 @@ function routeAction_(action, payload) {
       const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
       if (!attempt || String(attempt.studentId) !== String(user.userId)) throw new Error('Pengerjaan tidak ditemukan untuk akun ini.');
       const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
-      if (!assessment) throw new Error('Asesmen tidak ditemukan.');
+      assertStudentAssessmentAccess_(assessment, user);
       return uploadAnswerImage_(Object.assign({}, trusted, { assessmentId: assessment.assessmentId }));
     }
   };
@@ -814,6 +814,9 @@ function listAssessments_(payload) {
       if (!user) return false;
       if (user.role === 'student') {
         try { assertStudentAssessmentAccess_(assessment, user); } catch (error) { return false; }
+      } else if (user.role === 'teacher' && assessment.createdBy &&
+          String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
+        return false;
       }
       const matchesStatus = !payload.status || String(assessment.status) === String(payload.status);
       const matchesClass = user.role === 'student' ||
@@ -1021,7 +1024,7 @@ function submitAttempt_(payload) {
     attemptId: attemptId,
     assessmentId: assessmentId,
     studentId: studentId,
-    startedAt: String(payload.startedAt || currentTimestamp_()),
+    startedAt: currentTimestamp_(),
     submittedAt: currentTimestamp_(),
     status: needsReview ? 'needs_review' : 'graded',
     score: score,
