@@ -685,6 +685,10 @@ function uploadAssessmentImage_(payload) {
   const kindFolder = getOrCreateChildFolder_(assessmentImages, subfolderNames[kind]);
   const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, safeName);
   const file = kindFolder.createFile(blob);
+  const currentUser = payload.currentUser;
+  if (currentUser && currentUser.email) {
+    file.setDescription('Rumble Assessment owner: ' + String(currentUser.email).trim().toLowerCase());
+  }
 
   let domainSharingEnabled = true;
   try {
@@ -719,6 +723,16 @@ function folderIsInsideRoot_(folder, rootId, depth) {
   return false;
 }
 
+function folderHasNameInsideRoot_(folder, rootId, targetName, depth) {
+  if ((depth || 0) >= 20 || folder.getId() === rootId) return false;
+  if (folder.getName() === targetName && folderIsInsideRoot_(folder, rootId, 0)) return true;
+  const parents = folder.getParents();
+  while (parents.hasNext()) {
+    if (folderHasNameInsideRoot_(parents.next(), rootId, targetName, (depth || 0) + 1)) return true;
+  }
+  return false;
+}
+
 function deleteAssessmentImage_(payload) {
   const fileId = requiredText_(payload.fileId, 'ID gambar', 200);
   const rootId = CONFIG.DRIVE_FOLDER_ID;
@@ -729,7 +743,14 @@ function deleteAssessmentImage_(payload) {
   while (parents.hasNext()) {
     if (folderIsInsideRoot_(parents.next(), rootId, 0)) { found = true; break; }
   }
-  if (!found) throw new Error('File tidak berada di folder Drive Rumble Assessment.');
+  if (!found || !folderHasNameInsideRoot_(parents.hasNext ? file.getParents().hasNext() ? file.getParents().next() : null : null, rootId, '01 - Gambar Asesmen', 0)) {
+    throw new Error('Hanya gambar asesmen di folder gambar aplikasi yang dapat dihapus.');
+  }
+  const user = payload.currentUser;
+  const expectedDescription = 'Rumble Assessment owner: ' + String(user && user.email || '').trim().toLowerCase();
+  if (!user || user.role !== 'teacher' || String(file.getDescription() || '') !== expectedDescription) {
+    throw new Error('Gambar tidak memiliki pemilik terverifikasi untuk akun guru ini. Minta administrator memigrasikan atau unggah ulang gambar lama.');
+  }
   file.setTrashed(true);
   return { fileId: fileId, deleted: true };
 }
