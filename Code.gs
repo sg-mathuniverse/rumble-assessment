@@ -60,7 +60,7 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v4';
+  const cacheKey = 'rumble_frontend_html_v5';
   const cached = cache.get(cacheKey);
 
   if (cached) {

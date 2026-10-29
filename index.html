@@ -271,8 +271,10 @@ function endBusy(action){busyRequests=Math.max(0,busyRequests-1);const label=bus
 function api(action,payload={}){
  return new Promise((resolve,reject)=>{
   if(!window.google||!google.script||!google.script.run){reject(new Error('google.script.run tidak tersedia. Buka aplikasi melalui URL deployment Apps Script.'));return}
-  beginBusy(action);
-  let finished=false;const finish=()=>{if(!finished){finished=true;endBusy(action)}};
+  // Verifikasi akun sudah memiliki spinner khusus pada gerbang akses; jangan tampilkan overlay kedua.
+  const showBusy = action !== 'getCurrentUser';
+  if(showBusy)beginBusy(action);
+  let finished=false;const finish=()=>{if(!finished){finished=true;if(showBusy)endBusy(action)}};
   try{google.script.run.withSuccessHandler(result=>{finish();resolve(result)}).withFailureHandler(err=>{finish();reject(new Error(err&&err.message?err.message:String(err)))}).clientApi(action,payload)}
   catch(err){finish();reject(err)}
  });
