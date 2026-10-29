@@ -311,7 +311,7 @@ async function submitAssessment(){
  const a=(s.currentAssessment||{}).assessment||{};
  if(!a.assessmentId&&!a.id){toast('ID asesmen tidak ditemukan.');return}
  if(!confirm('Kirim jawaban sekarang? Pastikan semua jawaban sudah diperiksa.'))return;
- try{const r=await api('submitAttempt',{assessmentId:a.assessmentId||a.id,answers:s.answers,startedAt:new Date().toISOString()});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Jawaban gagal dikirim');toast('Jawaban berhasil dikirim dan diproses.');s.page='assessments';s.currentAssessment=null;render();await loadAssessments()}
+ try{const r=await api('submitAttempt',{assessmentId:a.assessmentId||a.id,answers:s.answers});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Jawaban gagal dikirim');toast('Jawaban berhasil dikirim dan diproses.');s.page='assessments';s.currentAssessment=null;render();await loadAssessments()}
  catch(e){toast('Gagal mengirim jawaban: '+e.message)}
 }
 
