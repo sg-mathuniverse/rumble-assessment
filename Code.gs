@@ -193,11 +193,29 @@ function routeAction_(action, payload) {
       if (user.role === 'student') {
         trusted.studentId = String(user.userId || '');
         delete trusted.assessmentId;
+        return listAttempts_(trusted);
       }
-      return listAttempts_(trusted);
+      return listAttempts_(trusted).filter(function (attempt) {
+        const assessment = listRows_('Assessments').find(function (item) {
+          return String(item.assessmentId) === String(attempt.assessmentId);
+        });
+        return assessment && (!assessment.createdBy ||
+          String(assessment.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase());
+      });
     },
-    gradeAttempt: function () { return gradeAttempt_(trusted); },
-    logEvent: function () { return logEvent_(trusted); },
+    gradeAttempt: function () {
+      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
+      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+      if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
+      assertAssessmentOwner_(attempt.assessmentId, user);
+      return gradeAttempt_(trusted);
+    },
+    logEvent: function () {
+      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
+      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+      if (!attempt || String(attempt.studentId) !== String(user.userId)) throw new Error('Pengerjaan tidak ditemukan untuk akun ini.');
+      return logEvent_(trusted);
+    },
     listStudents: function () {
       return listRows_('Users').filter(function (item) {
         return String(item.role).toLowerCase() === 'student' &&
@@ -206,7 +224,14 @@ function routeAction_(action, payload) {
         return { userId: item.userId, name: item.name, email: item.email, className: item.className, active: item.active };
       });
     },
-    uploadAnswerImage: function () { return uploadAnswerImage_(trusted); }
+    uploadAnswerImage: function () {
+      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
+      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+      if (!attempt || String(attempt.studentId) !== String(user.userId)) throw new Error('Pengerjaan tidak ditemukan untuk akun ini.');
+      const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+      if (!assessment) throw new Error('Asesmen tidak ditemukan.');
+      return uploadAnswerImage_(Object.assign({}, trusted, { assessmentId: assessment.assessmentId }));
+    }
   };
   if (!actions[action]) throw new Error('Unknown action: ' + action);
   return actions[action]();
