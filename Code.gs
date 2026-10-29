@@ -161,7 +161,7 @@ function routeAction_(action, payload) {
     'getQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
     'publishAssessment','gradeAttempt','listStudents'
   ];
-  const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt'];
+  const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt','saveAttempt'];
   const shared = ['listAssessments','getAssessment','listAttempts'];
   if (teacherOnly.indexOf(action) >= 0 && user.role !== 'teacher') {
     throw new Error('Fitur ini hanya dapat digunakan oleh akun guru terverifikasi.');
@@ -179,6 +179,7 @@ function routeAction_(action, payload) {
   const actions = {
     createAssessment: function () { return createAssessment_(trusted); },
     deleteAssessment: function () { assertAssessmentOwner_(payload.id || payload.assessmentId, user); return deleteAssessment_(trusted); },
+    deleteQuestionBundle: function () { assertQuestionBundleOwner_(payload.id || payload.bundleId, user); return deleteQuestionBundle_(trusted); },
     saveQuestionBundle: function () {
       const bundleId = payload.bundleId || payload.id;
       if (bundleId) assertQuestionBundleOwner_(bundleId, user);
@@ -193,6 +194,7 @@ function routeAction_(action, payload) {
     getAssessment: function () { return getAssessment_(Object.assign({}, trusted, { includeAnswers: user.role === 'teacher' && payload.includeAnswers === true })); },
     publishAssessment: function () { assertAssessmentOwner_(payload.id || payload.assessmentId, user); return publishAssessment_(trusted); },
     startAttempt: function () { return startAttempt_(trusted); },
+    saveAttempt: function () { return saveAttempt_(trusted); },
     submitAttempt: function () { return submitAttempt_(trusted); },
     listAttempts: function () {
       if (user.role === 'student') {
@@ -846,7 +848,8 @@ function deleteAssessment_(payload) {
     }
   }
   if (rowNumber < 0) throw new Error('Asesmen tidak ditemukan.');
-  if (status === 'published') throw new Error('Asesmen yang sudah dipublikasikan tidak dapat dihapus.');
+  const existingAttempts = listRows_('Attempts').filter(function (attempt) { return String(attempt.assessmentId) === assessmentId; });
+  if (existingAttempts.length) throw new Error('Asesmen ini sudah memiliki data pengerjaan siswa sehingga tidak dapat dihapus.');
   const questionSheet = getSheet_('Questions');
   const qValues = questionSheet.getDataRange().getValues();
   if (qValues.length > 1) {
@@ -860,6 +863,21 @@ function deleteAssessment_(payload) {
   }
   assessmentSheet.deleteRow(rowNumber);
   return { assessmentId: assessmentId, deleted: true };
+}
+
+function deleteQuestionBundle_(payload) {
+  setupDatabase();
+  const bundleId = requiredText_(payload.id || payload.bundleId, 'ID bundel', 100);
+  const sheet = getSheet_('QuestionBundles');
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) throw new Error('Bundel soal tidak ditemukan.');
+  const headers = values[0].map(String), idCol = headers.indexOf('bundleId');
+  if (idCol < 0) throw new Error('Kolom ID bundel tidak ditemukan.');
+  let rowNumber = -1;
+  for (let i = 1; i < values.length; i++) if (String(values[i][idCol]) === bundleId) { rowNumber = i + 1; break; }
+  if (rowNumber < 0) throw new Error('Bundel soal tidak ditemukan.');
+  sheet.deleteRow(rowNumber);
+  return { bundleId: bundleId, deleted: true };
 }
 
 function listAssessments_(payload) {
@@ -998,7 +1016,11 @@ function startAttempt_(payload) {
   if (!user || user.role !== 'student' || !user.userId) throw new Error('Akun siswa terverifikasi diperlukan.');
   const studentId = String(user.userId);
   const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
-  assertStudentAssessmentAccess_(assessment, user);
+  const previousAttempt = listRows_('Attempts').find(function (attempt) {
+    return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
+  });
+  if (previousAttempt && String(previousAttempt.status) === 'in_progress') assertStudentAssessmentIdentity_(assessment, user);
+  else assertStudentAssessmentAccess_(assessment, user);
   const duration = Number(assessment.duration);
   if (!isFinite(duration) || duration < 1) throw new Error('Durasi asesmen tidak valid.');
 
@@ -1013,7 +1035,7 @@ function startAttempt_(payload) {
       const started = new Date(previous.startedAt).getTime();
       if (!isFinite(started)) throw new Error('Waktu mulai sesi tidak valid. Hubungi guru.');
       if (Date.now() > started + duration * 60000 + 30000) throw new Error('Waktu pengerjaan sudah habis. Hubungi guru untuk bantuan.');
-      return { attemptId: String(previous.attemptId), startedAt: previous.startedAt, status: 'in_progress', duration: duration, resumed: true };
+      return { attemptId: String(previous.attemptId), startedAt: previous.startedAt, status: 'in_progress', duration: duration, resumed: true, answers: parseJson_(previous.answersJson, {}) };
     }
     const attemptId = makeId_('ATT'), startedAt = currentTimestamp_();
     const questions = listRows_('Questions').filter(function (question) { return String(question.assessmentId) === assessmentId; });
@@ -1023,7 +1045,35 @@ function startAttempt_(payload) {
       startedAt: startedAt, submittedAt: '', status: 'in_progress', score: 0,
       maxScore: maxScore, focusLossCount: 0, answersJson: '{}', teacherFeedback: ''
     });
-    return { attemptId: attemptId, startedAt: startedAt, status: 'in_progress', duration: duration, resumed: false };
+    return { attemptId: attemptId, startedAt: startedAt, status: 'in_progress', duration: duration, resumed: false, answers: {} };
+  } finally { lock.releaseLock(); }
+}
+
+function saveAttempt_(payload) {
+  const assessmentId = requiredText_(payload.assessmentId, 'ID asesmen', 100);
+  const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
+  const user = payload.currentUser;
+  if (!user || user.role !== 'student' || !user.userId) throw new Error('Akun siswa terverifikasi diperlukan.');
+  const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
+  assertStudentAssessmentIdentity_(assessment, user);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const attemptsSheet = getSheet_('Attempts'), values = attemptsSheet.getDataRange().getValues();
+    if (values.length < 2) throw new Error('Sesi pengerjaan tidak ditemukan.');
+    const headers = values[0].map(String), idCol = headers.indexOf('attemptId'), assessmentCol = headers.indexOf('assessmentId'), studentCol = headers.indexOf('studentId');
+    let rowNumber = -1, row = null;
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][idCol]) === attemptId && String(values[i][assessmentCol]) === assessmentId && String(values[i][studentCol]) === String(user.userId)) { rowNumber = i + 1; row = values[i]; break; }
+    }
+    if (rowNumber < 0) throw new Error('Sesi pengerjaan tidak ditemukan atau bukan milik akun ini.');
+    const col = function (name) { const index = headers.indexOf(name); if (index < 0) throw new Error('Kolom '+name+' tidak ditemukan.'); return index; };
+    if (String(row[col('status')]) !== 'in_progress') throw new Error('Sesi ini sudah dikirim dan tidak dapat diubah.');
+    const started = new Date(row[col('startedAt')]).getTime(), durationMs = Number(assessment.duration) * 60000;
+    if (!isFinite(started) || !isFinite(durationMs) || durationMs <= 0 || Date.now() > started + durationMs + 30000) throw new Error('Waktu pengerjaan sudah habis.');
+    const answers = payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers) ? payload.answers : {};
+    attemptsSheet.getRange(rowNumber, col('answersJson') + 1).setValue(JSON.stringify(answers));
+    return { saved: true, savedAt: currentTimestamp_() };
   } finally { lock.releaseLock(); }
 }
 
