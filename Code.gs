@@ -60,14 +60,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v1';
+  const cacheKey = 'rumble_frontend_html_v2';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/main/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/uiux-security-refresh-2026-10-29/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
