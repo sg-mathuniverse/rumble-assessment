@@ -848,8 +848,17 @@ function deleteAssessment_(payload) {
     }
   }
   if (rowNumber < 0) throw new Error('Asesmen tidak ditemukan.');
-  const existingAttempts = listRows_('Attempts').filter(function (attempt) { return String(attempt.assessmentId) === assessmentId; });
-  if (existingAttempts.length) throw new Error('Asesmen ini sudah memiliki data pengerjaan siswa sehingga tidak dapat dihapus.');
+  const attemptsSheet = getSheet_('Attempts');
+  const attemptValues = attemptsSheet.getDataRange().getValues();
+  if (attemptValues.length > 1) {
+    const attemptHeaders = attemptValues[0].map(String);
+    const attemptAssessmentCol = attemptHeaders.indexOf('assessmentId');
+    if (attemptAssessmentCol >= 0) {
+      for (let i = attemptValues.length - 1; i >= 1; i--) {
+        if (String(attemptValues[i][attemptAssessmentCol]) === assessmentId) attemptsSheet.deleteRow(i + 1);
+      }
+    }
+  }
   const questionSheet = getSheet_('Questions');
   const qValues = questionSheet.getDataRange().getValues();
   if (qValues.length > 1) {
