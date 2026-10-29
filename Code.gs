@@ -199,8 +199,8 @@ function routeAction_(action, payload) {
         const assessment = listRows_('Assessments').find(function (item) {
           return String(item.assessmentId) === String(attempt.assessmentId);
         });
-        return assessment && (!assessment.createdBy ||
-          String(assessment.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase());
+        return assessment && assessment.createdBy &&
+          String(assessment.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
       });
     },
     gradeAttempt: function () {
@@ -246,8 +246,8 @@ function assertAssessmentOwner_(assessmentId, user) {
     return String(item.assessmentId) === id;
   });
   if (!assessment) throw new Error('Asesmen tidak ditemukan.');
-  if (assessment.createdBy && String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
-    throw new Error('Akses ditolak. Asesmen ini dibuat oleh akun guru lain.');
+  if (!assessment.createdBy || String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
+    throw new Error('Akses ditolak. Asesmen lama tanpa pemilik terverifikasi perlu dimigrasikan oleh administrator.');
   }
   return assessment;
 }
@@ -814,8 +814,8 @@ function listAssessments_(payload) {
       if (!user) return false;
       if (user.role === 'student') {
         try { assertStudentAssessmentAccess_(assessment, user); } catch (error) { return false; }
-      } else if (user.role === 'teacher' && assessment.createdBy &&
-          String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
+      } else if (user.role === 'teacher' &&
+          (!assessment.createdBy || String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase())) {
         return false;
       }
       const matchesStatus = !payload.status || String(assessment.status) === String(payload.status);
@@ -854,9 +854,9 @@ function getAssessment_(payload) {
   const user = payload.currentUser;
   if (!user) throw new Error('Identitas akun tidak tersedia.');
   if (user.role === 'student') assertStudentAssessmentAccess_(assessment, user);
-  else if (user.role === 'teacher' && assessment.createdBy &&
-      String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
-    throw new Error('Akses ditolak. Asesmen ini dibuat oleh akun guru lain.');
+  else if (user.role === 'teacher' &&
+      (!assessment.createdBy || String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase())) {
+    throw new Error('Akses ditolak. Asesmen lama tanpa pemilik terverifikasi perlu dimigrasikan oleh administrator.');
   }
 
   const questions = listRows_('Questions')
