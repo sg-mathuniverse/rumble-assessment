@@ -179,7 +179,11 @@ function routeAction_(action, payload) {
   const actions = {
     createAssessment: function () { return createAssessment_(trusted); },
     deleteAssessment: function () { assertAssessmentOwner_(payload.id || payload.assessmentId, user); return deleteAssessment_(trusted); },
-    saveQuestionBundle: function () { return saveQuestionBundle_(trusted); },
+    saveQuestionBundle: function () {
+      const bundleId = payload.bundleId || payload.id;
+      if (bundleId) assertQuestionBundleOwner_(bundleId, user);
+      return saveQuestionBundle_(trusted);
+    },
     listQuestionBundles: function () { return listQuestionBundles_(trusted); },
     getQuestionBundle: function () { return getQuestionBundle_(trusted); },
     updateAssessment: function () { assertAssessmentOwner_(payload.id || payload.assessmentId, user); return updateAssessment_(trusted); },
@@ -250,6 +254,18 @@ function assertAssessmentOwner_(assessmentId, user) {
     throw new Error('Akses ditolak. Asesmen lama tanpa pemilik terverifikasi perlu dimigrasikan oleh administrator.');
   }
   return assessment;
+}
+
+function assertQuestionBundleOwner_(bundleId, user) {
+  const id = requiredText_(bundleId, 'ID bundel', 100);
+  const bundle = listRows_('QuestionBundles').find(function (item) {
+    return String(item.bundleId) === id;
+  });
+  if (!bundle) throw new Error('Bundel soal tidak ditemukan.');
+  if (!bundle.createdBy || String(bundle.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
+    throw new Error('Akses ditolak. Bundel lama tanpa pemilik terverifikasi perlu dimigrasikan oleh administrator.');
+  }
+  return bundle;
 }
 
 function assessmentIsAvailableNow_(assessment, now) {
@@ -500,9 +516,13 @@ function saveQuestionBundle_(payload) {
 
 function listQuestionBundles_(payload) {
   setupDatabase();
+  const user = payload.currentUser;
+  if (!user || user.role !== 'teacher') throw new Error('Akun guru terverifikasi diperlukan.');
   return listRows_('QuestionBundles')
     .filter(function (bundle) {
-      return !payload.status || String(bundle.status) === String(payload.status);
+      const owned = bundle.createdBy && String(bundle.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
+      const statusMatches = !payload.status || String(bundle.status) === String(payload.status);
+      return owned && statusMatches;
     })
     .map(function (bundle) {
       const item = Object.assign({}, bundle);
@@ -520,6 +540,11 @@ function getQuestionBundle_(payload) {
     return String(item.bundleId) === bundleId;
   });
   if (!bundle) throw new Error('Bundel soal tidak ditemukan.');
+  const user = payload.currentUser;
+  if (!user || user.role !== 'teacher') throw new Error('Akun guru terverifikasi diperlukan.');
+  if (!bundle.createdBy || String(bundle.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
+    throw new Error('Akses ditolak. Bundel lama tanpa pemilik terverifikasi perlu dimigrasikan oleh administrator.');
+  }
   return {
     bundle: {
       bundleId: bundle.bundleId,
