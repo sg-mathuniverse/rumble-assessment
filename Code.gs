@@ -83,7 +83,7 @@ function getFrontendHtml_() {
     throw new Error('File index.html dari GitHub kosong atau formatnya tidak sesuai.');
   }
 
-  cache.put(cacheKey, html, 300);
+  // index.html melebihi batas ukuran satu item CacheService, jadi jangan simpan HTML utuh di cache.
   return html;
 }
 
