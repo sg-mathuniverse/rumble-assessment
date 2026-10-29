@@ -195,7 +195,40 @@ async function saveGrade(id){
  catch(e){toast('Gagal menyimpan nilai: '+e.message)}
 }
 
-function progress(){const attempts=Array.isArray(s.attempts)?s.attempts:[];const graded=attempts.filter(a=>a.status==='graded'&&Number(a.maxScore)>0);const average=graded.length?Math.round(graded.reduce((sum,a)=>sum+(Number(a.score)||0)/Number(a.maxScore)*100,0)/graded.length):null;return head('RUANG SISWA','Perkembangan belajarku','Lihat riwayat pengerjaan dan nilai yang sudah dinilai.')+'<div class="grid stats">'+stat('Pengerjaan terkirim',String(attempts.length),'Riwayat akun ini')+stat('Sudah dinilai',String(graded.length),'Nilai telah tersedia')+stat('Rata-rata nilai',average===null?'—':average+'%','Dari pengerjaan yang dinilai')+stat('Perlu diperiksa',String(attempts.filter(a=>a.status==='needs_review').length),'Menunggu koreksi guru')+'</div><div class="card"><div class="actions"><h3>Riwayat asesmen</h3><button class="btn" onclick="loadAttempts()">Muat ulang</button></div>'+(!s.attemptsLoaded?'<p class="muted">Memuat riwayat…</p>':!attempts.length?'<p class="muted">Belum ada pengerjaan yang tercatat pada akun ini.</p>':attempts.map(a=>'<div class="listitem"><div class="symbol">✓</div><div class="grow"><b>'+esc(a.assessmentTitle||a.assessmentId||'Asesmen')+'</b><small>'+esc(a.submittedAt||'')+'</small></div><span class="pill '+(a.status==='graded'?'live':'')+'">'+esc(a.status==='graded'?'Sudah dinilai':'Menunggu koreksi')+'</span><strong>'+(a.status==='graded'&&Number(a.maxScore)>0?Math.round(Number(a.score)/Number(a.maxScore)*100)+'%':'—')+'</strong></div>').join('')+'</div>'}
+function progress() {
+  const attempts = Array.isArray(s.attempts) ? s.attempts : [];
+  const graded = attempts.filter(a => a.status === 'graded' && Number(a.maxScore) > 0);
+  const average = graded.length
+    ? Math.round(graded.reduce((sum, a) => sum + (Number(a.score) || 0) / Number(a.maxScore) * 100, 0) / graded.length)
+    : null;
+  const statsHtml = '<div class="grid stats">'
+    + stat('Pengerjaan terkirim', String(attempts.length), 'Riwayat akun ini')
+    + stat('Sudah dinilai', String(graded.length), 'Nilai telah tersedia')
+    + stat('Rata-rata nilai', average === null ? '—' : average + '%', 'Dari pengerjaan yang dinilai')
+    + stat('Perlu diperiksa', String(attempts.filter(a => a.status === 'needs_review').length), 'Menunggu koreksi guru')
+    + '</div>';
+  const rows = attempts.map(function (a) {
+    const score = a.status === 'graded' && Number(a.maxScore) > 0
+      ? Math.round(Number(a.score) / Number(a.maxScore) * 100) + '%'
+      : '—';
+    const statusLabel = a.status === 'graded' ? 'Sudah dinilai' : 'Menunggu koreksi';
+    const pillClass = a.status === 'graded' ? 'live' : '';
+    return '<div class="listitem"><div class="symbol">✓</div><div class="grow"><b>'
+      + esc(a.assessmentTitle || a.assessmentId || 'Asesmen')
+      + '</b><small>' + esc(a.submittedAt || '')
+      + '</small></div><span class="pill ' + pillClass + '">'
+      + esc(statusLabel) + '</span><strong>' + score + '</strong></div>';
+  }).join('');
+  const history = !s.attemptsLoaded
+    ? '<p class="muted">Memuat riwayat…</p>'
+    : !attempts.length
+      ? '<p class="muted">Belum ada pengerjaan yang tercatat pada akun ini.</p>'
+      : rows;
+  return head('RUANG SISWA', 'Perkembangan belajarku', 'Lihat riwayat pengerjaan dan nilai yang sudah dinilai.')
+    + statsHtml
+    + '<div class="card"><div class="actions"><h3>Riwayat asesmen</h3><button class="btn" onclick="loadAttempts()">Muat ulang</button></div>'
+    + history + '</div>';
+}
 function settings(){return head('Konfigurasi','Koneksi aplikasi','Rumble Assessment menggunakan Apps Script HTML Service.')+'<div class="card"><h3>Status backend</h3><p class="muted">Halaman ini berjalan melalui Apps Script. Koneksi menggunakan google.script.run sehingga tidak memerlukan URL API di browser.</p><div class="actions"><button class="btn primary" onclick="testApi()">Uji koneksi</button></div><div class="notice">Akses aplikasi tetap dibatasi oleh pengaturan deployment Apps Script. Sebelum menggunakan data siswa asli, pastikan izin setiap peran telah diterapkan di sisi server.</div></div>'}
 function newBundle(){s.page='bundles';s.bundleEditorOpen=true;s.assessmentEditorOpen=false;s.assessmentFromBundle=false;s.sourceBundleId='';s.sourceBundleTitle='';s.pendingImageDeletes=[];s.editorMode='bundle';s.editingBundleId=null;s.editingId=null;s.meta={title:'',subject:'Matematika',description:'',passageText:'',passageImageUrl:''};s.passages=[];s.qs=[{type:'multiple_choice',text:'',points:1,options:['','','','',''],optionImages:[],answer:'0',imageUrl:'',subquestions:[],rubricLevels:[],passageId:''}];render();setTimeout(function(){document.getElementById('editor')?.scrollIntoView({behavior:'smooth'})},0)}
 async function loadBundles(){try{const r=await api('listQuestionBundles');if(!r||!r.ok)throw Error(r&&r.error?r.error:'Gagal memuat bank soal');s.bundles=Array.isArray(r.data)?r.data:[];s.bundlesLoaded=true;if(s.page==='bundles'||(s.page==='assessments'&&s.assessmentEditorOpen))render()}catch(e){toast('Gagal memuat bank soal: '+e.message)}}
