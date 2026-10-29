@@ -886,8 +886,10 @@ function getAssessment_(payload) {
       };
     });
 
+  const safeAssessment = Object.assign({}, assessment);
+  delete safeAssessment.createdBy;
   return {
-    assessment: assessment,
+    assessment: safeAssessment,
     questions: questions
   };
 }
