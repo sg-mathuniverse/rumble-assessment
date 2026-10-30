@@ -1499,58 +1499,73 @@ function saveUser_(payload) {
  */
 function uploadAnswerImage_(payload) {
   setupDatabase();
-  if (!CONFIG.DRIVE_FOLDER_ID) throw new Error('Isi CONFIG.DRIVE_FOLDER_ID terlebih dahulu.');
-  const mimeType = String(payload.mimeType || 'image/jpeg');
+  if (!CONFIG.DRIVE_FOLDER_ID) throw new Error('Folder Drive jawaban belum dikonfigurasi.');
+  const mimeType = String(payload.mimeType || 'image/jpeg').toLowerCase();
   const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
   if (allowedMimeTypes.indexOf(mimeType) === -1) throw new Error('Format gambar harus JPG, PNG, atau WebP.');
-
   const base64 = String(payload.base64 || '');
   if (!base64 || base64.length > 8 * 1024 * 1024) throw new Error('Gambar kosong atau terlalu besar.');
-
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
   const questionId = requiredText_(payload.questionId, 'ID soal', 120);
-  const assessmentId = String(payload.assessmentId || 'Asesmen-Tanpa-ID').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
-  const safeAttemptId = attemptId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
-  const fileName = String(payload.fileName || 'jawaban.jpg').replace(/[\\/:*?"<>|]/g, '_').slice(0, 150);
-  const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, fileName);
-
-  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
-  const answerRoot = getOrCreateChildFolder_(root, '02 - Jawaban Siswa');
-  const assessmentFolder = getOrCreateChildFolder_(answerRoot, assessmentId);
-  const attemptFolder = getOrCreateChildFolder_(assessmentFolder, safeAttemptId);
-  // Foto jawaban siswa sengaja tidak dibagikan melalui tautan domain/publik.
-  const file = attemptFolder.createFile(blob);
-  const currentUser = payload.currentUser || {};
-  const viewerEmails = [currentUser.email, payload.teacherEmail].map(function (email) { return String(email || '').trim().toLowerCase(); }).filter(function (email, index, all) { return email && all.indexOf(email) === index; });
-  viewerEmails.forEach(function (email) { try { file.addViewer(email); } catch (shareError) { Logger.log('Tidak dapat memberi akses foto jawaban ke ' + email + ': ' + shareError.message); } });
-  const fileId = makeId_('FILE');
-  const imageUrl = 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.getId()) + '&sz=w1200';
-
-  appendRow_('Files', {
-    fileId: fileId,
-    attemptId: attemptId,
-    studentId: studentId,
-    questionId: questionId,
-    driveFileId: file.getId(),
-    fileUrl: file.getUrl(),
-    createdAt: currentTimestamp_()
-  });
-
-  const attemptsSheet = getSheet_('Attempts');
-  const attemptValues = attemptsSheet.getDataRange().getValues();
-  const attemptHeaders = attemptValues[0].map(String);
-  const attemptIdCol = attemptHeaders.indexOf('attemptId'), studentIdCol = attemptHeaders.indexOf('studentId'), answersCol = attemptHeaders.indexOf('answersJson');
-  for (let rowIndex = 1; rowIndex < attemptValues.length; rowIndex++) {
-    if (String(attemptValues[rowIndex][attemptIdCol]) === attemptId && String(attemptValues[rowIndex][studentIdCol]) === studentId) {
-      const answers = parseJson_(attemptValues[rowIndex][answersCol], {});
-      const answer = answers[questionId] && typeof answers[questionId] === 'object' ? answers[questionId] : {};
-      answer.photos = Array.isArray(answer.photos) ? answer.photos : [];
-      answer.photos.push({ fileId: fileId, url: file.getUrl(), imageUrl: imageUrl, name: file.getName() });
-      answers[questionId] = answer;
-      attemptsSheet.getRange(rowIndex + 1, answersCol + 1).setValue(JSON.stringify(answers));
-      break;
+  const assessmentId = requiredText_(payload.assessmentId, 'ID asesmen', 100);
+  const user = payload.currentUser || {};
+  if (user.role !== 'student' || String(user.userId || '') !== studentId) throw new Error('Identitas siswa tidak sesuai dengan sesi login.');
+  const attemptSheet = getSheet_('Attempts');
+  const attemptValues = attemptSheet.getDataRange().getValues();
+  if (!attemptValues.length) throw new Error('Data pengerjaan belum tersedia.');
+  const headers = attemptValues[0].map(String);
+  const col = function (name) { const index = headers.indexOf(name); if (index < 0) throw new Error('Kolom ' + name + ' tidak ditemukan pada Attempts.'); return index; };
+  let rowIndex = -1, attemptRow = null;
+  for (let i = 1; i < attemptValues.length; i++) {
+    if (String(attemptValues[i][col('attemptId')]) === attemptId &&
+        String(attemptValues[i][col('studentId')]) === studentId &&
+        String(attemptValues[i][col('assessmentId')]) === assessmentId) {
+      rowIndex = i; attemptRow = attemptValues[i]; break;
     }
   }
-  return { fileId: fileId, name: file.getName(), url: file.getUrl(), imageUrl: imageUrl, folder: '02 - Jawaban Siswa/' + assessmentId + '/' + safeAttemptId };
+  if (rowIndex < 0) throw new Error('Sesi pengerjaan tidak ditemukan untuk akun siswa ini.');
+  if (String(attemptRow[col('status')]) !== 'in_progress') throw new Error('Foto hanya dapat diunggah selama asesmen masih dikerjakan.');
+  const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
+  if (!assessment) throw new Error('Asesmen tidak ditemukan.');
+  const question = listRows_('Questions').find(function (item) {
+    return String(item.assessmentId) === assessmentId && String(item.questionId) === questionId;
+  });
+  if (!question) throw new Error('Soal tujuan unggahan tidak ditemukan pada asesmen ini.');
+  const fileName = (String(payload.fileName || 'jawaban.jpg').split(/[\\/]/).pop() || 'jawaban.jpg').slice(0, 150);
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, fileName);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  let file = null;
+  try {
+    const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+    const answerRoot = getOrCreateChildFolder_(root, '02 - Jawaban Siswa');
+    const assessmentFolder = getOrCreateChildFolder_(answerRoot, assessmentId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100));
+    const attemptFolder = getOrCreateChildFolder_(assessmentFolder, attemptId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100));
+    file = attemptFolder.createFile(blob);
+    const teacherEmail = String(assessment.createdBy || '').trim().toLowerCase();
+    [String(user.email || '').trim().toLowerCase(), teacherEmail].filter(function (email, index, all) {
+      return email && all.indexOf(email) === index;
+    }).forEach(function (email) {
+      try { file.addViewer(email); }
+      catch (shareError) { Logger.log('Akses foto jawaban tidak dapat diberikan ke ' + email + ': ' + shareError.message); }
+    });
+    const fileId = makeId_('FILE');
+    const imageUrl = 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.getId()) + '&sz=w1200';
+    appendRow_('Files', { fileId: fileId, attemptId: attemptId, studentId: studentId, questionId: questionId, driveFileId: file.getId(), fileUrl: file.getUrl(), createdAt: currentTimestamp_() });
+    const answersCol = col('answersJson');
+    const answers = parseJson_(attemptRow[answersCol], {});
+    const answer = answers[questionId] && typeof answers[questionId] === 'object' && !Array.isArray(answers[questionId])
+      ? answers[questionId] : { text: typeof answers[questionId] === 'string' ? answers[questionId] : '' };
+    answer.photos = Array.isArray(answer.photos) ? answer.photos : [];
+    answer.photos.push({ fileId: fileId, url: file.getUrl(), imageUrl: imageUrl, name: file.getName() });
+    answers[questionId] = answer;
+    attemptSheet.getRange(rowIndex + 1, answersCol + 1).setValue(JSON.stringify(answers));
+    SpreadsheetApp.flush();
+    return { fileId: fileId, name: file.getName(), url: file.getUrl(), imageUrl: imageUrl, folder: '02 - Jawaban Siswa/' + assessmentId + '/' + attemptId };
+  } catch (error) {
+    if (file) { try { file.setTrashed(true); } catch (trashError) { Logger.log('File unggahan gagal dibersihkan: ' + trashError.message); } }
+    throw error;
+  } finally { lock.releaseLock(); }
 }
+
