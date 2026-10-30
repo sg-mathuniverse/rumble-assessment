@@ -1292,6 +1292,8 @@ function listAttempts_(payload) {
       const assessment = assessments.find(function (item) { return item.assessmentId === attempt.assessmentId; });
       return Object.assign({}, attempt, {
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
+        subject: assessment ? String(assessment.subject || '') : '',
+        className: assessment ? String(assessment.className || '') : '',
         answers: parseJson_(attempt.answersJson, {}),
         questionScores: parseJson_(attempt.questionScoresJson, {}),
         questionDetails: details
