@@ -896,10 +896,14 @@ function listAssessments_(payload) {
     .filter(function (assessment) {
       if (!user) return false;
       if (user.role === 'student') {
-        const activeAttempt = listRows_('Attempts').some(function (attempt) {
-          return String(attempt.assessmentId) === String(assessment.assessmentId) && String(attempt.studentId) === String(user.userId) && String(attempt.status) === 'in_progress';
+        const studentAttempt = listRows_('Attempts').find(function (attempt) {
+          return String(attempt.assessmentId) === String(assessment.assessmentId) && String(attempt.studentId) === String(user.userId);
         });
-        try { if (activeAttempt) assertStudentAssessmentIdentity_(assessment, user); else assertStudentAssessmentAccess_(assessment, user); } catch (error) { return false; }
+        if (studentAttempt && String(studentAttempt.status) !== 'in_progress') {
+          try { assertStudentAssessmentIdentity_(assessment, user); } catch (error) { return false; }
+        } else {
+          try { if (studentAttempt && String(studentAttempt.status) === 'in_progress') assertStudentAssessmentIdentity_(assessment, user); else assertStudentAssessmentAccess_(assessment, user); } catch (error) { return false; }
+        }
       } else if (user.role === 'teacher' &&
           (!assessment.createdBy || String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase())) {
         return false;
@@ -914,6 +918,12 @@ function listAssessments_(payload) {
       item.questionCount = questions.filter(function (question) {
         return question.assessmentId === assessment.assessmentId;
       }).length;
+      if (user.role === 'student') {
+        const studentAttempt = listRows_('Attempts').find(function (attempt) {
+          return String(attempt.assessmentId) === String(assessment.assessmentId) && String(attempt.studentId) === String(user.userId);
+        });
+        item.attemptStatus = studentAttempt ? String(studentAttempt.status) : '';
+      }
       delete item.createdBy;
       return item;
     });
@@ -940,10 +950,11 @@ function getAssessment_(payload) {
   const user = payload.currentUser;
   if (!user) throw new Error('Identitas akun tidak tersedia.');
   if (user.role === 'student') {
-    const activeAttempt = listRows_('Attempts').some(function (attempt) {
-      return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === String(user.userId) && String(attempt.status) === 'in_progress';
+    const studentAttempt = listRows_('Attempts').find(function (attempt) {
+      return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === String(user.userId);
     });
-    if (activeAttempt) assertStudentAssessmentIdentity_(assessment, user);
+    if (studentAttempt && String(studentAttempt.status) !== 'in_progress') throw new Error('Asesmen ini sudah pernah dikerjakan.');
+    if (studentAttempt && String(studentAttempt.status) === 'in_progress') assertStudentAssessmentIdentity_(assessment, user);
     else assertStudentAssessmentAccess_(assessment, user);
   }
   else if (user.role === 'teacher' &&
@@ -1124,7 +1135,9 @@ function submitAttempt_(payload) {
       const started = new Date(previous.startedAt).getTime();
       const durationMs = Number(assessment.duration) * 60000;
       if (!isFinite(started) || !isFinite(durationMs) || durationMs <= 0) throw new Error('Waktu sesi pengerjaan tidak valid.');
-      if (Date.now() > started + durationMs + 30000) throw new Error('Waktu pengerjaan sudah habis. Jawaban tidak dapat dikirim terlambat.');
+      const remainingMs = started + durationMs - Date.now();
+      if (remainingMs > 8 * 60000) throw new Error('Pengumpulan jawaban hanya dapat dilakukan pada 8 menit terakhir. Silakan periksa jawaban kembali.');
+      if (remainingMs < -30000) throw new Error('Waktu pengerjaan sudah habis. Jawaban tidak dapat dikirim terlambat.');
     }
   const answers = payload.answers && typeof payload.answers === 'object' ? payload.answers : {};
   const questions = listRows_('Questions').filter(function (question) {
