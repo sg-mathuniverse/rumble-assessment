@@ -1283,6 +1283,8 @@ function listAttempts_(payload) {
             rubricLevels: parseJson_(question.rubricLevelsJson, []),
             subquestions: parseJson_(question.subquestionsJson, []),
             options: parseJson_(question.optionsJson, []),
+            pairs: parseJson_(question.pairsJson, []),
+            answer: payload.currentUser && payload.currentUser.role === 'teacher' ? parseJson_(question.answerJson, null) : undefined,
             imageUrl: question.imageUrl,
             optionImages: parseJson_(question.optionImagesJson, [])
           };
