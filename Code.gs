@@ -40,7 +40,7 @@ const TABLES = {
     'eventId', 'attemptId', 'studentId', 'eventType', 'eventAt', 'detailsJson'
   ],
   Files: [
-    'fileId', 'attemptId', 'studentId', 'driveFileId', 'fileUrl', 'createdAt'
+    'fileId', 'attemptId', 'studentId', 'questionId', 'driveFileId', 'fileUrl', 'createdAt'
   ]
 };
 
@@ -240,7 +240,10 @@ function routeAction_(action, payload) {
       assertStudentAssessmentIdentity_(assessment, user);
       const started = new Date(attempt.startedAt).getTime(), durationMs = Number(assessment.duration) * 60000;
       if (!isFinite(started) || !isFinite(durationMs) || Date.now() > started + durationMs) throw new Error('Waktu pengerjaan sudah habis. Foto tidak dapat diunggah.');
-      return uploadAnswerImage_(Object.assign({}, trusted, { assessmentId: assessment.assessmentId }));
+      const questionId = requiredText_(trusted.questionId, 'ID soal', 120);
+      const question = listRows_('Questions').find(function (item) { return String(item.questionId) === questionId && String(item.assessmentId) === String(assessment.assessmentId); });
+      if (!question || String(question.type) !== 'essay') throw new Error('Soal uraian tidak ditemukan untuk sesi ini.');
+      return uploadAnswerImage_(Object.assign({}, trusted, { assessmentId: assessment.assessmentId, teacherEmail: assessment.createdBy || '' }));
     }
   };
   if (!actions[action]) throw new Error('Unknown action: ' + action);
@@ -1262,6 +1265,7 @@ function submitAttempt_(payload) {
 function listAttempts_(payload) {
   const allQuestions = listRows_('Questions');
   const assessments = listRows_('Assessments');
+  const uploadedFiles = listRows_('Files');
   return listRows_('Attempts')
     .filter(function (attempt) {
       const matchesAssessment = !payload.assessmentId || attempt.assessmentId === payload.assessmentId;
@@ -1294,7 +1298,24 @@ function listAttempts_(payload) {
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
         subject: assessment ? String(assessment.subject || '') : '',
         className: assessment ? String(assessment.className || '') : '',
-        answers: parseJson_(attempt.answersJson, {}),
+        answers: (function () {
+          const answers = parseJson_(attempt.answersJson, {});
+          details.forEach(function (question) {
+            const saved = answers[question.id] && typeof answers[question.id] === 'object' ? answers[question.id] : {};
+            const savedPhotos = Array.isArray(saved.photos) ? saved.photos : [];
+            uploadedFiles.filter(function (file) {
+              return String(file.attemptId) === String(attempt.attemptId) &&
+                String(file.studentId) === String(attempt.studentId) &&
+                String(file.questionId || '') === String(question.id);
+            }).forEach(function (file) {
+              if (!savedPhotos.some(function (photo) { return String(photo.fileId) === String(file.fileId); })) {
+                savedPhotos.push({ fileId: file.fileId, url: file.fileUrl, imageUrl: file.driveFileId ? 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.driveFileId) + '&sz=w1200' : file.fileUrl, name: 'Foto jawaban' });
+              }
+            });
+            if (savedPhotos.length) { saved.photos = savedPhotos; answers[question.id] = saved; }
+          });
+          return answers;
+        })(),
         questionScores: parseJson_(attempt.questionScoresJson, {}),
         questionDetails: details
       });
@@ -1437,6 +1458,7 @@ function saveUser_(payload) {
  * Payload base64 dibatasi agar tidak menerima file terlalu besar.
  */
 function uploadAnswerImage_(payload) {
+  setupDatabase();
   if (!CONFIG.DRIVE_FOLDER_ID) throw new Error('Isi CONFIG.DRIVE_FOLDER_ID terlebih dahulu.');
   const mimeType = String(payload.mimeType || 'image/jpeg');
   const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
@@ -1447,6 +1469,7 @@ function uploadAnswerImage_(payload) {
 
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
+  const questionId = requiredText_(payload.questionId, 'ID soal', 120);
   const assessmentId = String(payload.assessmentId || 'Asesmen-Tanpa-ID').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
   const safeAttemptId = attemptId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
   const fileName = String(payload.fileName || 'jawaban.jpg').replace(/[\\/:*?"<>|]/g, '_').slice(0, 150);
@@ -1458,16 +1481,36 @@ function uploadAnswerImage_(payload) {
   const attemptFolder = getOrCreateChildFolder_(assessmentFolder, safeAttemptId);
   // Foto jawaban siswa sengaja tidak dibagikan melalui tautan domain/publik.
   const file = attemptFolder.createFile(blob);
+  const currentUser = payload.currentUser || {};
+  const viewerEmails = [currentUser.email, payload.teacherEmail].map(function (email) { return String(email || '').trim().toLowerCase(); }).filter(function (email, index, all) { return email && all.indexOf(email) === index; });
+  viewerEmails.forEach(function (email) { try { file.addViewer(email); } catch (shareError) { Logger.log('Tidak dapat memberi akses foto jawaban ke ' + email + ': ' + shareError.message); } });
   const fileId = makeId_('FILE');
+  const imageUrl = 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.getId()) + '&sz=w1200';
 
   appendRow_('Files', {
     fileId: fileId,
     attemptId: attemptId,
     studentId: studentId,
+    questionId: questionId,
     driveFileId: file.getId(),
     fileUrl: file.getUrl(),
     createdAt: currentTimestamp_()
   });
 
-  return { fileId: fileId, name: file.getName(), url: file.getUrl(), folder: '02 - Jawaban Siswa/' + assessmentId + '/' + safeAttemptId };
+  const attemptsSheet = getSheet_('Attempts');
+  const attemptValues = attemptsSheet.getDataRange().getValues();
+  const attemptHeaders = attemptValues[0].map(String);
+  const attemptIdCol = attemptHeaders.indexOf('attemptId'), studentIdCol = attemptHeaders.indexOf('studentId'), answersCol = attemptHeaders.indexOf('answersJson');
+  for (let rowIndex = 1; rowIndex < attemptValues.length; rowIndex++) {
+    if (String(attemptValues[rowIndex][attemptIdCol]) === attemptId && String(attemptValues[rowIndex][studentIdCol]) === studentId) {
+      const answers = parseJson_(attemptValues[rowIndex][answersCol], {});
+      const answer = answers[questionId] && typeof answers[questionId] === 'object' ? answers[questionId] : {};
+      answer.photos = Array.isArray(answer.photos) ? answer.photos : [];
+      answer.photos.push({ fileId: fileId, url: file.getUrl(), imageUrl: imageUrl, name: file.getName() });
+      answers[questionId] = answer;
+      attemptsSheet.getRange(rowIndex + 1, answersCol + 1).setValue(JSON.stringify(answers));
+      break;
+    }
+  }
+  return { fileId: fileId, name: file.getName(), url: file.getUrl(), imageUrl: imageUrl, folder: '02 - Jawaban Siswa/' + assessmentId + '/' + safeAttemptId };
 }
