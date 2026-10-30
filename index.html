@@ -604,7 +604,7 @@ function handleEquationPaste(event,el,kind,i,j){
   else if(kind==='libraryPassage'&&s.passages[i])s.passages[i].text=el.value;
   else if(kind==='statement'&&s.qs[i]?.subquestions)s.qs[i].subquestions[j]=el.value;
   else if(kind==='essaySubquestions'&&s.qs[i])s.qs[i].subquestions=el.value.split(String.fromCharCode(10)).filter(x=>x.trim());
-  else if(kind==='essayRubric'&&s.qs[i]){s.qs[i].rubricLevels=el.value.split(String.fromCharCode(10));s.qs[i]._rubricEdited=true;}
+  else if(kind==='essayRubric'&&s.qs[i])s.qs[i].rubric=el.value;
   else if(kind==='option'&&s.qs[i])s.qs[i].options[j]=el.value;
   else if(kind==='passage'&&s.meta)s.meta.passageText=el.value;
   else if(kind==='matchingLeft'&&s.qs[i]?.pairs?.[j])s.qs[i].pairs[j].left=el.value;
