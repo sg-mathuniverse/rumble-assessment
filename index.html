@@ -211,6 +211,8 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 .report-weight{font-size:12px;color:#52617a;font-weight:600}
 .report-answer{background:#f7f9fc;border-radius:9px;padding:10px;margin:10px 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .report-score-field{max-width:260px}
+ .subject-history{margin:14px 0}.subject-history>h3,.class-report-group>h3,.gradebook-section>h3{margin:14px 0 8px;color:#2f4778;font-size:16px}.teacher-feedback{margin:7px 0 0;color:#4d5f7c;font-size:13px;white-space:pre-wrap}.report-row{grid-template-columns:76px minmax(180px,1.5fr) minmax(100px,.8fr) 90px 112px}.report-key-empty{min-height:1px;background:transparent!important;padding:0!important}.report-row .report-score-cell{grid-column:5;justify-self:stretch}.report-final-summary{grid-template-columns:minmax(180px,.8fr) minmax(240px,2fr) minmax(190px,auto);align-items:end}.report-final-summary .btn{min-height:42px;white-space:normal}.gradebook-section{margin:18px 0;padding:16px;border:1px solid #e2e8f2;border-radius:13px;background:#fff}.gradebook-section h4{margin:6px 0 12px}.table-scroll{overflow-x:auto}.gradebook-table{width:100%;border-collapse:collapse;min-width:620px}.gradebook-table th,.gradebook-table td{padding:10px;border-bottom:1px solid #e5eaf2;text-align:center;white-space:nowrap}.gradebook-table th:first-child,.gradebook-table td:first-child{text-align:left;position:sticky;left:0;background:#fff}.gradebook-table th small{display:block;color:#78849a;font-weight:400}.report-question-text .math-content{white-space:pre-wrap}
+@media(max-width:760px){.report-row{grid-template-columns:1fr 1fr}.report-row .report-score-cell{grid-column:2}.report-final-summary{grid-template-columns:1fr}}
  .report-breadcrumb{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:-8px 0 18px;color:#68758b;font-size:13px}
 .report-breadcrumb button{border:0;background:none;color:#3157a4;padding:0;cursor:pointer;font:inherit}
 .report-breadcrumb b{color:#263653}
@@ -237,11 +239,11 @@ const demo=[{id:'ASM-101',title:'Persamaan Kuadrat',subject:'Matematika',classNa
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(x){let e=document.getElementById('toast');e.textContent=x;e.style.display='block';e.classList.remove('toast-saving','toast-saved','toast-error');if(/^Menyimpan jawaban/.test(x))e.classList.add('toast-saving');else if(/^Jawaban tersimpan/.test(x))e.classList.add('toast-saved');else if(/belum tersimpan|Gagal menyimpan/.test(x))e.classList.add('toast-error');if(window.__toastTimer)clearTimeout(window.__toastTimer);window.__toastTimer=setTimeout(()=>{e.style.display='none'},3200)}
 function questionAnswerState(q){const v=s.answers[String(q&&q.id||'')];if(v===undefined||v===null||v==='')return 'empty';const filled=x=>Array.isArray(x)?x.length>0:x!==undefined&&x!==null&&String(x).trim()!=='';if(q&&q.type==='true_false_multi'){const total=(q.subquestions||[]).length,done=Array.from({length:total},(_,i)=>filled(v&&v[String(i)] )).filter(Boolean).length;return !done?'empty':done<total?'partial':'answered'}if(q&&q.type==='matching'){const total=(q.pairs||[]).length,done=Array.from({length:total},(_,i)=>filled(v&&v[String(i)])).filter(Boolean).length;return !done?'empty':done<total?'partial':'answered'}if(q&&q.type==='essay'&&Array.isArray(q.subquestions)&&q.subquestions.length){const total=q.subquestions.length,done=Array.from({length:total},(_,i)=>filled(v&&v[String(i)])).filter(Boolean).length;return !done?'empty':done<total?'partial':'answered'}if(Array.isArray(v))return v.length?'answered':'empty';if(typeof v==='object'){const hasText=filled(v.text)||filled(v.photos&&v.photos.length?v.photos:'');return hasText?'answered':Object.keys(v).some(k=>filled(v[k]))?'partial':'empty'}return filled(v)?'answered':'empty'}
-function go(p){s.page=p;render();if(p==='reports'){s.selectedReportAssessmentId='';s.selectedReportAttemptId='';loadAttempts();loadStudents()}if(p==='progress')loadAttempts();if(p==='students')loadStudents();if(p==='bundles')loadBundles()}
+function go(p){s.page=p;render();if(p==='reports'){s.selectedReportAssessmentId='';s.selectedReportAttemptId='';loadAttempts();loadStudents()}if(p==='progress')loadAttempts();if(p==='students')loadStudents();if(p==='bundles')loadBundles();if(p==='gradebook'){loadAttempts();loadStudents()}}
 function formatLocalDateTime(value){if(!value)return '—';const date=new Date(value);if(!isFinite(date.getTime()))return String(value);return date.toLocaleString('id-ID',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function head(k,t,d,b=''){return '<div class="head"><div><div class="kicker">'+k+'</div><h2>'+t+'</h2><p>'+d+'</p></div>'+b+'</div>'}
 function stat(l,n,d){return '<div class="card"><div class="statlabel">'+l+'</div><div class="num">'+n+'</div><div class="muted">'+d+'</div></div>'}
-function nav(){let a=s.role==='teacher' ? [['overview','▦ Ringkasan'],['bundles','▣ Bank soal'],['assessments','▤ Jadwal & asesmen'],['students','♙ Siswa'],['reports','▥ Analitik'],['settings','⚙ Pengaturan']] : [['progress','↗ Progres saya'],['assessments','▤ Jadwal ujian'],['settings','⚙ Pengaturan']];return a.map(function(x){const label=x[0]==='assessments'&&s.role==='student'?x[1]+' <span class="nav-count">'+(Array.isArray(s.items)?s.items.length:0)+'</span>':x[1];return '<button class="'+(s.page===x[0]?'active':'')+'" onclick="go(\''+x[0]+'\')">'+label+'</button>'}).join('')}
+function nav(){let a=s.role==='teacher' ? [['overview','▦ Ringkasan'],['bundles','▣ Bank soal'],['assessments','▤ Jadwal & asesmen'],['students','♙ Siswa'],['reports','▥ Analitik'],['gradebook','▧ Rekap Nilai'],['settings','⚙ Pengaturan']] : [['progress','↗ Progres saya'],['assessments','▤ Jadwal ujian'],['settings','⚙ Pengaturan']];return a.map(function(x){const availableCount=x[0]==='assessments'&&s.role==='student'?(Array.isArray(s.items)?s.items.filter(item=>!(s.attempts||[]).some(at=>String(at.assessmentId)===String(item.assessmentId||item.id)&&String(at.status)!=='in_progress')).length:0):0;const label=x[0]==='assessments'&&s.role==='student'?x[1]+' <span class="nav-count">'+availableCount+'</span>':x[1];return '<button class="'+(s.page===x[0]?'active':'')+'" onclick="go(\''+x[0]+'\')">'+label+'</button>'}).join('')}
 function rows(){
  if(!s.loadedFromServer)return s.assessmentLoadError?'<div class="notice">Daftar asesmen gagal dimuat: '+esc(s.assessmentLoadError)+' <button class="btn" onclick="loadAssessments()">Coba lagi</button></div>':'<p class="muted">Mengambil asesmen dari server…</p>';
  const source=Array.isArray(s.items)?s.items:[];
@@ -290,19 +292,15 @@ function reportScoreRecommendation(q,val){
 }
 function reportDisplayAnswer(q,val){
  if(val===undefined||val===null||val==='')return '(Tidak dijawab)';
- if(q.type==='matching'){
-  const pairs=Array.isArray(q.pairs)?q.pairs:[],obj=val&&typeof val==='object'?val:{};
-  return pairs.map((p,i)=>(i+1)+'. '+(obj[String(i)]===undefined?'—':String.fromCharCode(65+Number(obj[String(i)])))).join('\n');
- }
- if(q.type==='true_false_multi'){
-  const items=Array.isArray(q.subquestions)?q.subquestions:[],obj=val&&typeof val==='object'?val:{};
-  return items.map((item,i)=>(i+1)+'. '+String(obj[String(i)]||'—')).join('\n');
- }
+ if(q.type==='matching'){const pairs=Array.isArray(q.pairs)?q.pairs:[],obj=val&&typeof val==='object'?val:{};return pairs.map((p,i)=>(i+1)+'. '+(obj[String(i)]===undefined?'—':String.fromCharCode(65+Number(obj[String(i)])))).join('\n')}
+ if(q.type==='true_false_multi'){const items=Array.isArray(q.subquestions)?q.subquestions:[],obj=val&&typeof val==='object'?val:{};return items.map((item,i)=>(i+1)+'. '+String(obj[String(i)]||'—')).join('\n')}
+ if(q.type==='essay'&&val&&typeof val==='object'){const lines=[];if(val.text)lines.push(String(val.text));(q.subquestions||[]).forEach((sub,i)=>{const answer=val[String(i)];lines.push('Subpertanyaan '+(i+1)+': '+String(sub));lines.push('Jawaban: '+(answer===undefined||answer===''?'(Kosong)':String(answer)))});return lines.join('\n')||'(Tidak dijawab)'}
  if(Array.isArray(val)&&q.type==='multi_select')return val.map(x=>String.fromCharCode(65+Number(x))).join(', ')||'(Tidak dijawab)';
  if(q.type==='multiple_choice')return String.fromCharCode(65+Number(val));
  if(val&&typeof val==='object')return String(val.text||'(Jawaban tersimpan)');
  return String(val);
 }
+function reportAnswerPhotos(val){return val&&typeof val==='object'&&Array.isArray(val.photos)?val.photos:[]}
 function reportCorrectAnswer(q){
  if(q.type==='essay'||q.type==='matching')return '';
  if(q.type==='multi_select')return (Array.isArray(q.answer)?q.answer:[]).map(x=>String.fromCharCode(65+Number(x))).join(', ');
@@ -312,34 +310,33 @@ function reportCorrectAnswer(q){
  return '';
 }
 function reports(){
- const attempts=Array.isArray(s.attempts)?s.attempts:[];
- const students=Array.isArray(s.students)?s.students:[];
+ const attempts=Array.isArray(s.attempts)?s.attempts:[],students=Array.isArray(s.students)?s.students:[];
  const groups={};attempts.forEach(a=>{const key=String(a.assessmentId||'');if(!groups[key])groups[key]=[];groups[key].push(a)});
- const ids=Object.keys(groups),aid=s.selectedReportAssessmentId||'',list=groups[aid]||[],attemptId=s.selectedReportAttemptId||'',active=list.find(a=>String(a.attemptId)===attemptId);
- const title=(list[0]&&list[0].assessmentTitle)||aid;
- const studentName=active?((students.find(u=>String(u.userId)===String(active.studentId))||{}).name||active.studentId):'';
+ const ids=Object.keys(groups),aid=s.selectedReportAssessmentId||'',list=groups[aid]||[],active=list.find(a=>String(a.attemptId)===String(s.selectedReportAttemptId||''));
+ const title=(list[0]&&list[0].assessmentTitle)||aid,studentName=active?((students.find(u=>String(u.userId)===String(active.studentId))||{}).name||active.studentId):'';
  let breadcrumb='<div class="report-breadcrumb"><span>Ruang kerja</span><span>›</span><button onclick="clearReportAssessment()">Daftar asesmen</button>';
  if(aid)breadcrumb+='<span>›</span><button onclick="clearReportAttempt()">'+esc(title)+'</button>';
- if(active)breadcrumb+='<span>›</span><b>Skor perbutir '+esc(studentName)+'</b>';
- breadcrumb+='</div>';
+ if(active)breadcrumb+='<span>›</span><b>Skor perbutir '+esc(studentName)+'</b>';breadcrumb+='</div>';
  if(active){
   const answers=active.answers||{},saved=active.questionScores||{},qs=active.questionDetails||[];
-  let rows=qs.map((q,i)=>{
-   const val=answers[q.id],display=reportDisplayAnswer(q,val),photos=val&&typeof val==='object'&&Array.isArray(val.photos)?val.photos:[];
-   const recommended=reportScoreRecommendation(q,val),existing=Object.prototype.hasOwnProperty.call(saved,q.id)?saved[q.id]:recommended;
-   const maximum=Number(q.points)||0,answerKey=reportCorrectAnswer(q);
-   const keyCell=answerKey?'<div class="report-key"><b>Kunci</b><span>'+esc(answerKey)+'</span></div>':'';
-   return '<section class="report-question"><div class="report-row"><div class="report-question-label">Soal '+(i+1)+'<small>'+esc(q.type)+'</small></div><div class="report-student-answer"><b>Jawaban murid</b><span>'+esc(display)+'</span>'+(photos.length?'<div class="essay-photo-list">'+photos.map((photo,k)=>'<a href="'+esc(photo.url)+'" target="_blank" rel="noopener">'+esc(photo.name||('Foto jawaban '+(k+1)))+'</a>').join('')+'</div>':'')+'</div>'+keyCell+'<div class="report-weight-cell"><b>Bobot</b><span>'+maximum+' poin</span></div><div class="report-score-cell"><label for="qscore_'+esc(active.attemptId)+'_'+esc(q.id)+'">Skor</label><input class="question-score-input" id="qscore_'+esc(active.attemptId)+'_'+esc(q.id)+'" type="number" min="0" max="'+maximum+'" step="0.5" value="'+esc(existing===null?'':existing)+'" placeholder="—" '+(q.type==='essay'?'':'')+'></div></div>'+(q.text?'<details class="report-question-text"><summary>Lihat teks soal</summary><p>'+esc(q.text)+'</p></details>':'')+(recommended!==null?'<small class="report-recommendation">Rekomendasi sistem: '+Number(recommended.toFixed(2))+' / '+maximum+' poin</small>':'<small class="report-recommendation">Soal uraian: skor ditentukan guru.</small>')+'</section>';
+  const rows=qs.map((q,i)=>{
+   const val=answers[q.id],display=reportDisplayAnswer(q,val),photos=reportAnswerPhotos(val),recommended=reportScoreRecommendation(q,val),existing=Object.prototype.hasOwnProperty.call(saved,q.id)?saved[q.id]:recommended,maximum=Number(q.points)||0,answerKey=reportCorrectAnswer(q);
+   const keyCell=answerKey?'<div class="report-key"><b>Kunci</b><span>'+esc(answerKey)+'</span></div>':'<div class="report-key report-key-empty"></div>';
+   const photoHtml=photos.length?'<div class="essay-photo-list">'+photos.map((photo,k)=>'<a href="'+esc(photo.url)+'" target="_blank" rel="noopener">'+esc(photo.name||('Foto jawaban '+(k+1)))+'</a>').join('')+'</div>':'';
+   const questionText=q.text||'',subHtml=(q.subquestions||[]).map((sub,j)=>'<p><b>Subpertanyaan '+(j+1)+'.</b> <span class="math-content">'+esc(sub)+'</span></p>').join('');
+   const textDetails=questionText||subHtml?'<details class="report-question-text"><summary>Lihat teks soal</summary><div class="math-content">'+esc(questionText)+'</div>'+subHtml+'</details>':'';
+   return '<section class="report-question"><div class="report-row"><div class="report-question-label">Soal '+(i+1)+'<small>'+esc(q.type)+'</small></div><div class="report-student-answer"><b>Jawaban murid</b><span>'+esc(display)+'</span>'+photoHtml+'</div>'+keyCell+'<div class="report-weight-cell"><b>Bobot</b><span>'+maximum+' poin</span></div><div class="report-score-cell"><label for="qscore_'+esc(active.attemptId)+'_'+esc(q.id)+'">Skor</label><input class="question-score-input" id="qscore_'+esc(active.attemptId)+'_'+esc(q.id)+'" type="number" min="0" max="'+maximum+'" step="0.5" value="'+esc(existing===null?'':existing)+'" placeholder="—"></div></div>'+textDetails+(recommended!==null?'<small class="report-recommendation">Rekomendasi sistem: '+Number(recommended.toFixed(2))+' / '+maximum+' poin</small>':'<small class="report-recommendation">Soal uraian: skor ditentukan guru.</small>')+'</section>';
   }).join('');
   const total=qs.reduce((sum,q)=>sum+(Number(saved[q.id]??reportScoreRecommendation(q,answers[q.id])??0)||0),0),max=qs.reduce((sum,q)=>sum+(Number(q.points)||0),0);
-  return head('ANALITIK','Skor perbutir · '+esc(studentName),'Periksa jawaban dan sesuaikan skor rekomendasi sistem.')+breadcrumb+'<div class="report-final-summary"><div><small>Nilai akhir sementara</small><strong>'+total.toFixed(2)+' / '+max+' poin</strong></div><div class="field"><label>Umpan balik guru</label><textarea id="gradeFeedback_'+esc(active.attemptId)+'" rows="3">'+esc(active.teacherFeedback||'')+'</textarea></div><button class="btn primary" onclick="saveGrade(\''+esc(active.attemptId)+'\')">Simpan skor dan umpan balik</button></div><div class="report-questions">'+rows+'</div>';
+  return head('ANALITIK','Skor perbutir · '+esc(studentName),'Periksa jawaban dan sesuaikan skor rekomendasi sistem.')+breadcrumb+'<div class="report-questions">'+rows+'</div><div class="report-final-summary"><div><small>Nilai akhir murid</small><strong>'+total.toFixed(2)+' / '+max+' poin</strong></div><div class="field"><label>Umpan balik guru</label><textarea id="gradeFeedback_'+esc(active.attemptId)+'" rows="3">'+esc(active.teacherFeedback||'')+'</textarea></div><button class="btn primary" onclick="saveGrade(\''+esc(active.attemptId)+'\')">Simpan skor dan umpan balik</button></div>';
  }
  if(aid){
-  const studentsHtml=list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),name=user?user.name:a.studentId,score=a.status==='graded'&&Number(a.maxScore)>0?Number(a.score)+' / '+Number(a.maxScore)+' poin':'Belum dinilai';return '<button class="report-student-row" onclick="chooseReportAttempt(\''+esc(a.attemptId)+'\')"><span><b>'+esc(name||'Murid')+'</b><small>'+esc(a.studentId||'')+' · '+esc(formatLocalDateTime(a.submittedAt))+'</small></span><span class="pill '+(a.status==='graded'?'live':'')+'">'+esc(score)+'</span></button>'}).join('');
-  return head('ANALITIK',esc(title),'Pilih murid yang ingin diperiksa.')+breadcrumb+'<div class="card"><div class="actions"><h3>Daftar murid</h3><button class="btn" onclick="clearReportAssessment()">← Daftar asesmen</button></div>'+(list.length?studentsHtml:'<p class="muted">Belum ada murid yang mengerjakan asesmen ini.</p>')+'</div>';
+  const studentRows=list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),name=user?user.name:a.studentId,score=a.status==='graded'&&Number(a.maxScore)>0?Number(a.score)+' / '+Number(a.maxScore)+' poin':'Belum dinilai';return '<button class="report-student-row" onclick="chooseReportAttempt(\''+esc(a.attemptId)+'\')"><span><b>'+esc(name||'Murid')+'</b><small>'+esc(a.studentId||'')+' · '+esc(formatLocalDateTime(a.submittedAt))+'</small></span><span class="pill '+(a.status==='graded'?'live':'')+'">'+esc(score)+'</span></button>'}).join('');
+  return head('ANALITIK',esc(title),'Pilih murid yang ingin diperiksa.')+breadcrumb+'<div class="card"><div class="actions"><h3>Daftar murid</h3><button class="btn" onclick="clearReportAssessment()">← Daftar asesmen</button></div>'+(studentRows||'<p class="muted">Belum ada murid yang mengerjakan asesmen ini.</p>')+'</div>';
  }
- const cards=ids.map(id=>{const group=groups[id],a=group[0],graded=group.filter(x=>x.status==='graded').length;return '<button class="report-assessment-card" onclick="chooseReportAssessment(\''+esc(id)+'\')"><span class="report-assessment-title">'+esc(a.assessmentTitle||id)+'</span><span class="report-assessment-meta">'+group.length+' murid mengerjakan · '+graded+' sudah dinilai</span></button>'}).join('');
- return head('ANALITIK','Daftar asesmen','Pilih asesmen untuk melihat daftar murid dan memeriksa skor.')+breadcrumb+'<div class="card"><div class="actions"><h3>Daftar asesmen</h3><button class="btn" onclick="loadAttempts()">Muat ulang</button></div>'+(!s.attemptsLoaded?'<p class="muted">Memuat data pengerjaan...</p>':cards||'<p class="muted">Belum ada pengerjaan siswa yang masuk.</p>')+'</div>';
+ const byClass={};ids.forEach(id=>{const group=groups[id],a=group[0],cls=String(a.className||'Kelas belum diatur');if(!byClass[cls])byClass[cls]=[];byClass[cls].push({id:id,group:group})});
+ const cards=Object.keys(byClass).sort().map(cls=>'<section class="class-report-group"><h3>'+esc(cls)+'</h3>'+byClass[cls].map(item=>{const group=item.group,a=group[0],graded=group.filter(x=>x.status==='graded').length;return '<button class="report-assessment-card" onclick="chooseReportAssessment(\''+esc(item.id)+'\')"><span class="report-assessment-title">'+esc(a.assessmentTitle||item.id)+'</span><span class="report-assessment-meta">'+group.length+' murid mengerjakan · '+graded+' sudah dinilai</span></button>'}).join('')+'</section>').join('');
+ return head('ANALITIK','Daftar asesmen','Pilih asesmen berdasarkan kelas untuk melihat daftar murid.')+breadcrumb+'<div class="card"><div class="actions"><h3>Daftar asesmen per kelas</h3><button class="btn" onclick="loadAttempts()">Muat ulang</button></div>'+(!s.attemptsLoaded?'<p class="muted">Memuat data pengerjaan...</p>':cards||'<p class="muted">Belum ada pengerjaan siswa yang masuk.</p>')+'</div>';
 }
 function chooseReportAssessment(id){s.selectedReportAssessmentId=id;s.selectedReportAttemptId='';render()}
 function clearReportAssessment(){s.selectedReportAssessmentId='';s.selectedReportAttemptId='';render()}
@@ -360,39 +357,20 @@ async function saveGrade(id){
  catch(e){toast('Gagal menyimpan nilai: '+e.message)}
 }
 
-function progress() {
-  const attempts = Array.isArray(s.attempts) ? s.attempts : [];
-  const graded = attempts.filter(a => a.status === 'graded' && Number(a.maxScore) > 0);
-  const average = graded.length
-    ? Math.round(graded.reduce((sum, a) => sum + (Number(a.score) || 0) / Number(a.maxScore) * 100, 0) / graded.length)
-    : null;
-  const statsHtml = '<div class="grid stats">'
-    + stat('Pengerjaan terkirim', String(attempts.length), 'Riwayat akun ini')
-    + stat('Sudah dinilai', String(graded.length), 'Nilai telah tersedia')
-    + stat('Rata-rata nilai', average === null ? '—' : average + '%', 'Dari pengerjaan yang dinilai')
-    + stat('Perlu diperiksa', String(attempts.filter(a => a.status === 'needs_review').length), 'Menunggu koreksi guru')
-    + '</div>';
-  const rows = attempts.map(function (a) {
-    const score = a.status === 'graded' && Number(a.maxScore) > 0
-      ? Math.round(Number(a.score) / Number(a.maxScore) * 100) + '%'
-      : '—';
-    const statusLabel = a.status === 'graded' ? 'Sudah dinilai' : 'Menunggu koreksi';
-    const pillClass = a.status === 'graded' ? 'live' : '';
-    return '<div class="listitem"><div class="symbol">✓</div><div class="grow"><b>'
-      + esc(a.assessmentTitle || a.assessmentId || 'Asesmen')
-      + '</b><small>' + esc(formatLocalDateTime(a.submittedAt))
-      + '</small></div><span class="pill ' + pillClass + '">'
-      + esc(statusLabel) + '</span><strong>' + score + '</strong></div>';
-  }).join('');
-  const history = !s.attemptsLoaded
-    ? '<p class="muted">Memuat riwayat…</p>'
-    : !attempts.length
-      ? '<p class="muted">Belum ada pengerjaan yang tercatat pada akun ini.</p>'
-      : rows;
-  return head('RUANG SISWA', 'Perkembangan belajarku', 'Lihat riwayat pengerjaan dan nilai yang sudah dinilai.')
-    + statsHtml
-    + '<div class="card"><div class="actions"><h3>Riwayat asesmen</h3><button class="btn" onclick="loadAttempts()">Muat ulang</button></div>'
-    + history + '</div>';
+function progress(){
+ const attempts=Array.isArray(s.attempts)?s.attempts:[],graded=attempts.filter(a=>a.status==='graded'&&Number(a.maxScore)>0);
+ const average=graded.length?Math.round(graded.reduce((sum,a)=>sum+(Number(a.score)||0)/Number(a.maxScore)*100,0)/graded.length):null;
+ const statsHtml='<div class="grid stats">'+stat('Pengerjaan terkirim',String(attempts.length),'Riwayat akun ini')+stat('Sudah dinilai',String(graded.length),'Nilai telah tersedia')+stat('Rata-rata nilai',average===null?'—':average,'Dari pengerjaan yang dinilai')+stat('Perlu diperiksa',String(attempts.filter(a=>a.status==='needs_review').length),'Menunggu koreksi guru')+'</div>';
+ const groups={};attempts.forEach(a=>{const subject=String(a.subject||'Mata pelajaran lainnya');if(!groups[subject])groups[subject]=[];groups[subject].push(a)});
+ const history=!s.attemptsLoaded?'<p class="muted">Memuat riwayat…</p>':!attempts.length?'<p class="muted">Belum ada pengerjaan yang tercatat pada akun ini.</p>':Object.keys(groups).sort().map(subject=>'<section class="subject-history"><h3>'+esc(subject)+'</h3>'+groups[subject].map(a=>{const score=a.status==='graded'&&Number(a.maxScore)>0?String(Math.round(Number(a.score)/Number(a.maxScore)*100)):'—';return '<div class="listitem"><div class="symbol">✓</div><div class="grow"><b>'+esc(a.assessmentTitle||a.assessmentId||'Asesmen')+'</b><small>'+esc(formatLocalDateTime(a.submittedAt))+'</small>'+(a.status==='graded'&&a.teacherFeedback?'<p class="teacher-feedback"><b>Umpan balik guru:</b> '+esc(a.teacherFeedback)+'</p>':'')+'</div><span class="pill '+(a.status==='graded'?'live':'')+'">'+(a.status==='graded'?'Sudah dinilai':'Menunggu koreksi')+'</span><strong>'+score+'</strong></div>'}).join('')+'</section>').join('');
+ return head('RUANG SISWA','Perkembangan belajarku','Lihat riwayat pengerjaan dan nilai yang sudah dinilai.')+statsHtml+'<div class="card"><div class="actions"><h3>Riwayat asesmen</h3><button class="btn" onclick="loadAttempts()">Muat ulang</button></div>'+history+'</div>';
+}
+function gradebook(){
+ const attempts=Array.isArray(s.attempts)?s.attempts:[],students=Array.isArray(s.students)?s.students:[];
+ if(!s.attemptsLoaded)return head('REKAP NILAI','Rekap nilai per kelas','Memuat hasil pengerjaan...')+'<div class="card">Memuat data...</div>';
+ const groups={};attempts.forEach(a=>{const key=String(a.className||'Kelas belum diatur')+'||'+String(a.assessmentId||'');if(!groups[key])groups[key]=[];groups[key].push(a)});
+ const sections=Object.keys(groups).sort().map(key=>{const list=groups[key],first=list[0],qs=first.questionDetails||[];return '<section class="gradebook-section"><h3>'+esc(first.className||'Kelas belum diatur')+' · '+esc(first.subject||'Mata pelajaran lainnya')+'</h3><h4>'+esc(first.assessmentTitle||first.assessmentId)+'</h4><div class="table-scroll"><table class="gradebook-table"><thead><tr><th>Nama murid</th>'+qs.map((q,i)=>'<th>Soal '+(i+1)+'<small>'+Number(q.points||0)+' poin</small></th>').join('')+'<th>Nilai akhir</th></tr></thead><tbody>'+list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),scores=a.questionScores||{};return '<tr><td>'+esc(user?user.name:a.studentId)+'</td>'+qs.map(q=>'<td>'+((a.status==='graded'||a.status==='needs_review')&&scores[q.id]!==undefined?esc(scores[q.id]):'—')+'</td>').join('')+'<td><b>'+(a.status==='graded'&&Number(a.maxScore)>0?Math.round(Number(a.score)/Number(a.maxScore)*100):'—')+'</b></td></tr>'}).join('')+'</tbody></table></div></section>'}).join('');
+ return head('REKAP NILAI','Rekap nilai per kelas','Tabel skor per butir untuk setiap murid, dikelompokkan berdasarkan kelas dan asesmen.')+(sections||'<div class="card">Belum ada data pengerjaan yang dapat direkap.</div>');
 }
 function settings(){return head('Konfigurasi','Koneksi aplikasi','Rumble Assessment menggunakan Apps Script HTML Service.')+'<div class="card"><h3>Status backend</h3><p class="muted">Halaman ini berjalan melalui Apps Script. Koneksi menggunakan google.script.run sehingga tidak memerlukan URL API di browser.</p><div class="actions"><button class="btn primary" onclick="testApi()">Uji koneksi</button></div><div class="notice">Akses aplikasi tetap dibatasi oleh pengaturan deployment Apps Script. Sebelum menggunakan data siswa asli, pastikan izin setiap peran telah diterapkan di sisi server.</div></div>'}
 function newBundle(){s.page='bundles';s.bundleEditorOpen=true;s.assessmentEditorOpen=false;s.assessmentFromBundle=false;s.sourceBundleId='';s.sourceBundleTitle='';s.pendingImageDeletes=[];s.editorMode='bundle';s.editingBundleId=null;s.editingId=null;s.meta={title:'',subject:'Matematika',description:'',tpCode:'',passageText:'',passageImageUrl:''};s.passages=[];s.qs=[{type:'multiple_choice',text:'',points:1,options:['','','','',''],optionImages:[],answer:'0',imageUrl:'',subquestions:[],rubricLevels:[],passageId:''}];render();setTimeout(function(){document.getElementById('editor')?.scrollIntoView({behavior:'smooth'})},0)}
@@ -499,7 +477,8 @@ let answerSaveTimeout=null,answerSaveInFlight=false,answerSaveAgain=false;
 function setEssayText(id,value){const current=s.answers[id]&&typeof s.answers[id]==='object'?s.answers[id]:{};current.text=value;s.answers[id]=current;scheduleAnswerSave()}
 function scheduleAnswerSave(){updateAnswerProgress();if(s.role!=='student'||!s.activeAttempt||!s.currentAssessment)return;if(answerSaveTimeout)clearTimeout(answerSaveTimeout);answerSaveTimeout=setTimeout(saveAnswersNow,550)}
 async function saveAnswersNow(){if(answerSaveTimeout){clearTimeout(answerSaveTimeout);answerSaveTimeout=null}if(s.role!=='student'||!s.activeAttempt||!s.currentAssessment)return;if(answerSaveInFlight){answerSaveAgain=true;return}answerSaveInFlight=true;answerSaveAgain=false;const a=(s.currentAssessment.assessment||{});toast('Menyimpan jawaban…');try{const r=await api('saveAttempt',{assessmentId:a.assessmentId||a.id,attemptId:s.activeAttempt.attemptId,answers:s.answers});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Gagal menyimpan');toast('Jawaban tersimpan otomatis · '+new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}));}catch(e){console.warn('Autosave:',e.message);toast('Jawaban belum tersimpan. Periksa koneksi.')}finally{answerSaveInFlight=false;if(answerSaveAgain){answerSaveAgain=false;saveAnswersNow()}}}
-function toggleStudentQuestion(event,details){if(event)event.preventDefault();const shouldOpen=!details.open;document.querySelectorAll('.student-question-accordion').forEach(function(item){item.open=false});if(shouldOpen){details.open=true;requestAnimationFrame(function(){details.scrollIntoView({behavior:'smooth',block:'start'})})}}
+function scrollQuestionBelowHeader(el){if(!el)return;requestAnimationFrame(function(){const sticky=document.querySelector('.exam-sticky-header');const offset=(sticky?sticky.getBoundingClientRect().height:0)+18;const target=el.getBoundingClientRect().top+(window.scrollY||window.pageYOffset)-offset;window.scrollTo({top:Math.max(0,target),behavior:'smooth'})})}
+function toggleStudentQuestion(event,details){if(event)event.preventDefault();const shouldOpen=!details.open;document.querySelectorAll('.student-question-accordion').forEach(function(item){item.open=false});if(shouldOpen){details.open=true;scrollQuestionBelowHeader(details)}}
 function restoreStudentAnswers(){const qs=(s.currentAssessment&&s.currentAssessment.questions)||[];qs.forEach(function(q){const id=String(q.id||''),v=s.answers[id],card=document.getElementById('question_'+id);if(v===undefined||!card)return;if(q.type==='multiple_choice'||q.type==='multi_select'){card.querySelectorAll('input[name="answer_'+id+'"]').forEach(function(input){input.checked=Array.isArray(v)?v.map(String).includes(String(input.value)):String(v)===String(input.value)})}else if(q.type==='true_false'){card.querySelectorAll('input[name="answer_'+id+'"]').forEach(function(input){input.checked=String(v)===String(input.value)})}else if(q.type==='true_false_multi'){card.querySelectorAll('input[type="radio"]').forEach(function(input){const m=input.name.match(/_([0-9]+)$/);if(m&&v&&typeof v==='object')input.checked=String(v[m[1]])===String(input.value)})}else if(q.type==='essay'){if(v&&typeof v==='object'){const main=card.querySelector('.essay-answer-field');if(main)main.value=v.text||'';card.querySelectorAll('textarea[data-essay-sub-index]').forEach(function(input){input.value=v[input.dataset.essaySubIndex]||''})}}if(q.type==='matching'&&v&&typeof v==='object'){card.querySelectorAll('select[data-sub-index]').forEach(function(input){input.value=v[input.dataset.subIndex]===undefined?'':String(v[input.dataset.subIndex])})}if(v&&typeof v==='object'&&Array.isArray(v.photos))setEssayPhotoList(id,v.photos)});updateAnswerProgress()}
 function setEssayPhotoList(id,photos){const list=document.getElementById('essayPhotos_'+id);if(!list)return;list.innerHTML=(photos||[]).map(function(photo,index){return '<div>📎 <a href="'+esc(photo.url)+'" target="_blank" rel="noopener">'+esc(photo.name||('Foto jawaban '+(index+1)))+'</a> <span class="muted">— terunggah</span></div>'}).join('')}
 async function uploadEssayPhoto(event,id){
@@ -518,7 +497,7 @@ function setAnswer(id,value,checked,multi){
  else s.answers[id]=value;
  scheduleAnswerSave();
 }
-function jumpToQuestion(target){const el=document.getElementById(target);if(el){document.querySelectorAll('.student-question-accordion').forEach(function(item){item.open=false});if(el.tagName==='DETAILS')el.open=true;el.scrollIntoView({behavior:'smooth',block:'start'})}}
+function jumpToQuestion(target){const el=document.getElementById(target);if(el){document.querySelectorAll('.student-question-accordion').forEach(function(item){item.open=false});if(el.tagName==='DETAILS')el.open=true;scrollQuestionBelowHeader(el)}}
 function updateAnswerProgress(){
  const qs=(s.currentAssessment&&s.currentAssessment.questions)||[];
  const answered=qs.filter(q=>questionAnswerState(q)==='answered').length;
@@ -701,7 +680,7 @@ async function loadCurrentUser(){
 }
 
 async function retryAuth(){s.authChecked=false;s.authReason='';render();await loadCurrentUser()}
-function render(){if(!s.authChecked||!s.authenticated||!s.currentUser){document.getElementById('app').innerHTML=renderAccessGate();return}let p=s.page,c=p==='overview'?overview():p==='bundles'?bundlesPage():p==='assessments'?assessments():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='progress'?progress():settings();const isStudentExam=s.page==='detail'&&s.role==='student';document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Belajar, ukur, tumbuh.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Aman · Terukur · Inklusif</footer></aside><main class="main">'+(isStudentExam?'':'<header class="top"><span class="muted">Ruang kerja / '+esc(p)+'</span><span class="account-chip"><span class="account-dot"></span>'+((s.currentUser&&s.currentUser.name)?esc(s.currentUser.name)+' · ':'')+(s.role==='teacher'?'Guru':'Siswa')+' <span class="role-lock" title="Peran ditentukan akun sekolah">Terverifikasi</span></span></header>')+'<div class="content">'+c+'</div></main></div>';document.querySelectorAll('.question p,.question label,.question li,.math-content,.passage-content').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));if(s.page==='detail'&&s.role==='student')updateAnswerProgress();}
+function render(){if(!s.authChecked||!s.authenticated||!s.currentUser){document.getElementById('app').innerHTML=renderAccessGate();return}let p=s.page,c=p==='overview'?overview():p==='bundles'?bundlesPage():p==='assessments'?assessments():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='gradebook'?gradebook():p==='progress'?progress():settings();const isStudentExam=s.page==='detail'&&s.role==='student';document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Belajar, ukur, tumbuh.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Aman · Terukur · Inklusif</footer></aside><main class="main">'+(isStudentExam?'':'<header class="top"><span class="muted">Ruang kerja / '+esc(p)+'</span><span class="account-chip"><span class="account-dot"></span>'+((s.currentUser&&s.currentUser.name)?esc(s.currentUser.name)+' · ':'')+(s.role==='teacher'?'Guru':'Siswa')+' <span class="role-lock" title="Peran ditentukan akun sekolah">Terverifikasi</span></span></header>')+'<div class="content">'+c+'</div></main></div>';document.querySelectorAll('.question p,.question label,.question li,.math-content,.passage-content,.report-question-text p,.report-question-text li').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));if(s.page==='detail'&&s.role==='student')updateAnswerProgress();}
 render();
 loadCurrentUser();
 </script></body></html>
