@@ -34,7 +34,7 @@ const TABLES = {
   Attempts: [
     'attemptId', 'assessmentId', 'studentId', 'startedAt', 'submittedAt',
     'status', 'score', 'maxScore', 'focusLossCount', 'answersJson',
-    'teacherFeedback'
+    'teacherFeedback', 'questionScoresJson'
   ],
   Events: [
     'eventId', 'attemptId', 'studentId', 'eventType', 'eventAt', 'detailsJson'
@@ -1291,6 +1291,7 @@ function listAttempts_(payload) {
       return Object.assign({}, attempt, {
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
         answers: parseJson_(attempt.answersJson, {}),
+        questionScores: parseJson_(attempt.questionScoresJson, {}),
         questionDetails: details
       });
     });
@@ -1301,18 +1302,25 @@ function listAttempts_(payload) {
  */
 function gradeAttempt_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
-  const score = Number(payload.score);
-  const maxScore = Number(payload.maxScore);
-
-  if (
-    !isFinite(score) ||
-    !isFinite(maxScore) ||
-    score < 0 ||
-    maxScore < score
-  ) {
-    throw new Error('Nilai tidak valid.');
+  const questionScores = payload.questionScores && typeof payload.questionScores === 'object' ? payload.questionScores : null;
+  let score = Number(payload.score);
+  let maxScore = Number(payload.maxScore);
+  if (questionScores) {
+    const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+    if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
+    const questions = listRows_('Questions').filter(function (q) { return String(q.assessmentId) === String(attempt.assessmentId); });
+    if (!questions.length) throw new Error('Soal asesmen tidak ditemukan.');
+    score = 0; maxScore = 0;
+    questions.forEach(function (q) {
+      const maximum = Number(q.points) || 0;
+      const value = Number(questionScores[q.questionId]);
+      if (!Object.prototype.hasOwnProperty.call(questionScores, q.questionId) || !isFinite(value) || value < 0 || value > maximum) {
+        throw new Error('Skor soal nomor ' + q.order + ' tidak valid. Nilai harus antara 0 dan ' + maximum + '.');
+      }
+      score += value; maxScore += maximum;
+    });
   }
-
+  if (!isFinite(score) || !isFinite(maxScore) || score < 0 || maxScore < score) throw new Error('Nilai tidak valid.');
   const sheet = getSheet_('Attempts');
   const values = sheet.getDataRange().getValues();
   const headers = values[0].map(String);
@@ -1332,6 +1340,10 @@ function gradeAttempt_(payload) {
         .setValue('graded');
       sheet.getRange(rowIndex + 1, columnIndex('teacherFeedback') + 1)
         .setValue(String(payload.feedback || ''));
+      if (payload.questionScores && typeof payload.questionScores === 'object') {
+        sheet.getRange(rowIndex + 1, columnIndex('questionScoresJson') + 1)
+          .setValue(JSON.stringify(payload.questionScores));
+      }
 
       return {
         attemptId: attemptId,
