@@ -1327,6 +1327,13 @@ function listAttempts_(payload) {
           };
         });
       const assessment = assessments.find(function (item) { return item.assessmentId === attempt.assessmentId; });
+      const viewer = payload.currentUser;
+      if (viewer && viewer.role === 'teacher' && assessment && String(assessment.createdBy || '').trim().toLowerCase() === String(viewer.email || '').trim().toLowerCase()) {
+        uploadedFiles.filter(function (file) { return String(file.attemptId) === String(attempt.attemptId) && file.driveFileId; }).forEach(function (file) {
+          try { DriveApp.getFileById(String(file.driveFileId)).addViewer(String(viewer.email)); }
+          catch (shareError) { Logger.log('Akses foto untuk guru belum dapat diberikan: ' + shareError.message); }
+        });
+      }
       return Object.assign({}, attempt, {
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
         subject: assessment ? String(assessment.subject || '') : '',
