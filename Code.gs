@@ -1252,9 +1252,9 @@ function submitAttempt_(payload) {
   }
   const attemptId = previous ? String(previous.attemptId) : makeId_('ATT');
   const existingAnswers = previous ? parseJson_(previous.answersJson, {}) : {};
-  const mergedAnswers = mergeUploadedAnswerPhotos_(attemptId, answers, existingAnswers);
-  Object.keys(answers).forEach(function (key) { delete answers[key]; });
-  Object.keys(mergedAnswers).forEach(function (key) { answers[key] = mergedAnswers[key]; });
+  // mergeUploadedAnswerPhotos_ mengembalikan objek jawaban yang sama (mutasi in-place).
+  // Jangan mengosongkan objek answers sebelum disimpan karena itu menghapus seluruh jawaban siswa.
+  const finalAnswers = mergeUploadedAnswerPhotos_(attemptId, answers, existingAnswers);
   const attemptsSheet = getSheet_('Attempts');
   const attemptValues = attemptsSheet.getDataRange().getValues();
   const attemptHeaders = attemptValues[0].map(String);
@@ -1270,14 +1270,14 @@ function submitAttempt_(payload) {
     attemptsSheet.getRange(rowNumber, col('score') + 1).setValue(score);
     attemptsSheet.getRange(rowNumber, col('maxScore') + 1).setValue(maxScore);
     attemptsSheet.getRange(rowNumber, col('focusLossCount') + 1).setValue(Math.max(0, Number(payload.focusLossCount) || 0));
-    attemptsSheet.getRange(rowNumber, col('answersJson') + 1).setValue(JSON.stringify(answers));
+    attemptsSheet.getRange(rowNumber, col('answersJson') + 1).setValue(JSON.stringify(finalAnswers));
   } else {
     appendRow_('Attempts', {
       attemptId: attemptId, assessmentId: assessmentId, studentId: studentId,
       startedAt: currentTimestamp_(), submittedAt: submittedAt, status: finalStatus,
       score: score, maxScore: maxScore,
       focusLossCount: Math.max(0, Number(payload.focusLossCount) || 0),
-      answersJson: JSON.stringify(answers), teacherFeedback: ''
+      answersJson: JSON.stringify(finalAnswers), teacherFeedback: ''
     });
   }
 
