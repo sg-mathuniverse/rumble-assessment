@@ -1084,6 +1084,34 @@ function startAttempt_(payload) {
   } finally { lock.releaseLock(); }
 }
 
+function mergeUploadedAnswerPhotos_(attemptId, answers, existingAnswers) {
+  const next = answers && typeof answers === 'object' && !Array.isArray(answers) ? answers : {};
+  const previous = existingAnswers && typeof existingAnswers === 'object' && !Array.isArray(existingAnswers) ? existingAnswers : {};
+  Object.keys(previous).forEach(function (questionId) {
+    const oldAnswer = previous[questionId];
+    if (!oldAnswer || typeof oldAnswer !== 'object' || !Array.isArray(oldAnswer.photos)) return;
+    const current = next[questionId] && typeof next[questionId] === 'object' ? next[questionId] : {};
+    current.photos = Array.isArray(current.photos) ? current.photos : [];
+    oldAnswer.photos.forEach(function (photo) {
+      if (photo && photo.fileId && !current.photos.some(function (item) { return String(item.fileId) === String(photo.fileId); })) current.photos.push(photo);
+    });
+    next[questionId] = current;
+  });
+  listRows_('Files').filter(function (file) { return String(file.attemptId) === String(attemptId) && file.questionId; }).forEach(function (file) {
+    const current = next[file.questionId] && typeof next[file.questionId] === 'object' ? next[file.questionId] : {};
+    current.photos = Array.isArray(current.photos) ? current.photos : [];
+    if (!current.photos.some(function (photo) { return String(photo.fileId) === String(file.fileId); })) {
+      current.photos.push({
+        fileId: file.fileId, url: file.fileUrl,
+        imageUrl: file.driveFileId ? 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.driveFileId) + '&sz=w1200' : file.fileUrl,
+        name: 'Foto jawaban'
+      });
+    }
+    next[file.questionId] = current;
+  });
+  return next;
+}
+
 function saveAttempt_(payload) {
   const assessmentId = requiredText_(payload.assessmentId, 'ID asesmen', 100);
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
@@ -1106,7 +1134,8 @@ function saveAttempt_(payload) {
     if (String(row[col('status')]) !== 'in_progress') throw new Error('Sesi ini sudah dikirim dan tidak dapat diubah.');
     const started = new Date(row[col('startedAt')]).getTime(), durationMs = Number(assessment.duration) * 60000;
     if (!isFinite(started) || !isFinite(durationMs) || durationMs <= 0 || Date.now() > started + durationMs + 30000) throw new Error('Waktu pengerjaan sudah habis.');
-    const answers = payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers) ? payload.answers : {};
+    const incomingAnswers = payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers) ? payload.answers : {};
+    const answers = mergeUploadedAnswerPhotos_(attemptId, incomingAnswers, parseJson_(row[col('answersJson')], {}));
     attemptsSheet.getRange(rowNumber, col('answersJson') + 1).setValue(JSON.stringify(answers));
     return { saved: true, savedAt: currentTimestamp_() };
   } finally { lock.releaseLock(); }
@@ -1222,6 +1251,10 @@ function submitAttempt_(payload) {
     assertStudentAssessmentAccess_(assessment, user);
   }
   const attemptId = previous ? String(previous.attemptId) : makeId_('ATT');
+  const existingAnswers = previous ? parseJson_(previous.answersJson, {}) : {};
+  const mergedAnswers = mergeUploadedAnswerPhotos_(attemptId, answers, existingAnswers);
+  Object.keys(answers).forEach(function (key) { delete answers[key]; });
+  Object.keys(mergedAnswers).forEach(function (key) { answers[key] = mergedAnswers[key]; });
   const attemptsSheet = getSheet_('Attempts');
   const attemptValues = attemptsSheet.getDataRange().getValues();
   const attemptHeaders = attemptValues[0].map(String);
