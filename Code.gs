@@ -25,7 +25,8 @@ const TABLES = {
     'assessmentId', 'title', 'subject', 'className', 'duration',
     'startAt', 'endAt', 'passageText', 'passageImageUrl', 'status', 'createdBy', 'createdAt', 'updatedAt'
   ],
-  QuestionBundles: ['bundleId','title','subject','description','passageText','passageImageUrl','passagesJson','questionsJson','status','createdBy','createdAt','updatedAt'],
+  QuestionBundles: ['bundleId','title','subject','description','tpCode','passageText','passageImageUrl','passagesJson','questionsJson','status','createdBy','createdAt','updatedAt'],
+  LearningObjectives: ['objectiveId','tpCode','title','subject','description','createdBy','createdAt','updatedAt','active'],
   Questions: [
     'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
     'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson', 'subquestionsJson', 'rubricLevelsJson', 'passageText', 'passageImageUrl'
@@ -502,6 +503,7 @@ function saveQuestionBundle_(payload) {
     title: title,
     subject: String(payload.subject || ''),
     description: String(payload.description || ''),
+    tpCode: String(payload.tpCode || '').trim().toUpperCase(),
     passageText: String(payload.passageText || ''),
     passageImageUrl: String(payload.passageImageUrl || ''),
     passagesJson: JSON.stringify(Array.isArray(payload.passages)?payload.passages:[]),
@@ -560,6 +562,7 @@ function getQuestionBundle_(payload) {
       title: bundle.title,
       subject: bundle.subject,
       description: bundle.description,
+      tpCode: String(bundle.tpCode || ''),
       passageText: bundle.passageText,
       passageImageUrl: bundle.passageImageUrl,
       passages: parseJson_(bundle.passagesJson, []),
