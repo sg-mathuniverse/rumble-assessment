@@ -151,7 +151,7 @@ function detailPage(){
  let body='';
  const passage=(a.passageText||a.passageImageUrl)?'<div class="question" style="white-space:pre-wrap"><b>Bacaan / stimulus</b><div class="passage-content">'+esc(a.passageText||'')+'</div>'+(a.passageImageUrl?'<img src="'+esc(a.passageImageUrl)+'" alt="Gambar bacaan" style="display:block;max-width:600px;max-height:380px;margin:8px 0;border-radius:8px">':'')+'</div>':'';
  if(student){
-  body='<h3>Kerjakan asesmen</h3><div class="field"><label>ID siswa (uji coba)</label><input id="studentId" placeholder="Contoh: SISWA-001"></div>'+passage;
+  body='<h3>Kerjakan asesmen</h3><div class="field"><label>ID siswa</label><input id="studentId" value="'+esc((s.currentUser&&s.currentUser.userId)||'')+'" placeholder="ID akun siswa" readonly></div>'+passage;
   body+=qs.map((q,i)=>{
    const id=esc(q.id||'');let control='';
    if(q.type==='multiple_choice'||q.type==='multi_select'){
@@ -195,7 +195,7 @@ async function publishAssessment(id){
  catch(e){toast('Gagal mempublikasikan: '+e.message)}
 }
 async function submitAssessment(){
- const studentId=(document.getElementById('studentId')||{}).value||'';
+ const studentId=(s.currentUser&&s.currentUser.userId)||((document.getElementById('studentId')||{}).value||'');
  if(!studentId.trim()){toast('Isi ID siswa untuk uji coba.');return}
  const a=(s.currentAssessment||{}).assessment||{};
  try{const r=await api('submitAttempt',{assessmentId:a.assessmentId||a.id,studentId:studentId.trim(),answers:s.answers,startedAt:new Date().toISOString()});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Jawaban gagal dikirim');toast('Jawaban terkirim. Nilai: '+r.data.score+'/'+r.data.maxScore);s.page='assessments';s.currentAssessment=null;render()}
