@@ -1066,8 +1066,8 @@ function startAttempt_(payload) {
       if (String(previous.status) !== 'in_progress') throw new Error('Jawaban untuk asesmen ini sudah pernah dikirim.');
       const started = new Date(previous.startedAt).getTime();
       if (!isFinite(started)) throw new Error('Waktu mulai sesi tidak valid. Hubungi guru.');
-      if (Date.now() > started + duration * 60000 + 30000) throw new Error('Waktu pengerjaan sudah habis. Hubungi guru untuk bantuan.');
-      return { attemptId: String(previous.attemptId), startedAt: previous.startedAt, status: 'in_progress', duration: duration, resumed: true, answers: parseJson_(previous.answersJson, {}) };
+      const expired = Date.now() > started + duration * 60000 + 30000;
+      return { attemptId: String(previous.attemptId), startedAt: previous.startedAt, status: 'in_progress', duration: duration, resumed: true, expired: expired, answers: parseJson_(previous.answersJson, {}) };
     }
     const attemptId = makeId_('ATT'), startedAt = currentTimestamp_();
     const questions = listRows_('Questions').filter(function (question) { return String(question.assessmentId) === assessmentId; });
@@ -1140,7 +1140,7 @@ function submitAttempt_(payload) {
       if (!isFinite(started) || !isFinite(durationMs) || durationMs <= 0) throw new Error('Waktu sesi pengerjaan tidak valid.');
       const remainingMs = started + durationMs - Date.now();
       if (remainingMs > 8 * 60000) throw new Error('Pengumpulan jawaban hanya dapat dilakukan pada 8 menit terakhir. Silakan periksa jawaban kembali.');
-      if (remainingMs < -30000) throw new Error('Waktu pengerjaan sudah habis. Jawaban tidak dapat dikirim terlambat.');
+      if (remainingMs < -30000 && payload.autoSubmitOnExpiry !== true) throw new Error('Waktu pengerjaan sudah habis. Jawaban tidak dapat dikirim terlambat.');
     }
   const answers = payload.answers && typeof payload.answers === 'object' ? payload.answers : {};
   const questions = listRows_('Questions').filter(function (question) {
