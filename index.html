@@ -185,11 +185,11 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 .exam-clock-panel{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 16px;padding:14px 16px;border:1px solid #dfe5f3;border-radius:14px;background:#fff}
 .exam-sticky-header .exam-clock-panel{margin:0 0 8px}
 .exam-sticky-header .exam-tools{margin:0;box-shadow:0 5px 14px #1d2c4a0b}
-.student-question-accordion{scroll-margin-top:220px}
+.student-question-accordion{scroll-margin-top:270px}
 .matching-prompt{margin:12px 0 8px;font-weight:700;color:#34415f}
 .matching-row{grid-template-columns:minmax(0,1fr) 100px}
 .matching-select{width:100%;min-width:0}
-@media(max-width:650px){.exam-sticky-header{top:0}.matching-two-column{grid-template-columns:1fr}.student-question-accordion{scroll-margin-top:280px}}
+@media(max-width:650px){.exam-sticky-header{top:0}.matching-two-column{grid-template-columns:1fr}.student-question-accordion{scroll-margin-top:330px}}
 
 .exam-clock-panel .clock-time{font-weight:800;color:#26347d}
 .exam-clock-panel .timer-value{font:800 20px Manrope,sans-serif;color:#087f68;font-variant-numeric:tabular-nums}
@@ -230,6 +230,7 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 .report-final-summary textarea{width:100%}
 .report-question-text{margin-top:9px;color:#64718a}
 @media(max-width:760px){.report-row{grid-template-columns:1fr 1fr}.report-student-answer{grid-column:1/-1}.report-final-summary{grid-template-columns:1fr}.report-score-cell{grid-column:2}}
+ .nav-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;margin-left:7px;border-radius:20px;background:#e8efff;color:#3157d5;font-size:11px;font-weight:800;line-height:1}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script></head><body><div id="app"></div><div class="toast" id="toast"></div><script>
 const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
 const demo=[{id:'ASM-101',title:'Persamaan Kuadrat',subject:'Matematika',className:'Kelas IX-A',duration:60,status:'Aktif'},{id:'ASM-102',title:'Sistem Persamaan Linear',subject:'Matematika',className:'Kelas VIII-B',duration:45,status:'Draft'},{id:'ASM-103',title:'Fungsi dan Grafik',subject:'Matematika',className:'Kelas IX-B',duration:50,status:'Selesai'}];
@@ -240,7 +241,7 @@ function go(p){s.page=p;render();if(p==='reports'){s.selectedReportAssessmentId=
 function formatLocalDateTime(value){if(!value)return '—';const date=new Date(value);if(!isFinite(date.getTime()))return String(value);return date.toLocaleString('id-ID',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function head(k,t,d,b=''){return '<div class="head"><div><div class="kicker">'+k+'</div><h2>'+t+'</h2><p>'+d+'</p></div>'+b+'</div>'}
 function stat(l,n,d){return '<div class="card"><div class="statlabel">'+l+'</div><div class="num">'+n+'</div><div class="muted">'+d+'</div></div>'}
-function nav(){let a=s.role==='teacher' ? [['overview','▦ Ringkasan'],['bundles','▣ Bank soal'],['assessments','▤ Jadwal & asesmen'],['students','♙ Siswa'],['reports','▥ Analitik'],['settings','⚙ Pengaturan']] : [['progress','↗ Progres saya'],['assessments','▤ Jadwal ujian'],['settings','⚙ Pengaturan']];return a.map(function(x){return '<button class="'+(s.page===x[0]?'active':'')+'" onclick="go(\''+x[0]+'\')">'+x[1]+'</button>'}).join('')}
+function nav(){let a=s.role==='teacher' ? [['overview','▦ Ringkasan'],['bundles','▣ Bank soal'],['assessments','▤ Jadwal & asesmen'],['students','♙ Siswa'],['reports','▥ Analitik'],['settings','⚙ Pengaturan']] : [['progress','↗ Progres saya'],['assessments','▤ Jadwal ujian'],['settings','⚙ Pengaturan']];return a.map(function(x){const label=x[0]==='assessments'&&s.role==='student'?x[1]+' <span class="nav-count">'+(Array.isArray(s.items)?s.items.length:0)+'</span>':x[1];return '<button class="'+(s.page===x[0]?'active':'')+'" onclick="go(\''+x[0]+'\')">'+label+'</button>'}).join('')}
 function rows(){
  if(!s.loadedFromServer)return s.assessmentLoadError?'<div class="notice">Daftar asesmen gagal dimuat: '+esc(s.assessmentLoadError)+' <button class="btn" onclick="loadAssessments()">Coba lagi</button></div>':'<p class="muted">Mengambil asesmen dari server…</p>';
  const source=Array.isArray(s.items)?s.items:[];
@@ -477,7 +478,8 @@ function detailPage(){
   body+='<div class="notice">Sebelum mengirim, periksa kembali jawabanmu. Pengumpulan akan diproses setelah server memvalidasi akun, kelas, jadwal, dan status asesmen.</div><div class="actions"><button class="btn primary" onclick="submitAssessment()">Kirim jawaban</button></div>';
  }else{
   body=(a.status!=='published'?'<div class="detail-action-bar"><span><b>Publikasikan asesmen</b><br><small class="muted">Tombol tersedia di bagian atas detail.</small></span><div class="actions" style="margin:0"><button class="btn primary" data-id="'+esc(a.assessmentId||a.id||'')+'" onclick="publishAssessment(this.dataset.id)">Publikasikan asesmen</button></div></div>':'')+'<h3>Daftar soal</h3>'+passage+qs.map((q,i)=>((q.passageText||q.passageImageUrl)?'<div class="question" style="white-space:pre-wrap"><b>Bacaan / stimulus</b><div class="passage-content">'+esc(q.passageText||'')+'</div>'+(q.passageImageUrl?'<img src="'+esc(q.passageImageUrl)+'" alt="Gambar bacaan" style="display:block;max-width:600px;max-height:380px;margin:8px 0;border-radius:8px">':'')+'</div>':'')+'<div class="question"><b>Soal '+(i+1)+' · '+esc(q.type)+' · '+esc(q.points)+' poin</b><p>'+esc(q.text||'(Soal belum diisi)')+'</p>'+(q.imageUrl?'<img src="'+esc(q.imageUrl)+'" alt="Gambar soal" style="display:block;max-width:500px;max-height:320px;margin:8px 0;border-radius:8px">':'')+(q.type==='multiple_choice'||q.type==='multi_select'?'<ol type="A">'+(Array.isArray(q.options)?q.options:[]).map((o,j)=>'<li><span class="math-content">'+esc(o)+'</span>'+(q.optionImages&&q.optionImages[j]?'<img src="'+esc(q.optionImages[j])+'" alt="Gambar pilihan" style="display:block;max-width:200px;max-height:130px;margin:5px 0">':'')+'</li>').join('')+'</ol>':q.type==='true_false_multi'?'<div class="question"><b>Pernyataan</b>'+(q.subquestions||[]).map((st,j)=>'<div style="padding:8px 0;border-bottom:1px solid #e5e7eb"><b>Pernyataan '+(j+1)+'.</b> <span class="math-content">'+esc(st)+'</span>'+(q.subquestionImages&&q.subquestionImages[j]?'<img src="'+esc(q.subquestionImages[j])+'" alt="Gambar pernyataan" style="display:block;max-width:300px;max-height:200px;margin:6px 0">':'')+'</div>').join('')+'</div>':q.type==='true_false'?'<p><b>Jenis jawaban:</b> Benar atau Salah</p>':q.type==='matching'?'<div><b>Pasangan menjodohkan:</b>'+(Array.isArray(q.pairs)?q.pairs:[]).map((p,j)=>'<p>'+(j+1)+'. <span class="math-content">'+esc(p.left||'')+'</span> ↔ <span class="math-content">'+esc(p.right||'')+'</span></p>').join('')+'</div>':'')+(q.type==='essay'&&q.subquestions&&q.subquestions.length?'<p><b>Subpertanyaan:</b></p><ul>'+q.subquestions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul><p><b>Rubrik:</b></p><ol>'+((q.rubricLevels&&q.rubricLevels.length)?q.rubricLevels:[q.rubric||'Rubrik belum diisi']).map(x=>'<li>'+esc(x)+'</li>').join('')+'</ol>':'')+'</div>').join('');
-  if(a.status==='published') body+='<div class="actions"><button class="btn" data-id="'+esc(a.assessmentId||a.id||'')+'" onclick="editAssessment(this.dataset.id)">Buat salinan untuk edit</button></div><p class="notice">Asesmen sudah dipublikasikan. Pengeditan membuat salinan draft agar soal dan hasil siswa sebelumnya tetap aman.</p>';
+  if(a.status==='published') body+='<div class="actions"><button class="btn" data-id="'+esc(a.assessmentId||a.id||'')+'" onclick="editAssessment(this.dataset.id)">Buat salinan untuk edit</button></div><p class="notice">Asesmen sudah dipublikasikan. Pengeditan membuat salinan draft agar soal dan hasil siswa sebelumnya tetap aman. Salinan akan disimpan sebagai draft baru setelah tombol Simpan ditekan.</p>';
+  else body+='<div class="actions"><button class="btn" data-id="'+esc(a.assessmentId||a.id||'')+'" onclick="editAssessment(this.dataset.id)">Edit asesmen</button></div>';
  }
  return head(student?'Area siswa':'Detail asesmen',esc(a.title||'Asesmen'),esc(a.subject||'')+' · '+esc(a.className||'')+' · '+(a.duration||45)+' menit',back)+'<div class="card"><div class="actions"><span class="pill '+(a.status==='published'?'live':'')+'">Status: '+esc(a.status||'draft')+'</span><span class="pill">'+qs.length+' soal</span></div>'+body+'</div>';
 }
@@ -535,7 +537,7 @@ async function openAssessment(id){
    const a=r.data.assessment||{};const started=await api('startAttempt',{assessmentId:a.assessmentId||a.id||id});
    if(!started||!started.ok)throw Error(started&&started.error?started.error:'Sesi ujian gagal disiapkan');s.activeAttempt=started.data;s.answers=started.data.answers&&typeof started.data.answers==='object'?started.data.answers:{};
   }
-  s.page='detail';render();if(s.role==='student'){restoreStudentAnswers();startExamClock()}
+  s.page='detail';render();if(s.role==='student'){restoreStudentAnswers();if(s.activeAttempt&&s.activeAttempt.expired){toast('Waktu asesmen sudah habis. Jawaban tersimpan akan dikirim otomatis.');await submitAssessment(true)}else{startExamClock()}}
  }catch(e){toast('Gagal membuka detail: '+e.message)}
 }
 
@@ -550,7 +552,7 @@ async function submitAssessment(autoSubmit){
  if(s.submittingAttempt)return;
  if(!autoSubmit){const attempt=s.activeAttempt||{},started=new Date(attempt.startedAt||Date.now()).getTime(),durationMs=Math.max(1,Number(a.duration||attempt.duration||45))*60000,remaining=started+durationMs-Date.now();if(remaining>8*60000){const mins=Math.ceil((remaining-8*60000)/60000);toast('Pengumpulan baru dibuka pada 8 menit terakhir. Silakan periksa jawaban kembali.');return}if(!confirm('Kirim jawaban sekarang? Pastikan semua jawaban sudah diperiksa.'))return;}
  s.submittingAttempt=true;if(examTimerInterval){clearInterval(examTimerInterval);examTimerInterval=null}
- try{const r=await api('submitAttempt',{assessmentId:a.assessmentId||a.id,attemptId:s.activeAttempt&&s.activeAttempt.attemptId,answers:s.answers});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Jawaban gagal dikirim');
+ try{const r=await api('submitAttempt',{assessmentId:a.assessmentId||a.id,attemptId:s.activeAttempt&&s.activeAttempt.attemptId,answers:s.answers,autoSubmitOnExpiry:autoSubmit===true});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Jawaban gagal dikirim');
   toast(autoSubmit?'Waktu habis. Jawaban berhasil dikirim.':'Jawaban berhasil dikirim dan diproses.');s.page='assessments';s.currentAssessment=null;s.activeAttempt=null;s.answers={};render();await loadAssessments();
  }catch(e){s.submittingAttempt=false;toast('Gagal mengirim jawaban: '+e.message)}
 }
@@ -583,6 +585,7 @@ async function editAssessment(id){
   if(!r||!r.ok)throw Error(r&&r.error?r.error:'Asesmen tidak tersedia');
   const d=r.data,a=d.assessment||{},isPublished=a.status==='published';
   s.editingId=isPublished?null:id;
+  s.editorMode='assessment';s.assessmentEditorOpen=true;s.bundleEditorOpen=false;s.assessmentFromBundle=false;s.sourceBundleId='';s.sourceBundleTitle='';s.editingBundleId=null;
   s.meta={title:(isPublished?'Salinan - ':'')+(a.title||''),subject:a.subject||'Matematika',className:a.className||'',duration:a.duration||60,startAt:isoToLocalDateTime(a.startAt||''),endAt:isoToLocalDateTime(a.endAt||''),passageText:a.passageText||'',passageImageUrl:a.passageImageUrl||''};
   s.qs=(d.questions||[]).map(q=>({...q,answer:q.answer===undefined?'0':q.answer,options:q.options||[],optionImages:q.optionImages||[],subquestions:q.subquestions||[],subquestionImages:q.subquestionImages||[],rubricLevels:q.rubricLevels||[],_rubricEdited:!!(q.rubricLevels&&q.rubricLevels.length)}));
   s.currentAssessment=null;s.page='assessments';render();setTimeout(()=>document.getElementById('editor')?.scrollIntoView({behavior:'smooth'}),0);
@@ -682,6 +685,7 @@ async function loadCurrentUser(){
       s.page = s.role === 'student' ? 'progress' : 'overview';
       render();
       await loadAssessments();
+      if (s.role === 'student') await loadAttempts();
     } else {
       render();
     }
