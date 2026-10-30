@@ -300,6 +300,7 @@ function reportDisplayAnswer(q,val){
   if(subKeys.length)return subKeys.map(function(key,index){const answer=val[key];return (index+1)+'. '+(answer===undefined||answer===null||String(answer).trim()===''?'(Kosong)':String(answer))}).join('\n');
   if(Array.isArray(q.subquestions)&&q.subquestions.length){const answers=q.subquestions.map(function(sub,i){const answer=val[String(i)];return (i+1)+'. '+(answer===undefined||answer===null||String(answer).trim()===''?'(Kosong)':String(answer))});return answers.join('\n')}
   if(typeof val.text==='string'&&val.text.trim())return val.text;
+  if(Array.isArray(val.photos)&&val.photos.length)return 'Foto terlampir ('+val.photos.length+' berkas)';
   return '(Tidak dijawab)';
  }
  if(Array.isArray(val)&&q.type==='multi_select')return val.map(x=>String.fromCharCode(65+Number(x))).join(', ')||'(Tidak dijawab)';
@@ -491,11 +492,11 @@ function restoreStudentAnswers(){const qs=(s.currentAssessment&&s.currentAssessm
 function setEssayPhotoList(id,photos){const list=document.getElementById('essayPhotos_'+id);if(list)list.innerHTML=(photos||[]).map(function(photo,index){return '<a class="essay-photo-preview" href="'+esc(photo.url)+'" target="_blank" rel="noopener"><img src="'+esc(photo.imageUrl||photo.thumbnailUrl||'')+'" alt="'+esc(photo.name||('Foto jawaban '+(index+1)))+'"><span>'+esc(photo.name||('Foto jawaban '+(index+1)))+' · tersimpan</span></a>'}).join('');const status=document.getElementById('essayPhotoStatus_'+id);if(status){status.textContent=(photos||[]).length?'✓ '+photos.length+' foto berhasil diunggah dan tersimpan.':'Belum ada foto yang diunggah.';status.classList.toggle('saved',(photos||[]).length>0)}}
 async function uploadEssayPhoto(event,id){
  const file=event&&event.target&&event.target.files&&event.target.files[0];if(!file)return;
- if(!/^image\\//i.test(file.type)){toast('Pilih file gambar dari kamera atau perangkat.');event.target.value='';return}
+ if(String(file.type||'').toLowerCase().indexOf('image/')!==0){toast('Pilih file gambar dari kamera atau perangkat.');event.target.value='';return}
  const attempt=s.activeAttempt||{},a=(s.currentAssessment||{}).assessment||{};if(!attempt.attemptId){toast('Sesi ujian belum siap. Muat ulang detail ujian.');event.target.value='';return}
  try{toast('Sedang menyiapkan foto jawaban...');
   const compressed=await new Promise(function(resolve,reject){const reader=new FileReader();reader.onerror=function(){reject(new Error('Foto tidak dapat dibaca.'))};reader.onload=function(){const img=new Image();img.onerror=function(){reject(new Error('Format foto tidak dapat dibaca.'))};img.onload=function(){const maxSide=1600,scale=Math.min(1,maxSide/Math.max(img.width,img.height)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);const data=canvas.toDataURL('image/jpeg',0.78);resolve({base64:data.split(',')[1],mimeType:'image/jpeg'})};img.src=reader.result};reader.readAsDataURL(file)});
-  const response=await api('uploadAnswerImage',{attemptId:attempt.attemptId,assessmentId:a.assessmentId||a.id,questionId:id,fileName:(file.name||'foto-jawaban.jpg').replace(/\\.[^.]+$/,'')+'.jpg',mimeType:compressed.mimeType,base64:compressed.base64});
+  const response=await api('uploadAnswerImage',{attemptId:attempt.attemptId,assessmentId:a.assessmentId||a.id,questionId:id,fileName:(String(file.name||'foto-jawaban.jpg').split('.').slice(0,-1).join('.')||'foto-jawaban')+'.jpg',mimeType:compressed.mimeType,base64:compressed.base64});
   if(!response||!response.ok)throw new Error(response&&response.error?response.error:'Foto gagal diunggah');
   const current=s.answers[id]&&typeof s.answers[id]==='object'?s.answers[id]:{};current.photos=Array.isArray(current.photos)?current.photos:[];current.photos.push({fileId:response.data.fileId,url:response.data.url,imageUrl:response.data.imageUrl||response.data.url,name:response.data.name||file.name});s.answers[id]=current;setEssayPhotoList(id,current.photos);scheduleAnswerSave();toast('Foto jawaban berhasil diunggah dan tersimpan.');
  }catch(error){toast('Gagal mengunggah foto: '+error.message)}finally{event.target.value=''}
