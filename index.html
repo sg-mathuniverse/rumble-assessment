@@ -181,15 +181,22 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 
 .question-editor-body>.question{margin:8px 0 0;padding:0;border:0;box-shadow:none;background:transparent}
 .student-question-accordion[open],.question-editor-accordion[open]{box-shadow:0 8px 24px #263b7810}
-.exam-sticky-header{position:sticky;top:0;z-index:20;padding:6px 0 8px;background:#f8f9fc}
-.exam-clock-panel{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 16px;padding:14px 16px;border:1px solid #dfe5f3;border-radius:14px;background:#fff}
-.exam-sticky-header .exam-clock-panel{margin:0 0 8px}
-.exam-sticky-header .exam-tools{margin:0;box-shadow:0 5px 14px #1d2c4a0b}
-.student-question-accordion{scroll-margin-top:270px}
+.exam-sticky-header{position:sticky;top:0;z-index:20;padding:4px 0 6px;background:#f8f9fc}
+.exam-clock-panel{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin:0 0 6px;padding:8px 11px;border:1px solid #dfe5f3;border-radius:11px;background:#fff}
+.exam-sticky-header .exam-clock-panel{margin:0 0 6px}
+.exam-sticky-header .exam-tools{margin:0;padding:7px 10px;box-shadow:0 3px 10px #1d2c4a0b}
+.exam-sticky-header .exam-progress-track{height:5px;margin:5px 0 7px}
+.exam-sticky-header .exam-progress-row{font-size:12px}
+.exam-sticky-header .question-nav{flex-wrap:nowrap;overflow-x:auto;gap:5px;padding:1px 0 3px;scrollbar-width:thin}
+.exam-sticky-header .question-nav .btn{flex:0 0 auto;min-width:32px;min-height:30px;padding:4px 7px;border-radius:8px;font-size:11px}
+.exam-sticky-header .clock-time{font-size:12px;line-height:1.35}
+.exam-sticky-header .timer-value{font-size:17px}
+.exam-sticky-header .exam-fullscreen-btn{padding:6px 9px;font-size:11px;min-height:30px}
+.student-question-accordion{scroll-margin-top:155px}
 .matching-prompt{margin:12px 0 8px;font-weight:700;color:#34415f}
 .matching-row{grid-template-columns:minmax(0,1fr) 100px}
 .matching-select{width:100%;min-width:0}
-@media(max-width:650px){.exam-sticky-header{top:0}.matching-two-column{grid-template-columns:1fr}.student-question-accordion{scroll-margin-top:330px}}
+@media(max-width:650px){.exam-sticky-header{top:0;padding:3px 0 5px}.exam-clock-panel{gap:5px;padding:7px 8px}.exam-sticky-header .exam-tools{padding:6px 8px}.exam-sticky-header .exam-progress-row{font-size:11px}.exam-sticky-header .clock-time{font-size:11px}.exam-sticky-header .timer-value{font-size:16px}.exam-sticky-header .exam-fullscreen-btn{padding:5px 7px;font-size:10px}.matching-two-column{grid-template-columns:1fr}.student-question-accordion{scroll-margin-top:145px}}
 
 .exam-clock-panel .clock-time{font-weight:800;color:#26347d}
 .exam-clock-panel .timer-value{font:800 20px Manrope,sans-serif;color:#087f68;font-variant-numeric:tabular-nums}
@@ -318,7 +325,7 @@ async function loadMonitoring(){
    if(s.page==='monitoring')render();
   }
  }
- function selectMonitoringAttempt(attemptId){s.selectedMonitoringAttemptId=String(attemptId||'');render()}
+ function selectMonitoringAttempt(attemptId){s.selectedMonitoringAttemptId=String(attemptId||'');render();if(s.selectedMonitoringAttemptId){requestAnimationFrame(function(){const panel=document.getElementById('monitoringDetailPanel');if(panel){panel.scrollIntoView({behavior:'smooth',block:'start'});panel.setAttribute('tabindex','-1');panel.focus({preventScroll:true})}})}}
  function setMonitoringFilter(filter){s.monitoringFilter=['all','active','review','completed'].includes(filter)?filter:'all';render()}
  function monitoringStatusLabel(status){
   const labels={in_progress:'Sedang mengerjakan',submitted:'Sudah dikumpulkan',graded:'Sudah dinilai',completed:'Selesai'};
@@ -397,7 +404,7 @@ function monitoringPage(){
    const platform=details.platform?'<span class="muted"> · '+esc(details.platform)+'</span>':'';
    return '<div class="monitoring-timeline-item"><span class="monitoring-timeline-dot"></span><div><b>'+esc(monitoringEventLabel(event.eventType))+'</b><div class="muted">'+esc(formatLocalDateTime(event.eventAt))+platform+'</div></div></div>';
   }).join(''):'';
-  const detail=selected?'<div class="card monitoring-detail"><div class="actions"><div><div class="kicker">RINCIAN SESI</div><h3>'+esc(selected.studentName)+' · '+esc(selected.assessmentTitle)+'</h3></div><button class="btn" onclick="selectMonitoringAttempt(\'\')">Tutup detail</button></div><div class="grid monitoring-detail-grid"><div><small class="muted">Status</small><b>'+esc(monitoringStatusLabel(selected.status))+'</b></div><div><small class="muted">Progres</small><b>'+Math.min(Number(selected.answeredCount)||0,Number(selected.questionCount)||0)+' / '+(Number(selected.questionCount)||0)+' soal</b></div><div><small class="muted">Mulai</small><b>'+esc(formatLocalDateTime(selected.startedAt))+'</b></div><div><small class="muted">Dikumpulkan</small><b>'+esc(formatLocalDateTime(selected.submittedAt))+'</b></div><div><small class="muted">Indikator kehilangan fokus</small><b>'+Number(selected.focusLossCount||0)+' kali</b></div><div><small class="muted">Aktivitas terakhir</small><b>'+esc(formatLocalDateTime(selected.lastActivityAt))+'</b></div></div><h4>Riwayat aktivitas terbaru</h4>'+(timeline?'<div class="monitoring-timeline">'+timeline+'</div>':'<p class="muted">Belum ada event yang tercatat untuk sesi ini.</p>')+'<p class="footnote">Catatan browser bersifat terbatas dan dapat dipengaruhi notifikasi atau perilaku perangkat. Tinjau bersama konteks kelas; jangan jadikan satu event sebagai bukti pelanggaran.</p></div>':'';
+  const detail=selected?'<div class="card monitoring-detail" id="monitoringDetailPanel"><div class="actions"><div><div class="kicker">RINCIAN SESI</div><h3>'+esc(selected.studentName)+' · '+esc(selected.assessmentTitle)+'</h3></div><button class="btn" onclick="selectMonitoringAttempt(\'\')">Tutup detail</button></div><div class="grid monitoring-detail-grid"><div><small class="muted">Status</small><b>'+esc(monitoringStatusLabel(selected.status))+'</b></div><div><small class="muted">Progres</small><b>'+Math.min(Number(selected.answeredCount)||0,Number(selected.questionCount)||0)+' / '+(Number(selected.questionCount)||0)+' soal</b></div><div><small class="muted">Mulai</small><b>'+esc(formatLocalDateTime(selected.startedAt))+'</b></div><div><small class="muted">Dikumpulkan</small><b>'+esc(formatLocalDateTime(selected.submittedAt))+'</b></div><div><small class="muted">Indikator kehilangan fokus</small><b>'+Number(selected.focusLossCount||0)+' kali</b></div><div><small class="muted">Aktivitas terakhir</small><b>'+esc(formatLocalDateTime(selected.lastActivityAt))+'</b></div></div><h4>Riwayat aktivitas terbaru</h4>'+(timeline?'<div class="monitoring-timeline">'+timeline+'</div>':'<p class="muted">Belum ada event yang tercatat untuk sesi ini.</p>')+'<p class="footnote">Catatan browser bersifat terbatas dan dapat dipengaruhi notifikasi atau perilaku perangkat. Tinjau bersama konteks kelas; jangan jadikan satu event sebagai bukti pelanggaran.</p></div>':'';
   const alert=warned.length?'<div class="monitoring-alert warning"><b>Perlu ditinjau: '+warned.length+' sesi memiliki indikator perubahan fokus.</b><span>Periksa detail aktivitas dan konfirmasi konteksnya sebelum mengambil tindakan.</span><button class="btn" onclick="setMonitoringFilter(\'review\')">Lihat sesi terkait</button></div>':'<div class="monitoring-alert"><b>Belum ada indikator perubahan fokus pada sesi yang tercatat.</b><span>Data ini hanya mencakup aktivitas yang dapat dideteksi browser.</span></div>';
   const filterButtons=[['all','Semua ('+items.length+')'],['active','Aktif ('+active.length+')'],['review','Perlu ditinjau ('+warned.length+')'],['completed','Selesai ('+completed.length+')']];
   return head('PENGAWASAN ASESMEN','Pemantauan siswa','Data diperbarui otomatis setiap 20 detik. Pemantauan browser bukan penguncian perangkat dan indikator fokus bukan bukti pasti kecurangan.','<button class="btn" onclick="loadMonitoring()">↻ Muat ulang</button>')+
@@ -586,7 +593,7 @@ function detailPage(){
  let body='';
  const passage=(a.passageText||a.passageImageUrl)?'<div class="question" style="white-space:pre-wrap"><b>Bacaan / stimulus</b><div class="passage-content">'+esc(a.passageText||'')+'</div>'+(a.passageImageUrl?'<img src="'+esc(a.passageImageUrl)+'" alt="Gambar bacaan" style="display:block;max-width:600px;max-height:380px;margin:8px 0;border-radius:8px">':'')+'</div>':'';
  if(student){
-  body='<div class="exam-sticky-header"><div class="notice" id="examSecurityWarning" role="status">Pemantauan aktivitas halaman aktif. Perpindahan aplikasi tertentu mungkin tidak terdeteksi oleh browser.</div><div class="actions"><span class="muted">Mode keamanan berbasis browser</span><button class="btn" id="examFullscreenAction" type="button" onclick="requestExamFullscreen()" '+(document.fullscreenElement?'hidden':'')+'>Aktifkan layar penuh</button></div><div class="exam-clock-panel"><div><div class="muted">Tanggal dan jam saat ini</div><div class="clock-time" id="examClock">Memuat waktu...</div></div><div><div class="muted">Sisa waktu ujian</div><div class="timer-value" id="examTimer">--:--</div></div></div>';
+  body='<div class="notice" id="examSecurityWarning" role="status">Pemantauan aktivitas halaman aktif. Perpindahan aplikasi tertentu mungkin tidak terdeteksi oleh browser.</div><div class="exam-sticky-header"><div class="exam-clock-panel"><div><div class="muted">Tanggal dan jam saat ini</div><div class="clock-time" id="examClock">Memuat waktu...</div></div><div style="display:flex;align-items:center;gap:9px"><div><div class="muted">Sisa waktu</div><div class="timer-value" id="examTimer">--:--</div></div><button class="btn exam-fullscreen-btn" id="examFullscreenAction" type="button" onclick="requestExamFullscreen()" '+(document.fullscreenElement?'hidden':'')+'>Layar penuh</button></div></div>';
   body+='<div class="exam-tools"><div class="exam-progress-row"><span>Progres jawaban</span><span><span id="answerCount">0</span> dari '+qs.length+' soal terisi</span></div><div class="exam-progress-track" aria-hidden="true"><i id="answerProgressBar"></i></div><div class="question-nav" aria-label="Navigasi nomor soal">'+qs.map((q,i)=>'<button type="button" class="btn question-jump" data-target="question_'+esc(q.id||'')+'" onclick="jumpToQuestion(this.dataset.target)" aria-label="Ke soal '+(i+1)+'">'+(i+1)+'</button>').join('')+'</div></div></div>';
   body+=qs.map((q,i)=>{
    const id=esc(q.id||'');let control='';
