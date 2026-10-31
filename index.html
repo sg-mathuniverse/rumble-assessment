@@ -234,8 +234,32 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 @media(max-width:760px){.report-row{grid-template-columns:1fr 1fr}.report-student-answer{grid-column:1/-1}.report-final-summary{grid-template-columns:1fr}.report-score-cell{grid-column:2}}
  .nav-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;margin-left:7px;border-radius:20px;background:#e8efff;color:#3157d5;font-size:11px;font-weight:800;line-height:1}
  .essay-photo-preview{display:inline-flex;flex-direction:column;gap:4px;max-width:180px;text-decoration:none;overflow-wrap:anywhere}.essay-photo-preview img{display:block;width:100%;max-height:150px;object-fit:contain;border:1px solid #dce4f1;border-radius:9px;background:#f7f9fd}.essay-photo-preview span{font-size:11px;color:#3157d5}.report-answer-key{margin-top:10px;padding-top:9px;border-top:1px solid #e3e9f3}.report-answer-key .math-content{white-space:pre-wrap;overflow-x:auto}
+
+/* Monitoring dashboard refinements */
+.monitoring-alert{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:15px 17px;margin:0 0 17px;border:1px solid #dce8f5;border-radius:13px;background:#f1f7ff;color:#29466f;font-size:13px}
+.monitoring-alert span{flex:1;min-width:190px;color:#60718c}
+.monitoring-alert.warning{background:#fff8eb;border-color:#f2d8a8;color:#815314}
+.monitoring-alert.warning span{color:#876d47}
+.monitoring-focus{display:inline-flex;padding:5px 8px;border-radius:20px;background:#eef3f8;color:#62718a;font-size:11px;font-weight:700;white-space:nowrap}
+.monitoring-focus.flag{background:#fff0d8;color:#925c08}
+.monitoring-progress{height:6px;min-width:75px;margin:6px 0 3px;border-radius:10px;background:#edf1f7;overflow:hidden}
+.monitoring-progress i{display:block;height:100%;border-radius:10px;background:#3157d5}
+.monitoring-event-mini{font-size:11px;margin-top:3px;max-width:220px}
+.monitoring-filters{margin:12px 0 14px}
+.monitoring-detail{margin-top:16px;border-color:#cfdaf0}
+.monitoring-detail h3{margin:4px 0 0}
+.monitoring-detail h4{margin:20px 0 12px;font:800 14px Manrope}
+.monitoring-detail-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:14px;background:#f7f9fd;border-radius:12px}
+.monitoring-detail-grid>div{display:grid;gap:4px;min-width:0}
+.monitoring-detail-grid b{font-size:12px;overflow-wrap:anywhere}
+.monitoring-timeline{display:grid;gap:0}
+.monitoring-timeline-item{display:flex;gap:12px;position:relative;padding:0 0 16px;min-height:44px}
+.monitoring-timeline-item:not(:last-child):before{content:'';position:absolute;left:5px;top:12px;bottom:0;width:2px;background:#e0e7f2}
+.monitoring-timeline-dot{position:relative;z-index:1;flex:0 0 12px;height:12px;border-radius:50%;background:#5475d6;border:2px solid #e8edff;margin-top:3px}
+.monitoring-timeline-item b{font-size:12px}
+@media(max-width:680px){.monitoring-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.monitoring-filters{gap:6px}.monitoring-filters .btn{padding:8px 10px;font-size:11px}}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script></head><body><div id="app"></div><div class="toast" id="toast"></div><script>
-const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,monitoring:[],monitoringLoaded:false,assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
+const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,monitoring:[],monitoringLoaded:false,monitoringUpdatedAt:'',monitoringError:'',selectedMonitoringAttemptId:'',monitoringFilter:'all',assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
 let monitoringPollInterval=null;
 let examSecurityActive=false,securityEventLastSent={},securityWarningCount=0;
 function sendSecurityEvent(eventType){
@@ -281,12 +305,30 @@ async function requestExamFullscreen(){
 }
 function stopMonitoringPolling(){if(monitoringPollInterval){clearInterval(monitoringPollInterval);monitoringPollInterval=null}}
 async function loadMonitoring(){
- if(s.role!=='teacher')return;
- try{const result=await api('listMonitoring',{});if(!result||!result.ok)throw Error(result&&result.error?result.error:'Data pemantauan tidak tersedia');s.monitoring=Array.isArray(result.data)?result.data:[];s.monitoringLoaded=true;if(s.page==='monitoring')render();}
- catch(error){s.monitoringLoaded=true;if(s.page==='monitoring'){render();toast('Gagal memuat pemantauan: '+error.message)}}
-}
-function startMonitoringPolling(){stopMonitoringPolling();loadMonitoring();monitoringPollInterval=setInterval(loadMonitoring,20000)}
-const demo=[{id:'ASM-101',title:'Persamaan Kuadrat',subject:'Matematika',className:'Kelas IX-A',duration:60,status:'Aktif'},{id:'ASM-102',title:'Sistem Persamaan Linear',subject:'Matematika',className:'Kelas VIII-B',duration:45,status:'Draft'},{id:'ASM-103',title:'Fungsi dan Grafik',subject:'Matematika',className:'Kelas IX-B',duration:50,status:'Selesai'}];
+  if(s.role!=='teacher')return;
+  try{
+   const result=await api('listMonitoring',{});
+   if(!result||!result.ok)throw Error(result&&result.error?result.error:'Data pemantauan tidak tersedia');
+   s.monitoring=Array.isArray(result.data)?result.data:[];
+   s.monitoringLoaded=true;s.monitoringError='';s.monitoringUpdatedAt=new Date().toISOString();
+   if(s.selectedMonitoringAttemptId&&!s.monitoring.some(item=>item.attemptId===s.selectedMonitoringAttemptId))s.selectedMonitoringAttemptId='';
+   if(s.page==='monitoring')render();
+  }catch(error){
+   s.monitoringLoaded=true;s.monitoringError=error.message||'Gagal memuat data pemantauan';
+   if(s.page==='monitoring')render();
+  }
+ }
+ function selectMonitoringAttempt(attemptId){s.selectedMonitoringAttemptId=String(attemptId||'');render()}
+ function setMonitoringFilter(filter){s.monitoringFilter=['all','active','review','completed'].includes(filter)?filter:'all';render()}
+ function monitoringStatusLabel(status){
+  const labels={in_progress:'Sedang mengerjakan',submitted:'Sudah dikumpulkan',graded:'Sudah dinilai',completed:'Selesai'};
+  return labels[String(status||'').toLowerCase()]||String(status||'Status tidak diketahui').replace(/_/g,' ');
+ }
+ function monitoringEventLabel(type){
+  const labels={exam_started:'Memulai asesmen',page_hidden:'Halaman tidak terlihat',page_visible:'Kembali ke halaman asesmen',window_blur:'Jendela kehilangan fokus',window_focus:'Fokus kembali',fullscreen_exit:'Keluar dari layar penuh',exam_submit_attempted:'Mencoba mengumpulkan'};
+  return labels[String(type||'')]||String(type||'Aktivitas');
+ }
+ const demo=[{id:'ASM-101',title:'Persamaan Kuadrat',subject:'Matematika',className:'Kelas IX-A',duration:60,status:'Aktif'},{id:'ASM-102',title:'Sistem Persamaan Linear',subject:'Matematika',className:'Kelas VIII-B',duration:45,status:'Draft'},{id:'ASM-103',title:'Fungsi dan Grafik',subject:'Matematika',className:'Kelas IX-B',duration:50,status:'Selesai'}];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(x){let e=document.getElementById('toast');e.textContent=x;e.style.display='block';e.classList.remove('toast-saving','toast-saved','toast-error');if(/^Menyimpan jawaban/.test(x))e.classList.add('toast-saving');else if(/^Jawaban tersimpan/.test(x))e.classList.add('toast-saved');else if(/belum tersimpan|Gagal menyimpan/.test(x))e.classList.add('toast-error');if(window.__toastTimer)clearTimeout(window.__toastTimer);window.__toastTimer=setTimeout(()=>{e.style.display='none'},3200)}
 function questionAnswerState(q){const v=s.answers[String(q&&q.id||'')];if(v===undefined||v===null||v==='')return 'empty';const filled=x=>Array.isArray(x)?x.length>0:x!==undefined&&x!==null&&String(x).trim()!=='';if(q&&q.type==='true_false_multi'){const total=(q.subquestions||[]).length,done=Array.from({length:total},(_,i)=>filled(v&&v[String(i)] )).filter(Boolean).length;return !done?'empty':done<total?'partial':'answered'}if(q&&q.type==='matching'){const total=(q.pairs||[]).length,done=Array.from({length:total},(_,i)=>filled(v&&v[String(i)])).filter(Boolean).length;return !done?'empty':done<total?'partial':'answered'}if(q&&q.type==='essay'&&Array.isArray(q.subquestions)&&q.subquestions.length){const total=q.subquestions.length,done=Array.from({length:total},(_,i)=>filled(v&&v[String(i)])).filter(Boolean).length;return !done?'empty':done<total?'partial':'answered'}if(Array.isArray(v))return v.length?'answered':'empty';if(typeof v==='object'){const hasText=filled(v.text)||filled(v.photos&&v.photos.length?v.photos:'');return hasText?'answered':Object.keys(v).some(k=>filled(v[k]))?'partial':'empty'}return filled(v)?'answered':'empty'}
@@ -315,21 +357,45 @@ function overview(){
  return head('DASHBOARD GURU','Selamat datang, '+esc((s.currentUser&&s.currentUser.name)||'Guru')+'!','Ruang kerja untuk merancang asesmen, mengatur jadwal, dan memahami progres belajar.','<button class="btn primary" onclick="newA()">＋ Buat asesmen</button>')+'<div class="grid stats">'+stat('Total asesmen',String(all.length),'Data dari server')+stat('Dipublikasikan',String(published),'Asesmen terbit')+stat('Draft',String(drafts),'Masih dapat disunting')+stat('Jumlah soal',String(questionCount),'Dari seluruh asesmen')+'</div><div class="grid columns"><div class="card"><h3>Asesmen terbaru</h3>'+rows()+'</div><div class="card"><h3>Asesmen per kelas</h3>'+classPanel+'<div class="notice">Tips: gunakan bank soal untuk menyusun asesmen berikutnya lebih cepat. Periksa pratinjau siswa sebelum memublikasikan.</div></div></div>';
 }
 function monitoringPage(){
- const items=Array.isArray(s.monitoring)?s.monitoring:[];
- const active=items.filter(item=>item.status==='in_progress');
- const warned=items.filter(item=>Number(item.focusLossCount)>0);
- const completed=items.filter(item=>item.status!=='in_progress');
- const rows=items.length?items.map(item=>{
-  const events=(item.recentEvents||[]).slice(0,4).map(event=>'<div class="muted" style="font-size:12px">'+esc(formatLocalDateTime(event.eventAt))+' · '+esc(event.eventType)+'</div>').join('');
-  const state=item.status==='in_progress'?'<span class="pill live">Mengerjakan</span>':'<span class="pill">'+esc(item.status)+'</span>';
-  const count=Number(item.questionCount)||0,done=Math.min(Number(item.answeredCount)||0,count);
-  return '<tr><td><b>'+esc(item.studentName)+'</b><div class="muted">'+esc(item.className||'')+'</div></td><td>'+esc(item.assessmentTitle)+'</td><td>'+state+'</td><td>'+done+' / '+count+'</td><td>'+Number(item.focusLossCount||0)+'</td><td>'+esc(formatLocalDateTime(item.lastActivityAt))+'<div>'+events+'</div></td></tr>';
- }).join(''):'<tr><td colspan="6" class="muted">Belum ada sesi pengerjaan pada asesmen milik Anda.</td></tr>';
- return head('PENGAWASAN ASESMEN','Pemantauan siswa','Pembaruan otomatis setiap 20 detik. Aktivitas kehilangan fokus merupakan indikator browser, bukan bukti pasti kecurangan.','<button class="btn" onclick="loadMonitoring()">↻ Muat ulang</button>')+
- '<div class="grid stats">'+stat('Sedang mengerjakan',String(active.length),'Sesi aktif')+stat('Ada indikator fokus',String(warned.length),'Perlu ditinjau guru')+stat('Selesai / lainnya',String(completed.length),'Status nonaktif')+stat('Total sesi',String(items.length),'Semua asesmen milik Anda')+'</div>'+
- '<div class="card"><div class="actions"><h3>Aktivitas peserta</h3><span class="muted">'+(s.monitoringLoaded?'Data terbaru':'Memuat data…')+'</span></div><div style="overflow-x:auto"><table class="table"><thead><tr><th>Siswa</th><th>Asesmen</th><th>Status</th><th>Progres</th><th>Indikator fokus</th><th>Aktivitas terakhir / event terbaru</th></tr></thead><tbody>'+rows+'</tbody></table></div><p class="footnote">Data yang ditampilkan dibatasi pada asesmen yang dibuat oleh akun guru ini. Isi jawaban dan kunci jawaban tidak ditampilkan pada halaman pemantauan.</p></div>';
-}
-function assessments(){return head('Jadwal & asesmen','Kelola ujian','Buat jadwal asesmen, tentukan kelas murid, lalu pilih bundel soal dari Bank Soal.','<button class="btn primary" onclick="newA()">＋ Buat asesmen</button>')+'<div class="card"><h3>Semua asesmen</h3>'+rows()+'</div>'+(s.assessmentEditorOpen?editor():'')+'<p class="footnote">Bundel soal disimpan terpisah agar dapat digunakan ulang.</p>'}
+  const items=Array.isArray(s.monitoring)?s.monitoring:[];
+  const active=items.filter(item=>item.status==='in_progress');
+  const warned=items.filter(item=>Number(item.focusLossCount)>0);
+  const completed=items.filter(item=>item.status!=='in_progress');
+  const filter=s.monitoringFilter||'all';
+  const visible=items.filter(item=>{
+   if(filter==='active')return item.status==='in_progress';
+   if(filter==='review')return Number(item.focusLossCount)>0;
+   if(filter==='completed')return item.status!=='in_progress';
+   return true;
+  });
+  const rows=visible.length?visible.map(item=>{
+   const count=Number(item.questionCount)||0,done=Math.min(Number(item.answeredCount)||0,count);
+   const pct=count?Math.round(done/count*100):0;
+   const flagged=Number(item.focusLossCount)>0;
+   const recent=(item.recentEvents||[]).slice(0,2).map(event=>'<div class="muted monitoring-event-mini">'+esc(formatLocalDateTime(event.eventAt))+' · '+esc(monitoringEventLabel(event.eventType))+'</div>').join('');
+   const state='<span class="pill '+(item.status==='in_progress'?'live':'')+'">'+esc(monitoringStatusLabel(item.status))+'</span>';
+   const focus='<span class="monitoring-focus '+(flagged?'flag':'')+'">'+(flagged?Number(item.focusLossCount)+' indikator':'Tidak ada catatan')+'</span>';
+   return '<tr><td><b>'+esc(item.studentName)+'</b><div class="muted">'+esc(item.className||'')+'</div></td><td>'+esc(item.assessmentTitle)+'</td><td>'+state+'</td><td><b>'+done+' / '+count+'</b><div class="monitoring-progress"><i style="width:'+pct+'%"></i></div><small class="muted">'+pct+'% terjawab</small></td><td>'+focus+'</td><td>'+esc(formatLocalDateTime(item.lastActivityAt))+(recent?'<div>'+recent+'</div>':'')+'</td><td><button class="btn" data-attempt-id="'+esc(item.attemptId)+'" onclick="selectMonitoringAttempt(this.dataset.attemptId)">Detail</button></td></tr>';
+  }).join(''):'<tr><td colspan="7" class="muted">'+(items.length?'Tidak ada sesi yang sesuai filter ini.':(s.monitoringLoaded?'Belum ada sesi pengerjaan pada asesmen milik Anda.':'Memuat sesi pemantauan…'))+'</td></tr>';
+  const selected=items.find(item=>String(item.attemptId)===String(s.selectedMonitoringAttemptId));
+  const timeline=selected?(selected.recentEvents||[]).map(event=>{
+   const details=event.details&&typeof event.details==='object'?event.details:{};
+   const platform=details.platform?'<span class="muted"> · '+esc(details.platform)+'</span>':'';
+   return '<div class="monitoring-timeline-item"><span class="monitoring-timeline-dot"></span><div><b>'+esc(monitoringEventLabel(event.eventType))+'</b><div class="muted">'+esc(formatLocalDateTime(event.eventAt))+platform+'</div></div></div>';
+  }).join(''):'';
+  const detail=selected?'<div class="card monitoring-detail"><div class="actions"><div><div class="kicker">RINCIAN SESI</div><h3>'+esc(selected.studentName)+' · '+esc(selected.assessmentTitle)+'</h3></div><button class="btn" onclick="selectMonitoringAttempt(\'\')">Tutup detail</button></div><div class="grid monitoring-detail-grid"><div><small class="muted">Status</small><b>'+esc(monitoringStatusLabel(selected.status))+'</b></div><div><small class="muted">Progres</small><b>'+Math.min(Number(selected.answeredCount)||0,Number(selected.questionCount)||0)+' / '+(Number(selected.questionCount)||0)+' soal</b></div><div><small class="muted">Mulai</small><b>'+esc(formatLocalDateTime(selected.startedAt))+'</b></div><div><small class="muted">Dikumpulkan</small><b>'+esc(formatLocalDateTime(selected.submittedAt))+'</b></div><div><small class="muted">Indikator kehilangan fokus</small><b>'+Number(selected.focusLossCount||0)+' kali</b></div><div><small class="muted">Aktivitas terakhir</small><b>'+esc(formatLocalDateTime(selected.lastActivityAt))+'</b></div></div><h4>Riwayat aktivitas terbaru</h4>'+(timeline?'<div class="monitoring-timeline">'+timeline+'</div>':'<p class="muted">Belum ada event yang tercatat untuk sesi ini.</p>')+'<p class="footnote">Catatan browser bersifat terbatas dan dapat dipengaruhi notifikasi atau perilaku perangkat. Tinjau bersama konteks kelas; jangan jadikan satu event sebagai bukti pelanggaran.</p></div>':'';
+  const alert=warned.length?'<div class="monitoring-alert warning"><b>Perlu ditinjau: '+warned.length+' sesi memiliki indikator perubahan fokus.</b><span>Periksa detail aktivitas dan konfirmasi konteksnya sebelum mengambil tindakan.</span><button class="btn" onclick="setMonitoringFilter(\'review\')">Lihat sesi terkait</button></div>':'<div class="monitoring-alert"><b>Belum ada indikator perubahan fokus pada sesi yang tercatat.</b><span>Data ini hanya mencakup aktivitas yang dapat dideteksi browser.</span></div>';
+  const filterButtons=[['all','Semua ('+items.length+')'],['active','Aktif ('+active.length+')'],['review','Perlu ditinjau ('+warned.length+')'],['completed','Selesai ('+completed.length+')']];
+  return head('PENGAWASAN ASESMEN','Pemantauan siswa','Data diperbarui otomatis setiap 20 detik. Pemantauan browser bukan penguncian perangkat dan indikator fokus bukan bukti pasti kecurangan.','<button class="btn" onclick="loadMonitoring()">↻ Muat ulang</button>')+
+  '<div class="grid stats">'+stat('Sedang mengerjakan',String(active.length),'Sesi aktif')+stat('Ada indikator fokus',String(warned.length),'Perlu ditinjau guru')+stat('Selesai / lainnya',String(completed.length),'Status nonaktif')+stat('Total sesi',String(items.length),'Semua asesmen milik Anda')+'</div>'+
+  alert+
+  '<div class="card"><div class="actions"><h3>Aktivitas peserta</h3><span class="muted">'+(s.monitoringUpdatedAt?'Terakhir diperbarui '+esc(formatLocalDateTime(s.monitoringUpdatedAt)):(s.monitoringLoaded?'Belum ada pembaruan berhasil':'Memuat data…'))+'</span></div>'+
+  (s.monitoringError?'<div class="notice">Pembaruan gagal: '+esc(s.monitoringError)+'. Data yang terlihat mungkin merupakan data terakhir yang berhasil dimuat.</div>':'')+
+  '<div class="actions monitoring-filters">'+filterButtons.map(([key,label])=>'<button class="btn '+(filter===key?'primary':'')+'" onclick="setMonitoringFilter(\''+key+'\')">'+label+'</button>').join('')+'</div>'+
+  '<div style="overflow-x:auto"><table class="table monitoring-table"><thead><tr><th>Siswa</th><th>Asesmen</th><th>Status</th><th>Progres</th><th>Indikator fokus</th><th>Aktivitas terakhir</th><th>Rincian</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+  '<p class="footnote">Data dibatasi pada asesmen yang dibuat oleh akun guru ini. Isi jawaban, kunci jawaban, dan email siswa tidak ditampilkan pada dashboard pemantauan.</p></div>'+detail;
+ }
+ function assessments(){return head('Jadwal & asesmen','Kelola ujian','Buat jadwal asesmen, tentukan kelas murid, lalu pilih bundel soal dari Bank Soal.','<button class="btn primary" onclick="newA()">＋ Buat asesmen</button>')+'<div class="card"><h3>Semua asesmen</h3>'+rows()+'</div>'+(s.assessmentEditorOpen?editor():'')+'<p class="footnote">Bundel soal disimpan terpisah agar dapat digunakan ulang.</p>'}
 function bundlesPage(){return head('Perpustakaan soal','Bank soal & bundel','Simpan kumpulan soal untuk digunakan kembali pada jadwal ujian.','<button class="btn primary" onclick="newBundle()">＋ Buat bundel soal</button>')+'<div class="card"><div class="actions"><h3>Bundel tersimpan</h3><button class="btn" onclick="loadBundles()">Muat ulang</button></div>'+(s.bundlesLoaded?bundleRows():'<p class="muted">Memuat bundel soal...</p>')+'</div>'+(s.bundleEditorOpen&&s.editorMode==='bundle'?editor():'')+'<p class="footnote">Asesmen dari bundel menjadi salinan terpisah; bundel sumber tetap aman.</p>'}
 function bundleRows(){if(!s.bundles.length)return '<p class="muted">Belum ada bundel. Klik Buat bundel soal untuk memulai.</p>';return s.bundles.map(function(x){return '<div class="listitem"><div class="symbol">▣</div><div class="grow"><b>'+esc(x.title)+'</b><small>'+esc(x.subject||'Umum')+' · '+Number(x.questionCount||0)+' soal</small></div><button class="btn" onclick="editBundle(\''+esc(x.bundleId)+'\')">Edit bundel</button><button class="btn" onclick="deleteBundle(\''+esc(x.bundleId)+'\')">Hapus bundel</button></div>'}).join('')}
 function students(){const list=Array.isArray(s.students)?s.students:[];return head('MANAJEMEN KELAS','Daftar siswa','Identitas dan kelas diambil dari daftar pengguna sekolah yang aktif.')+'<div class="card"><div class="actions"><h3>Pengguna siswa</h3><button class="btn" onclick="loadStudents()">Muat ulang</button></div>'+(!s.studentsLoaded?'<p class="muted">Memuat daftar siswa…</p>':!list.length?'<div class="notice">Belum ada akun siswa aktif pada sheet Users. Daftarkan akun melalui administrator sekolah.</div>':'<table class="table"><thead><tr><th>Nama</th><th>Email sekolah</th><th>Kelas</th><th>Status</th></tr></thead><tbody>'+list.map(u=>'<tr><td>'+esc(u.name||'—')+'</td><td>'+esc(u.email||'—')+'</td><td>'+esc(u.className||'Belum ditetapkan')+'</td><td><span class="pill live">Aktif</span></td></tr>').join('')+'</tbody></table>')+'</div>'}
