@@ -316,7 +316,7 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 .detail-edit-actions{margin:14px 0;justify-content:flex-start}
 @media(max-width:760px){.summary-class-content{grid-template-columns:1fr}.assessment-class-toggle,.summary-class-toggle{padding:12px}.assessment-class-children{padding:0 9px}.assessment-class-item{flex-wrap:wrap}.section-refresh-button{font-size:12px}}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script></head><body><div id="app"></div><div class="toast" id="toast"></div><script>
-const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,monitoring:[],monitoringLoaded:false,monitoringUpdatedAt:'',monitoringError:'',selectedMonitoringAttemptId:'',selectedMonitoringAssessmentId:'',monitoringFilter:'all',monitoringExpandedGroups:{},monitoringLoading:false,selectedAssessmentClass:'',selectedGradebookClass:'',selectedGradebookAssessmentId:'',selectedSummaryClass:'',bundleVisibility:'shared',assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
+const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,monitoring:[],monitoringLoaded:false,monitoringUpdatedAt:'',monitoringError:'',selectedMonitoringAttemptId:'',selectedMonitoringAssessmentId:'',monitoringFilter:'all',monitoringExpandedGroups:{},monitoringLoading:false,teacherSummary:[],teacherSummaryLoaded:false,teacherSummaryError:'',selectedAssessmentClass:'',selectedGradebookClass:'',selectedGradebookAssessmentId:'',selectedSummaryClass:'',bundleVisibility:'shared',assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
 let monitoringPollInterval=null;
 let examSecurityActive=false,securityEventLastSent={},securityWarningCount=0;
 function sendSecurityEvent(eventType){
@@ -389,6 +389,16 @@ async function loadMonitoring(){
    }
   }
  }
+async function loadTeacherSummary(){
+ if(s.role!=='teacher')return;
+ try{
+  const result=await api('getTeacherSummary',{});
+  if(!result||!result.ok)throw Error(result&&result.error?result.error:'Ringkasan siswa tidak tersedia');
+  s.teacherSummary=Array.isArray(result.data)?result.data:[];
+  s.teacherSummaryLoaded=true;s.teacherSummaryError='';
+ }catch(error){s.teacherSummaryLoaded=true;s.teacherSummaryError=error.message||'Gagal memuat ringkasan siswa';s.teacherSummary=[]}
+ if(s.page==='overview'){const previousScroll=window.scrollY||0;render();requestAnimationFrame(function(){window.scrollTo(0,previousScroll)})}
+}
  function selectMonitoringAttempt(attemptId){s.selectedMonitoringAttemptId=String(attemptId||'');render();if(s.selectedMonitoringAttemptId){requestAnimationFrame(function(){const panel=document.getElementById('monitoringDetailPanel');if(panel){panel.scrollIntoView({behavior:'smooth',block:'start'});panel.setAttribute('tabindex','-1');panel.focus({preventScroll:true})}})}}
  function setMonitoringFilter(filter){s.monitoringFilter=['all','active','review','completed'].includes(filter)?filter:'all';s.selectedMonitoringAssessmentId='';s.selectedMonitoringAttemptId='';stopMonitoringPolling();render();loadMonitoring();if(s.monitoringFilter==='active')monitoringPollInterval=setInterval(function(){if(s.page==='monitoring'&&s.monitoringFilter==='active')loadMonitoring()},30000)}
  function toggleMonitoringGroup(groupKey){if(!s.monitoringExpandedGroups)s.monitoringExpandedGroups={};s.monitoringExpandedGroups[groupKey]=!s.monitoringExpandedGroups[groupKey];render()}
@@ -433,28 +443,27 @@ function rows(){
 }
 function selectAssessmentClass(name){s.selectedAssessmentClass=s.selectedAssessmentClass===name?'':name;render()}
 function overview(){
- const all=Array.isArray(s.items)?s.items:[],attempts=Array.isArray(s.attempts)?s.attempts:[],students=Array.isArray(s.students)?s.students:[];
+ const all=Array.isArray(s.items)?s.items:[],summary=Array.isArray(s.teacherSummary)?s.teacherSummary:[];
  const published=all.filter(a=>String(a.status)==='published').length,drafts=all.length-published,questionCount=all.reduce((n,a)=>n+Number(a.questionCount||0),0);
- const graded=attempts.filter(a=>a.status==='graded'&&Number(a.maxScore)>0);
- const average=student=>{const rows=graded.filter(a=>String(a.studentId)===String(student.userId));return rows.length?Math.round(rows.reduce((sum,a)=>sum+(Number(a.score)||0)/Number(a.maxScore)*100,0)/rows.length):null};
- const classNames=[...new Set(students.map(x=>String(x.className||'Kelas belum diatur').trim()))].sort((a,b)=>a.localeCompare(b,'id'));
- const flagged=Array.isArray(s.monitoring)?s.monitoring.filter(x=>['fullscreenExitCount','pageReloadCount','windowBlurCount','pageHiddenCount'].some(k=>(Number(x[k])||0)>3)):[];
- const watchMap={};flagged.forEach(x=>{const id=String(x.studentId);if(!watchMap[id])watchMap[id]={count:0};watchMap[id].count++});
- const classPanel=classNames.length?classNames.map(cls=>{
-  const roster=students.filter(x=>String(x.className||'Kelas belum diatur').trim()===cls);
-  const averages=roster.map(student=>({student:student,average:average(student)})).filter(x=>x.average!==null);
-  const enrichment=averages.filter(x=>x.average>85).sort((a,b)=>b.average-a.average).slice(0,3),support=averages.slice().sort((a,b)=>a.average-b.average).slice(0,3);
-  const supervision=roster.map(student=>({student:student,count:(watchMap[String(student.userId)]||{}).count||0})).filter(x=>x.count>0).sort((a,b)=>b.count-a.count);
+ const classNames=[...new Set(summary.map(x=>String(x.className||'Kelas belum diatur').trim()))].sort((a,b)=>a.localeCompare(b,'id'));
+ const classPanel=!s.teacherSummaryLoaded?'<p class="muted">Memuat statistik siswa…</p>':s.teacherSummaryError?'<div class="notice">Statistik siswa gagal dimuat: '+esc(s.teacherSummaryError)+'</div>':classNames.length?classNames.map(cls=>{
+  const roster=summary.filter(x=>String(x.className||'Kelas belum diatur').trim()===cls);
+  const graded=roster.filter(x=>x.averageScore!==null&&x.averageScore!==undefined);
+  const enrichment=graded.filter(x=>Number(x.averageScore)>85).sort((a,b)=>Number(b.averageScore)-Number(a.averageScore)).slice(0,3);
+  const support=graded.slice().sort((a,b)=>Number(a.averageScore)-Number(b.averageScore)).slice(0,3);
+  const supervision=roster.filter(x=>Number(x.reviewSessionCount)>0).sort((a,b)=>Number(b.reviewSessionCount)-Number(a.reviewSessionCount));
   const expanded=s.selectedSummaryClass===cls;
   const names=(list,fn)=>list.length?'<ul class="summary-student-list">'+list.map(fn).join('')+'</ul>':'<p class="muted">Belum ada data yang memenuhi kriteria.</p>';
-  const panel=expanded?'<div class="summary-class-content"><div class="summary-category"><b>Perlu Pengayaan</b><small>Hingga 3 siswa dengan rata-rata di atas 85</small>'+names(enrichment,x=>'<li>'+esc(x.student.name)+' <b>'+x.average+'</b></li>')+'</div><div class="summary-category"><b>Perlu Pendampingan</b><small>3 rata-rata terendah dari siswa yang sudah dinilai</small>'+names(support,x=>'<li>'+esc(x.student.name)+' <b>'+x.average+'</b></li>')+'</div><div class="summary-category"><b>Dalam Pengawasan</b><small>Siswa dengan sesi yang masuk kategori Perlu ditinjau pada pemantauan</small>'+names(supervision,x=>'<li>'+esc(x.student.name)+' <b>'+x.count+' sesi ditandai</b></li>')+'</div></div>':'';
+  const panel=expanded?'<div class="summary-class-content"><div class="summary-category"><b>Perlu Pengayaan</b><small>Hingga 3 siswa dengan rata-rata di atas 85</small>'+names(enrichment,x=>'<li>'+esc(x.studentName)+' <b>'+Number(x.averageScore)+' · '+Number(x.gradedAssessmentCount||0)+' asesmen</b></li>')+'</div><div class="summary-category"><b>Perlu Pendampingan</b><small>3 rata-rata terendah dari siswa yang sudah dinilai</small>'+names(support,x=>'<li>'+esc(x.studentName)+' <b>'+Number(x.averageScore)+' · '+Number(x.gradedAssessmentCount||0)+' asesmen</b></li>')+'</div><div class="summary-category"><b>Dalam Pengawasan</b><small>Siswa dengan sesi yang masuk kategori Perlu ditinjau pada pemantauan</small>'+names(supervision,x=>'<li>'+esc(x.studentName)+' <b>'+Number(x.reviewSessionCount)+' sesi ditandai</b></li>')+'</div></div>':'';
   return '<section class="summary-class-group"><button class="summary-class-toggle" data-class="'+esc(cls)+'" onclick="selectSummaryClass(this.dataset.class)" aria-expanded="'+expanded+'"><span>'+(expanded?'▾':'▸')+'</span><b>'+esc(cls)+'</b><small>'+roster.length+' siswa</small></button>'+panel+'</section>';
  }).join(''):'<p class="muted">Belum ada data kelas siswa.</p>';
  return head('DASHBOARD GURU','Selamat datang, '+esc((s.currentUser&&s.currentUser.name)||'Guru')+'!','Ringkasan perkembangan siswa dihitung dari asesmen yang sudah dinilai dan catatan pemantauan.','<button class="btn primary" onclick="newA()">＋ Buat asesmen</button>')+
  '<div class="grid stats">'+stat('Total asesmen',String(all.length),'Asesmen milik Anda')+stat('Dipublikasikan',String(published),'Asesmen terbit')+stat('Draft',String(drafts),'Belum diterbitkan')+stat('Jumlah soal',String(questionCount),'Dari seluruh asesmen')+'</div>'+
- '<div class="card"><div class="actions"><h3>Ringkasan siswa per kelas</h3><button class="btn section-refresh-button" onclick="refreshTeacherSummary()"><span aria-hidden="true">↻</span> Muat ulang</button></div>'+classPanel+'<p class="footnote">Rata-rata hanya menggunakan pengerjaan berstatus sudah dinilai. Perlu Pengayaan menggunakan rata-rata di atas 85; Perlu Pendampingan menampilkan hingga 3 rata-rata terendah. Dalam Pengawasan mencatat siswa dengan sesi yang pernah masuk kategori Perlu ditinjau (indikator lebih dari 3 kali).</p></div>'+
+ '<div class="card"><div class="actions"><h3>Ringkasan siswa per kelas</h3><button class="btn section-refresh-button" onclick="refreshTeacherSummary()"><span aria-hidden="true">↻</span> Muat ulang</button></div>'+classPanel+'<p class="footnote">Rata-rata hanya menggunakan pengerjaan berstatus sudah dinilai dan menampilkan jumlah asesmen yang dihitung. Perlu Pengayaan menggunakan rata-rata di atas 85; Perlu Pendampingan menampilkan hingga 3 rata-rata terendah. Dalam Pengawasan mencatat siswa dengan sesi yang memenuhi kriteria Perlu ditinjau (salah satu indikator lebih dari 3 kali).</p></div>'+
  '<div class="card"><div class="actions"><h3>Asesmen terbaru</h3><button class="btn" onclick="go(&quot;assessments&quot;)">Lihat jadwal & asesmen</button></div>'+rows()+'</div>';
 }
+function selectSummaryClass(name){s.selectedSummaryClass=s.selectedSummaryClass===name?'':name;render()}
+async function refreshTeacherSummary(){await loadAssessments();await Promise.all([loadTeacherSummary(),loadMonitoring()]);render()}
 function selectSummaryClass(name){s.selectedSummaryClass=s.selectedSummaryClass===name?'':name;render()}
 async function refreshTeacherSummary(){await loadAssessments();await Promise.all([loadAttempts(),loadStudents(),loadMonitoring()]);render()}
 function monitoringPage(){
@@ -935,7 +944,7 @@ async function loadCurrentUser(){
       render();
       await loadAssessments();
       if (s.role === 'student') await loadAttempts();
-      else { await Promise.all([loadAttempts(),loadStudents()]); await loadMonitoring(); }
+      else { await Promise.all([loadTeacherSummary(),loadMonitoring()]); }
     } else {
       render();
     }
