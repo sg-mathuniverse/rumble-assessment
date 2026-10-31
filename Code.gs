@@ -160,7 +160,7 @@ function routeAction_(action, payload) {
   const teacherOnly = [
     'createAssessment','deleteAssessment','saveQuestionBundle','listQuestionBundles',
     'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
-    'publishAssessment','gradeAttempt','listStudents','listMonitoring'
+    'publishAssessment','gradeAttempt','listStudents','listMonitoring','getTeacherSummary'
   ];
   const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt','saveAttempt'];
   const shared = ['listAssessments','getAssessment','listAttempts'];
@@ -229,6 +229,7 @@ function routeAction_(action, payload) {
       return logEvent_(Object.assign({}, trusted, { attemptId: attemptId }));
     },
     listMonitoring: function () { return listMonitoring_(trusted); },
+    getTeacherSummary: function () { return getTeacherSummary_(trusted); },
     listStudents: function () {
       return listRows_('Users').filter(function (item) {
         return String(item.role).toLowerCase() === 'student' &&
@@ -1499,6 +1500,67 @@ function logEvent_(payload) {
  * Data pemantauan hanya berisi sesi pada asesmen milik guru yang sedang login.
  * Tidak mengirim isi jawaban, kunci jawaban, atau alamat email siswa.
  */
+function getTeacherSummary_(payload) {
+  const teacher = payload.currentUser;
+  if (!teacher || teacher.role !== 'teacher') throw new Error('Fitur ringkasan hanya untuk guru.');
+  const email = String(teacher.email || '').trim().toLowerCase();
+  const assessments = listRows_('Assessments').filter(function (assessment) {
+    return String(assessment.createdBy || '').trim().toLowerCase() === email;
+  });
+  const owned = {};
+  assessments.forEach(function (assessment) { owned[String(assessment.assessmentId)] = assessment; });
+  const users = listRows_('Users').filter(function (user) {
+    const active = user.active === true || String(user.active).toLowerCase() === 'true' || String(user.active) === '1';
+    return String(user.role).toLowerCase() === 'student' && active;
+  });
+  const attempts = listRows_('Attempts').filter(function (attempt) {
+    return !!owned[String(attempt.assessmentId)];
+  });
+  const attemptById = {};
+  const studentStats = {};
+  attempts.forEach(function (attempt) {
+    const id = String(attempt.attemptId);
+    attemptById[id] = attempt;
+    const assessment = owned[String(attempt.assessmentId)] || {};
+    const studentId = String(attempt.studentId);
+    if (!studentStats[studentId]) studentStats[studentId] = { className: String(assessment.className || ''), scoreTotal: 0, gradedCount: 0, reviewSessionCount: 0 };
+    if (String(attempt.status) === 'graded' && Number(attempt.maxScore) > 0) {
+      studentStats[studentId].scoreTotal += (Number(attempt.score) || 0) / Number(attempt.maxScore) * 100;
+      studentStats[studentId].gradedCount++;
+    }
+  });
+  const eventCounts = {};
+  listRows_('Events').forEach(function (event) {
+    const attemptId = String(event.attemptId);
+    if (!attemptById[attemptId]) return;
+    if (!eventCounts[attemptId]) eventCounts[attemptId] = { fullscreen: 0, reload: 0, blur: 0, hidden: 0 };
+    const counts = eventCounts[attemptId];
+    if (String(event.eventType) === 'fullscreen_exit') counts.fullscreen++;
+    if (String(event.eventType) === 'page_reload') counts.reload++;
+    if (String(event.eventType) === 'window_blur') counts.blur++;
+    if (String(event.eventType) === 'page_hidden') counts.hidden++;
+  });
+  attempts.forEach(function (attempt) {
+    const counts = eventCounts[String(attempt.attemptId)] || { fullscreen: 0, reload: 0, blur: 0, hidden: 0 };
+    counts.hidden = Math.max(counts.hidden, Number(attempt.focusLossCount) || 0);
+    if (counts.fullscreen > 3 || counts.reload > 3 || counts.blur > 3 || counts.hidden > 3) {
+      const stats = studentStats[String(attempt.studentId)];
+      if (stats) stats.reviewSessionCount++;
+    }
+  });
+  return users.map(function (user) {
+    const stats = studentStats[String(user.userId)] || { className: String(user.className || ''), scoreTotal: 0, gradedCount: 0, reviewSessionCount: 0 };
+    const count = Number(stats.gradedCount) || 0;
+    return {
+      studentName: String(user.name || 'Siswa'),
+      className: String(user.className || stats.className || 'Kelas belum diatur'),
+      averageScore: count ? Math.round(stats.scoreTotal / count) : null,
+      gradedAssessmentCount: count,
+      reviewSessionCount: Number(stats.reviewSessionCount) || 0
+    };
+  });
+}
+
 function listMonitoring_(payload) {
   const teacher = payload.currentUser;
   if (!teacher || teacher.role !== 'teacher') throw new Error('Fitur pemantauan hanya untuk guru.');
