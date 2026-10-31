@@ -604,7 +604,7 @@ async function submitAssessment(autoSubmit){
  const a=(s.currentAssessment||{}).assessment||{};if(!a.assessmentId&&!a.id){toast('ID asesmen tidak ditemukan.');return}
  if(s.submittingAttempt)return;
  if(!autoSubmit){const attempt=s.activeAttempt||{},started=new Date(attempt.startedAt||Date.now()).getTime(),durationMs=Math.max(1,Number(a.duration||attempt.duration||45))*60000,remaining=started+durationMs-Date.now();if(remaining>8*60000){const mins=Math.ceil((remaining-8*60000)/60000);toast('Pengumpulan baru dibuka pada 8 menit terakhir. Silakan periksa jawaban kembali.');return}if(!confirm('Kirim jawaban sekarang? Pastikan semua jawaban sudah diperiksa.'))return;}
- s.submittingAttempt=true;if(examTimerInterval){clearInterval(examTimerInterval);examTimerInterval=null}sendSecurityEvent('exam_submitted');stopExamSecurity();
+ s.submittingAttempt=true;if(examTimerInterval){clearInterval(examTimerInterval);examTimerInterval=null}sendSecurityEvent('exam_submit_attempted');stopExamSecurity();
  try{const r=await api('submitAttempt',{assessmentId:a.assessmentId||a.id,attemptId:s.activeAttempt&&s.activeAttempt.attemptId,answers:s.answers,autoSubmitOnExpiry:autoSubmit===true});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Jawaban gagal dikirim');
   toast(autoSubmit?'Waktu habis. Jawaban berhasil dikirim.':'Jawaban berhasil dikirim dan diproses.');s.page='assessments';s.currentAssessment=null;s.activeAttempt=null;s.answers={};render();await loadAssessments();
  }catch(e){s.submittingAttempt=false;if(s.role==='student'&&s.page==='detail')startExamSecurity();toast('Gagal mengirim jawaban: '+e.message)}
