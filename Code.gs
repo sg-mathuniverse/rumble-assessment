@@ -1434,7 +1434,7 @@ function gradeAttempt_(payload) {
 function logEvent_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
-  const allowedTypes = ['exam_started','page_hidden','page_visible','window_blur','window_focus','fullscreen_exit','exam_submit_attempted'];
+  const allowedTypes = ['exam_started','page_hidden','page_visible','window_blur','window_focus','fullscreen_exit','page_reload','exam_submit_attempted'];
   const eventType = requiredText_(payload.eventType, 'Jenis kejadian', 80);
   if (allowedTypes.indexOf(eventType) < 0) throw new Error('Jenis event keamanan tidak dikenal.');
 
@@ -1516,6 +1516,9 @@ function listMonitoring_(payload) {
     }).sort(function (a, b) {
       return new Date(b.eventAt).getTime() - new Date(a.eventAt).getTime();
     });
+    const countEvent = function (type) {
+      return attemptEvents.filter(function (event) { return String(event.eventType) === type; }).length;
+    };
     const answers = parseJson_(attempt.answersJson, {});
     const answeredCount = Object.keys(answers && typeof answers === 'object' ? answers : {}).filter(function (key) {
       const value = answers[key];
@@ -1527,25 +1530,33 @@ function listMonitoring_(payload) {
       return value !== null && value !== undefined && String(value).trim() !== '';
     }).length;
     const latestEvent = attemptEvents.length ? attemptEvents[0] : null;
+    const pageHiddenCount = Math.max(Number(attempt.focusLossCount) || 0, countEvent('page_hidden'));
     return {
       attemptId: String(attempt.attemptId),
       assessmentId: String(attempt.assessmentId),
       assessmentTitle: String(assessment.title || 'Asesmen'),
+      assessmentSubject: String(assessment.subject || 'Umum'),
+      assessmentStartAt: assessment.startAt || '',
+      assessmentEndAt: assessment.endAt || '',
+      assessmentCreatedAt: assessment.createdAt || '',
       className: String(assessment.className || ''),
       studentName: String(student.name || 'Siswa'),
       studentId: String(attempt.studentId),
       status: String(attempt.status || ''),
       startedAt: attempt.startedAt || '',
       submittedAt: attempt.submittedAt || '',
-      focusLossCount: Number(attempt.focusLossCount) || 0,
-      windowBlurCount: attemptEvents.filter(function (event) { return String(event.eventType) === 'window_blur'; }).length,
+      fullscreenExitCount: countEvent('fullscreen_exit'),
+      pageReloadCount: countEvent('page_reload'),
+      windowBlurCount: countEvent('window_blur'),
+      pageHiddenCount: pageHiddenCount,
+      focusLossCount: pageHiddenCount,
       answeredCount: answeredCount,
       questionCount: questions.filter(function (question) {
         return String(question.assessmentId) === String(attempt.assessmentId);
       }).length,
       lastActivityAt: latestEvent ? latestEvent.eventAt : (attempt.submittedAt || attempt.startedAt || ''),
       lastEventType: latestEvent ? String(latestEvent.eventType || '') : '',
-      recentEvents: attemptEvents.slice(0, 6).map(function (event) {
+      recentEvents: attemptEvents.slice(0, 100).map(function (event) {
         return {
           eventType: String(event.eventType || ''),
           eventAt: event.eventAt || '',
@@ -1562,11 +1573,6 @@ function listMonitoring_(payload) {
   });
   return rows;
 }
-
-/**
- * Membuat pengguna sederhana.
- * Autentikasi dan validasi izin perlu ditambahkan sebelum produksi.
- */
 function getCurrentUser_() {
   const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
   if (!email) return { authenticated: false, email: '', user: null, reason: 'email_unavailable' };
