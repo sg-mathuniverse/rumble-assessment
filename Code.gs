@@ -160,7 +160,7 @@ function routeAction_(action, payload) {
   const teacherOnly = [
     'createAssessment','deleteAssessment','saveQuestionBundle','listQuestionBundles',
     'getQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
-    'publishAssessment','gradeAttempt','listStudents'
+    'publishAssessment','gradeAttempt','listStudents','listMonitoring'
   ];
   const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt','saveAttempt'];
   const shared = ['listAssessments','getAssessment','listAttempts'];
@@ -221,9 +221,14 @@ function routeAction_(action, payload) {
     logEvent: function () {
       const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
       const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
-      if (!attempt || String(attempt.studentId) !== String(user.userId)) throw new Error('Pengerjaan tidak ditemukan untuk akun ini.');
-      return logEvent_(trusted);
+      if (!attempt || String(attempt.studentId) !== String(user.userId) || String(attempt.status) !== 'in_progress') {
+        throw new Error('Sesi aktif tidak ditemukan untuk akun ini.');
+      }
+      const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+      assertStudentAssessmentIdentity_(assessment, user);
+      return logEvent_(Object.assign({}, trusted, { attemptId: attemptId }));
     },
+    listMonitoring: function () { return listMonitoring_(trusted); },
     listStudents: function () {
       return listRows_('Users').filter(function (item) {
         return String(item.role).toLowerCase() === 'student' &&
@@ -1423,23 +1428,133 @@ function gradeAttempt_(payload) {
 }
 
 /**
- * Mencatat peristiwa selama pengerjaan asesmen.
+ * Mencatat event keamanan dari sesi siswa yang telah diverifikasi oleh routeAction_.
+ * Hanya event yang dikenal yang disimpan; waktu selalu dibuat di server.
  */
 function logEvent_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
+  const allowedTypes = ['exam_started','page_hidden','page_visible','window_blur','window_focus','fullscreen_exit','exam_submitted'];
   const eventType = requiredText_(payload.eventType, 'Jenis kejadian', 80);
+  if (allowedTypes.indexOf(eventType) < 0) throw new Error('Jenis event keamanan tidak dikenal.');
 
+  const attemptSheet = getSheet_('Attempts');
+  const values = attemptSheet.getDataRange().getValues();
+  if (values.length < 2) throw new Error('Sesi pengerjaan tidak ditemukan.');
+  const headers = values[0].map(String);
+  const col = function (name) {
+    const index = headers.indexOf(name);
+    if (index < 0) throw new Error('Kolom ' + name + ' tidak ditemukan pada Attempts.');
+    return index;
+  };
+  let rowNumber = -1;
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][col('attemptId')]) === attemptId &&
+        String(values[i][col('studentId')]) === studentId &&
+        String(values[i][col('status')]) === 'in_progress') {
+      rowNumber = i + 1;
+      break;
+    }
+  }
+  if (rowNumber < 0) throw new Error('Sesi aktif tidak ditemukan.');
+
+  const details = payload.details && typeof payload.details === 'object' ? payload.details : {};
+  const safeDetails = {
+    platform: String(details.platform || '').slice(0, 20),
+    visibilityState: String(details.visibilityState || '').slice(0, 20)
+  };
+  const now = currentTimestamp_();
   appendRow_('Events', {
     eventId: makeId_('EVT'),
     attemptId: attemptId,
     studentId: studentId,
     eventType: eventType,
-    eventAt: currentTimestamp_(),
-    detailsJson: JSON.stringify(payload.details || {})
+    eventAt: now,
+    detailsJson: JSON.stringify(safeDetails)
   });
 
-  return { logged: true };
+  // Satu kehilangan visibilitas dihitung satu kali per transisi hidden.
+  if (eventType === 'page_hidden') {
+    const focusCol = headers.indexOf('focusLossCount');
+    if (focusCol >= 0) {
+      const current = Number(values[rowNumber - 1][focusCol]) || 0;
+      attemptSheet.getRange(rowNumber, focusCol + 1).setValue(current + 1);
+    }
+  }
+  return { logged: true, eventAt: now };
+}
+
+/**
+ * Data pemantauan hanya berisi sesi pada asesmen milik guru yang sedang login.
+ * Tidak mengirim isi jawaban, kunci jawaban, atau alamat email siswa.
+ */
+function listMonitoring_(payload) {
+  const teacher = payload.currentUser;
+  if (!teacher || teacher.role !== 'teacher') throw new Error('Fitur pemantauan hanya untuk guru.');
+  const assessments = listRows_('Assessments').filter(function (assessment) {
+    return String(assessment.createdBy || '').trim().toLowerCase() === String(teacher.email || '').trim().toLowerCase();
+  });
+  const owned = {};
+  assessments.forEach(function (assessment) { owned[String(assessment.assessmentId)] = assessment; });
+  const users = listRows_('Users');
+  const events = listRows_('Events');
+  const questions = listRows_('Questions');
+  const rows = listRows_('Attempts').filter(function (attempt) {
+    return !!owned[String(attempt.assessmentId)];
+  }).map(function (attempt) {
+    const assessment = owned[String(attempt.assessmentId)];
+    const student = users.find(function (item) {
+      return String(item.userId) === String(attempt.studentId);
+    }) || {};
+    const attemptEvents = events.filter(function (event) {
+      return String(event.attemptId) === String(attempt.attemptId);
+    }).sort(function (a, b) {
+      return new Date(b.eventAt).getTime() - new Date(a.eventAt).getTime();
+    });
+    const answers = parseJson_(attempt.answersJson, {});
+    const answeredCount = Object.keys(answers && typeof answers === 'object' ? answers : {}).filter(function (key) {
+      const value = answers[key];
+      if (Array.isArray(value)) return value.length > 0;
+      if (value && typeof value === 'object') return Object.keys(value).some(function (part) {
+        const item = value[part];
+        return Array.isArray(item) ? item.length > 0 : item !== null && item !== undefined && String(item).trim() !== '';
+      });
+      return value !== null && value !== undefined && String(value).trim() !== '';
+    }).length;
+    const latestEvent = attemptEvents.length ? attemptEvents[0] : null;
+    return {
+      attemptId: String(attempt.attemptId),
+      assessmentId: String(attempt.assessmentId),
+      assessmentTitle: String(assessment.title || 'Asesmen'),
+      className: String(assessment.className || ''),
+      studentName: String(student.name || 'Siswa'),
+      studentId: String(attempt.studentId),
+      status: String(attempt.status || ''),
+      startedAt: attempt.startedAt || '',
+      submittedAt: attempt.submittedAt || '',
+      focusLossCount: Number(attempt.focusLossCount) || 0,
+      answeredCount: answeredCount,
+      questionCount: questions.filter(function (question) {
+        return String(question.assessmentId) === String(attempt.assessmentId);
+      }).length,
+      lastActivityAt: latestEvent ? latestEvent.eventAt : (attempt.submittedAt || attempt.startedAt || ''),
+      lastEventType: latestEvent ? String(latestEvent.eventType || '') : '',
+      recentEvents: attemptEvents.slice(0, 6).map(function (event) {
+        return {
+          eventType: String(event.eventType || ''),
+          eventAt: event.eventAt || '',
+          details: parseJson_(event.detailsJson, {})
+        };
+      })
+    };
+  });
+  rows.sort(function (a, b) {
+    const aActive = a.status === 'in_progress' ? 1 : 0;
+    const bActive = b.status === 'in_progress' ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+    return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+  });
+  return rows;
 }
 
 /**
