@@ -235,16 +235,66 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
  .nav-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;margin-left:7px;border-radius:20px;background:#e8efff;color:#3157d5;font-size:11px;font-weight:800;line-height:1}
  .essay-photo-preview{display:inline-flex;flex-direction:column;gap:4px;max-width:180px;text-decoration:none;overflow-wrap:anywhere}.essay-photo-preview img{display:block;width:100%;max-height:150px;object-fit:contain;border:1px solid #dce4f1;border-radius:9px;background:#f7f9fd}.essay-photo-preview span{font-size:11px;color:#3157d5}.report-answer-key{margin-top:10px;padding-top:9px;border-top:1px solid #e3e9f3}.report-answer-key .math-content{white-space:pre-wrap;overflow-x:auto}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script></head><body><div id="app"></div><div class="toast" id="toast"></div><script>
-const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
+const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,monitoring:[],monitoringLoaded:false,assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
+let monitoringPollInterval=null;
+let examSecurityActive=false,securityEventLastSent={},securityWarningCount=0;
+function sendSecurityEvent(eventType){
+ if(!examSecurityActive||!s.activeAttempt||!s.currentAssessment)return;
+ const now=Date.now(),last=securityEventLastSent[eventType]||0;
+ if(now-last<2500)return;
+ securityEventLastSent[eventType]=now;
+ api('logEvent',{attemptId:s.activeAttempt.attemptId,eventType,details:{platform:/iPhone|iPad|iPod/.test(navigator.userAgent)?'iOS':/Android/i.test(navigator.userAgent)?'Android':'Other',visibilityState:document.visibilityState||'unknown'}}).catch(error=>console.warn('Security event:',error.message));
+}
+function handleExamVisibility(){
+ if(!examSecurityActive)return;
+ if(document.visibilityState==='hidden'){
+  securityWarningCount++;
+  sendSecurityEvent('page_hidden');
+ }else sendSecurityEvent('page_visible');
+ const warning=document.getElementById('examSecurityWarning');
+ if(warning){warning.textContent=securityWarningCount?'Peringatan: halaman asesmen sempat tidak terlihat ('+securityWarningCount+' kali). Perpindahan ini dicatat sebagai indikator, bukan bukti pelanggaran.':'Pemantauan aktivitas halaman aktif. Perpindahan aplikasi tertentu mungkin tidak terdeteksi oleh browser.';}
+}
+function handleExamBlur(){sendSecurityEvent('window_blur')}
+function handleExamFocus(){sendSecurityEvent('window_focus')}
+function handleExamFullscreen(){if(examSecurityActive&&!document.fullscreenElement&&document.visibilityState==='visible')sendSecurityEvent('fullscreen_exit')}
+function startExamSecurity(){
+ if(examSecurityActive)return;
+ examSecurityActive=true;securityEventLastSent={};securityWarningCount=0;
+ document.addEventListener('visibilitychange',handleExamVisibility);
+ document.addEventListener('fullscreenchange',handleExamFullscreen);
+ window.addEventListener('blur',handleExamBlur);
+ window.addEventListener('focus',handleExamFocus);
+ if(!s.activeAttempt.resumed)sendSecurityEvent('exam_started');
+}
+function stopExamSecurity(){
+ if(!examSecurityActive)return;
+ document.removeEventListener('visibilitychange',handleExamVisibility);
+ document.removeEventListener('fullscreenchange',handleExamFullscreen);
+ window.removeEventListener('blur',handleExamBlur);
+ window.removeEventListener('focus',handleExamFocus);
+ examSecurityActive=false;
+}
+async function requestExamFullscreen(){
+ const target=document.documentElement;
+ if(!target.requestFullscreen){toast('Mode layar penuh tidak didukung browser ini. Asesmen tetap dapat dikerjakan.');return}
+ try{await target.requestFullscreen()}catch(error){toast('Browser tidak mengizinkan layar penuh. Lanjutkan asesmen seperti biasa.')}
+}
+function stopMonitoringPolling(){if(monitoringPollInterval){clearInterval(monitoringPollInterval);monitoringPollInterval=null}}
+async function loadMonitoring(){
+ if(s.role!=='teacher')return;
+ try{const result=await api('listMonitoring',{});if(!result||!result.ok)throw Error(result&&result.error?result.error:'Data pemantauan tidak tersedia');s.monitoring=Array.isArray(result.data)?result.data:[];s.monitoringLoaded=true;if(s.page==='monitoring')render();}
+ catch(error){s.monitoringLoaded=true;if(s.page==='monitoring'){render();toast('Gagal memuat pemantauan: '+error.message)}}
+}
+function startMonitoringPolling(){stopMonitoringPolling();loadMonitoring();monitoringPollInterval=setInterval(loadMonitoring,20000)}
 const demo=[{id:'ASM-101',title:'Persamaan Kuadrat',subject:'Matematika',className:'Kelas IX-A',duration:60,status:'Aktif'},{id:'ASM-102',title:'Sistem Persamaan Linear',subject:'Matematika',className:'Kelas VIII-B',duration:45,status:'Draft'},{id:'ASM-103',title:'Fungsi dan Grafik',subject:'Matematika',className:'Kelas IX-B',duration:50,status:'Selesai'}];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(x){let e=document.getElementById('toast');e.textContent=x;e.style.display='block';e.classList.remove('toast-saving','toast-saved','toast-error');if(/^Menyimpan jawaban/.test(x))e.classList.add('toast-saving');else if(/^Jawaban tersimpan/.test(x))e.classList.add('toast-saved');else if(/belum tersimpan|Gagal menyimpan/.test(x))e.classList.add('toast-error');if(window.__toastTimer)clearTimeout(window.__toastTimer);window.__toastTimer=setTimeout(()=>{e.style.display='none'},3200)}
 function questionAnswerState(q){const v=s.answers[String(q&&q.id||'')];if(v===undefined||v===null||v==='')return 'empty';const filled=x=>Array.isArray(x)?x.length>0:x!==undefined&&x!==null&&String(x).trim()!=='';if(q&&q.type==='true_false_multi'){const total=(q.subquestions||[]).length,done=Array.from({length:total},(_,i)=>filled(v&&v[String(i)] )).filter(Boolean).length;return !done?'empty':done<total?'partial':'answered'}if(q&&q.type==='matching'){const total=(q.pairs||[]).length,done=Array.from({length:total},(_,i)=>filled(v&&v[String(i)])).filter(Boolean).length;return !done?'empty':done<total?'partial':'answered'}if(q&&q.type==='essay'&&Array.isArray(q.subquestions)&&q.subquestions.length){const total=q.subquestions.length,done=Array.from({length:total},(_,i)=>filled(v&&v[String(i)])).filter(Boolean).length;return !done?'empty':done<total?'partial':'answered'}if(Array.isArray(v))return v.length?'answered':'empty';if(typeof v==='object'){const hasText=filled(v.text)||filled(v.photos&&v.photos.length?v.photos:'');return hasText?'answered':Object.keys(v).some(k=>filled(v[k]))?'partial':'empty'}return filled(v)?'answered':'empty'}
-function go(p){s.page=p;render();if(p==='reports'){s.selectedReportAssessmentId='';s.selectedReportAttemptId='';loadAttempts();loadStudents()}if(p==='progress')loadAttempts();if(p==='students')loadStudents();if(p==='bundles')loadBundles();if(p==='gradebook'){loadAttempts();loadStudents()}}
+function go(p){if(s.page==='detail'&&s.role==='student'&&p!=='detail')return;stopMonitoringPolling();s.page=p;render();if(p==='reports'){s.selectedReportAssessmentId='';s.selectedReportAttemptId='';loadAttempts();loadStudents()}if(p==='progress')loadAttempts();if(p==='students')loadStudents();if(p==='bundles')loadBundles();if(p==='gradebook'){loadAttempts();loadStudents()}if(p==='monitoring')startMonitoringPolling()}
 function formatLocalDateTime(value){if(!value)return '—';const date=new Date(value);if(!isFinite(date.getTime()))return String(value);return date.toLocaleString('id-ID',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function head(k,t,d,b=''){return '<div class="head"><div><div class="kicker">'+k+'</div><h2>'+t+'</h2><p>'+d+'</p></div>'+b+'</div>'}
 function stat(l,n,d){return '<div class="card"><div class="statlabel">'+l+'</div><div class="num">'+n+'</div><div class="muted">'+d+'</div></div>'}
-function nav(){let a=s.role==='teacher' ? [['overview','▦ Ringkasan'],['bundles','▣ Bank soal'],['assessments','▤ Jadwal & asesmen'],['students','♙ Siswa'],['reports','▥ Analitik'],['gradebook','▧ Rekap Nilai'],['settings','⚙ Pengaturan']] : [['progress','↗ Progres saya'],['assessments','▤ Jadwal ujian'],['settings','⚙ Pengaturan']];return a.map(function(x){const availableCount=x[0]==='assessments'&&s.role==='student'?(Array.isArray(s.items)?s.items.filter(item=>!(s.attempts||[]).some(at=>String(at.assessmentId)===String(item.assessmentId||item.id)&&String(at.status)!=='in_progress')).length:0):0;const label=x[0]==='assessments'&&s.role==='student'?x[1]+' <span class="nav-count">'+availableCount+'</span>':x[1];return '<button class="'+(s.page===x[0]?'active':'')+'" onclick="go(\''+x[0]+'\')">'+label+'</button>'}).join('')}
+function nav(){let a=s.role==='teacher' ? [['overview','▦ Ringkasan'],['bundles','▣ Bank soal'],['assessments','▤ Jadwal & asesmen'],['monitoring','◉ Pemantauan'],['students','♙ Siswa'],['reports','▥ Analitik'],['gradebook','▧ Rekap Nilai'],['settings','⚙ Pengaturan']] : [['progress','↗ Progres saya'],['assessments','▤ Jadwal ujian'],['settings','⚙ Pengaturan']];return a.map(function(x){const availableCount=x[0]==='assessments'&&s.role==='student'?(Array.isArray(s.items)?s.items.filter(item=>!(s.attempts||[]).some(at=>String(at.assessmentId)===String(item.assessmentId||item.id)&&String(at.status)!=='in_progress')).length:0):0;const label=x[0]==='assessments'&&s.role==='student'?x[1]+' <span class="nav-count">'+availableCount+'</span>':x[1];return '<button class="'+(s.page===x[0]?'active':'')+'" onclick="go(\''+x[0]+'\')">'+label+'</button>'}).join('')}
 function rows(){
  if(!s.loadedFromServer)return s.assessmentLoadError?'<div class="notice">Daftar asesmen gagal dimuat: '+esc(s.assessmentLoadError)+' <button class="btn" onclick="loadAssessments()">Coba lagi</button></div>':'<p class="muted">Mengambil asesmen dari server…</p>';
  const source=Array.isArray(s.items)?s.items:[];
@@ -263,6 +313,21 @@ function overview(){
  const classes=[...new Set(all.map(a=>String(a.className||'').trim()).filter(Boolean))];
  const classPanel=classes.length?classes.map(name=>{const count=all.filter(a=>String(a.className||'').trim()===name).length;return '<div class="listitem"><div class="symbol">▦</div><div class="grow"><b>'+esc(name)+'</b><small>'+count+' asesmen terkait</small></div><span class="pill">'+count+'</span></div>'}).join(''):'<p class="muted">Ringkasan kelas muncul setelah asesmen dibuat dan ditetapkan ke kelas.</p>';
  return head('DASHBOARD GURU','Selamat datang, '+esc((s.currentUser&&s.currentUser.name)||'Guru')+'!','Ruang kerja untuk merancang asesmen, mengatur jadwal, dan memahami progres belajar.','<button class="btn primary" onclick="newA()">＋ Buat asesmen</button>')+'<div class="grid stats">'+stat('Total asesmen',String(all.length),'Data dari server')+stat('Dipublikasikan',String(published),'Asesmen terbit')+stat('Draft',String(drafts),'Masih dapat disunting')+stat('Jumlah soal',String(questionCount),'Dari seluruh asesmen')+'</div><div class="grid columns"><div class="card"><h3>Asesmen terbaru</h3>'+rows()+'</div><div class="card"><h3>Asesmen per kelas</h3>'+classPanel+'<div class="notice">Tips: gunakan bank soal untuk menyusun asesmen berikutnya lebih cepat. Periksa pratinjau siswa sebelum memublikasikan.</div></div></div>';
+}
+function monitoringPage(){
+ const items=Array.isArray(s.monitoring)?s.monitoring:[];
+ const active=items.filter(item=>item.status==='in_progress');
+ const warned=items.filter(item=>Number(item.focusLossCount)>0);
+ const completed=items.filter(item=>item.status!=='in_progress');
+ const rows=items.length?items.map(item=>{
+  const events=(item.recentEvents||[]).slice(0,4).map(event=>'<div class="muted" style="font-size:12px">'+esc(formatLocalDateTime(event.eventAt))+' · '+esc(event.eventType)+'</div>').join('');
+  const state=item.status==='in_progress'?'<span class="pill live">Mengerjakan</span>':'<span class="pill">'+esc(item.status)+'</span>';
+  const count=Number(item.questionCount)||0,done=Math.min(Number(item.answeredCount)||0,count);
+  return '<tr><td><b>'+esc(item.studentName)+'</b><div class="muted">'+esc(item.className||'')+'</div></td><td>'+esc(item.assessmentTitle)+'</td><td>'+state+'</td><td>'+done+' / '+count+'</td><td>'+Number(item.focusLossCount||0)+'</td><td>'+esc(formatLocalDateTime(item.lastActivityAt))+'<div>'+events+'</div></td></tr>';
+ }).join(''):'<tr><td colspan="6" class="muted">Belum ada sesi pengerjaan pada asesmen milik Anda.</td></tr>';
+ return head('PENGAWASAN ASESMEN','Pemantauan siswa','Pembaruan otomatis setiap 20 detik. Aktivitas kehilangan fokus merupakan indikator browser, bukan bukti pasti kecurangan.','<button class="btn" onclick="loadMonitoring()">↻ Muat ulang</button>')+
+ '<div class="grid stats">'+stat('Sedang mengerjakan',String(active.length),'Sesi aktif')+stat('Ada indikator fokus',String(warned.length),'Perlu ditinjau guru')+stat('Selesai / lainnya',String(completed.length),'Status nonaktif')+stat('Total sesi',String(items.length),'Semua asesmen milik Anda')+'</div>'+
+ '<div class="card"><div class="actions"><h3>Aktivitas peserta</h3><span class="muted">'+(s.monitoringLoaded?'Data terbaru':'Memuat data…')+'</span></div><div style="overflow-x:auto"><table class="table"><thead><tr><th>Siswa</th><th>Asesmen</th><th>Status</th><th>Progres</th><th>Indikator fokus</th><th>Aktivitas terakhir / event terbaru</th></tr></thead><tbody>'+rows+'</tbody></table></div><p class="footnote">Data yang ditampilkan dibatasi pada asesmen yang dibuat oleh akun guru ini. Isi jawaban dan kunci jawaban tidak ditampilkan pada halaman pemantauan.</p></div>';
 }
 function assessments(){return head('Jadwal & asesmen','Kelola ujian','Buat jadwal asesmen, tentukan kelas murid, lalu pilih bundel soal dari Bank Soal.','<button class="btn primary" onclick="newA()">＋ Buat asesmen</button>')+'<div class="card"><h3>Semua asesmen</h3>'+rows()+'</div>'+(s.assessmentEditorOpen?editor():'')+'<p class="footnote">Bundel soal disimpan terpisah agar dapat digunakan ulang.</p>'}
 function bundlesPage(){return head('Perpustakaan soal','Bank soal & bundel','Simpan kumpulan soal untuk digunakan kembali pada jadwal ujian.','<button class="btn primary" onclick="newBundle()">＋ Buat bundel soal</button>')+'<div class="card"><div class="actions"><h3>Bundel tersimpan</h3><button class="btn" onclick="loadBundles()">Muat ulang</button></div>'+(s.bundlesLoaded?bundleRows():'<p class="muted">Memuat bundel soal...</p>')+'</div>'+(s.bundleEditorOpen&&s.editorMode==='bundle'?editor():'')+'<p class="footnote">Asesmen dari bundel menjadi salinan terpisah; bundel sumber tetap aman.</p>'}
@@ -441,7 +506,7 @@ function detailPage(){
  let body='';
  const passage=(a.passageText||a.passageImageUrl)?'<div class="question" style="white-space:pre-wrap"><b>Bacaan / stimulus</b><div class="passage-content">'+esc(a.passageText||'')+'</div>'+(a.passageImageUrl?'<img src="'+esc(a.passageImageUrl)+'" alt="Gambar bacaan" style="display:block;max-width:600px;max-height:380px;margin:8px 0;border-radius:8px">':'')+'</div>':'';
  if(student){
-  body='<div class="exam-sticky-header"><div class="exam-clock-panel"><div><div class="muted">Tanggal dan jam saat ini</div><div class="clock-time" id="examClock">Memuat waktu...</div></div><div><div class="muted">Sisa waktu ujian</div><div class="timer-value" id="examTimer">--:--</div></div></div>';
+  body='<div class="exam-sticky-header"><div class="notice" id="examSecurityWarning" role="status">Pemantauan aktivitas halaman aktif. Perpindahan aplikasi tertentu mungkin tidak terdeteksi oleh browser.</div><div class="actions"><span class="muted">Mode keamanan berbasis browser</span><button class="btn" type="button" onclick="requestExamFullscreen()">Aktifkan layar penuh</button></div><div class="exam-clock-panel"><div><div class="muted">Tanggal dan jam saat ini</div><div class="clock-time" id="examClock">Memuat waktu...</div></div><div><div class="muted">Sisa waktu ujian</div><div class="timer-value" id="examTimer">--:--</div></div></div>';
   body+='<div class="exam-tools"><div class="exam-progress-row"><span>Progres jawaban</span><span><span id="answerCount">0</span> dari '+qs.length+' soal terisi</span></div><div class="exam-progress-track" aria-hidden="true"><i id="answerProgressBar"></i></div><div class="question-nav" aria-label="Navigasi nomor soal">'+qs.map((q,i)=>'<button type="button" class="btn question-jump" data-target="question_'+esc(q.id||'')+'" onclick="jumpToQuestion(this.dataset.target)" aria-label="Ke soal '+(i+1)+'">'+(i+1)+'</button>').join('')+'</div></div></div>';
   body+=qs.map((q,i)=>{
    const id=esc(q.id||'');let control='';
@@ -525,7 +590,7 @@ async function openAssessment(id){
    const a=r.data.assessment||{};const started=await api('startAttempt',{assessmentId:a.assessmentId||a.id||id});
    if(!started||!started.ok)throw Error(started&&started.error?started.error:'Sesi ujian gagal disiapkan');s.activeAttempt=started.data;s.answers=started.data.answers&&typeof started.data.answers==='object'?started.data.answers:{};
   }
-  s.page='detail';render();if(s.role==='student'){restoreStudentAnswers();if(s.activeAttempt&&s.activeAttempt.expired){toast('Waktu asesmen sudah habis. Jawaban tersimpan akan dikirim otomatis.');await submitAssessment(true)}else{startExamClock()}}
+  s.page='detail';render();if(s.role==='student'){restoreStudentAnswers();if(s.activeAttempt&&s.activeAttempt.expired){toast('Waktu asesmen sudah habis. Jawaban tersimpan akan dikirim otomatis.');await submitAssessment(true)}else{startExamSecurity();startExamClock()}}
  }catch(e){toast('Gagal membuka detail: '+e.message)}
 }
 
@@ -539,10 +604,10 @@ async function submitAssessment(autoSubmit){
  const a=(s.currentAssessment||{}).assessment||{};if(!a.assessmentId&&!a.id){toast('ID asesmen tidak ditemukan.');return}
  if(s.submittingAttempt)return;
  if(!autoSubmit){const attempt=s.activeAttempt||{},started=new Date(attempt.startedAt||Date.now()).getTime(),durationMs=Math.max(1,Number(a.duration||attempt.duration||45))*60000,remaining=started+durationMs-Date.now();if(remaining>8*60000){const mins=Math.ceil((remaining-8*60000)/60000);toast('Pengumpulan baru dibuka pada 8 menit terakhir. Silakan periksa jawaban kembali.');return}if(!confirm('Kirim jawaban sekarang? Pastikan semua jawaban sudah diperiksa.'))return;}
- s.submittingAttempt=true;if(examTimerInterval){clearInterval(examTimerInterval);examTimerInterval=null}
+ s.submittingAttempt=true;if(examTimerInterval){clearInterval(examTimerInterval);examTimerInterval=null}sendSecurityEvent('exam_submitted');stopExamSecurity();
  try{const r=await api('submitAttempt',{assessmentId:a.assessmentId||a.id,attemptId:s.activeAttempt&&s.activeAttempt.attemptId,answers:s.answers,autoSubmitOnExpiry:autoSubmit===true});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Jawaban gagal dikirim');
   toast(autoSubmit?'Waktu habis. Jawaban berhasil dikirim.':'Jawaban berhasil dikirim dan diproses.');s.page='assessments';s.currentAssessment=null;s.activeAttempt=null;s.answers={};render();await loadAssessments();
- }catch(e){s.submittingAttempt=false;toast('Gagal mengirim jawaban: '+e.message)}
+ }catch(e){s.submittingAttempt=false;if(s.role==='student'&&s.page==='detail')startExamSecurity();toast('Gagal mengirim jawaban: '+e.message)}
 }
 
 async function testApi(){
@@ -689,7 +754,7 @@ async function loadCurrentUser(){
 }
 
 async function retryAuth(){s.authChecked=false;s.authReason='';render();await loadCurrentUser()}
-function render(){if(!s.authChecked||!s.authenticated||!s.currentUser){document.getElementById('app').innerHTML=renderAccessGate();return}let p=s.page,c=p==='overview'?overview():p==='bundles'?bundlesPage():p==='assessments'?assessments():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='gradebook'?gradebook():p==='progress'?progress():settings();const isStudentExam=s.page==='detail'&&s.role==='student';document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Belajar, ukur, tumbuh.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Aman · Terukur · Inklusif</footer></aside><main class="main">'+(isStudentExam?'':'<header class="top"><span class="muted">Ruang kerja / '+esc(p)+'</span><span class="account-chip"><span class="account-dot"></span>'+((s.currentUser&&s.currentUser.name)?esc(s.currentUser.name)+' · ':'')+(s.role==='teacher'?'Guru':'Siswa')+' <span class="role-lock" title="Peran ditentukan akun sekolah">Terverifikasi</span></span></header>')+'<div class="content">'+c+'</div></main></div>';document.querySelectorAll('.question p,.question label,.question li,.math-content,.passage-content,.report-question-text p,.report-question-text li,.report-answer-text').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));if(s.page==='detail'&&s.role==='student')updateAnswerProgress();}
+function render(){if(!s.authChecked||!s.authenticated||!s.currentUser){document.getElementById('app').innerHTML=renderAccessGate();return}let p=s.page,c=p==='overview'?overview():p==='bundles'?bundlesPage():p==='assessments'?assessments():p==='monitoring'?monitoringPage():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='gradebook'?gradebook():p==='progress'?progress():settings();const isStudentExam=s.page==='detail'&&s.role==='student';document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Belajar, ukur, tumbuh.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Aman · Terukur · Inklusif</footer></aside><main class="main">'+(isStudentExam?'':'<header class="top"><span class="muted">Ruang kerja / '+esc(p)+'</span><span class="account-chip"><span class="account-dot"></span>'+((s.currentUser&&s.currentUser.name)?esc(s.currentUser.name)+' · ':'')+(s.role==='teacher'?'Guru':'Siswa')+' <span class="role-lock" title="Peran ditentukan akun sekolah">Terverifikasi</span></span></header>')+'<div class="content">'+c+'</div></main></div>';document.querySelectorAll('.question p,.question label,.question li,.math-content,.passage-content,.report-question-text p,.report-question-text li,.report-answer-text').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));if(s.page==='detail'&&s.role==='student')updateAnswerProgress();}
 render();
 loadCurrentUser();
 </script></body></html>
