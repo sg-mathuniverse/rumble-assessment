@@ -266,7 +266,7 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 .monitoring-timeline-item b{font-size:12px}
 @media(max-width:680px){.monitoring-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.monitoring-filters{gap:6px}.monitoring-filters .btn{padding:8px 10px;font-size:11px}}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script></head><body><div id="app"></div><div class="toast" id="toast"></div><script>
-const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,monitoring:[],monitoringLoaded:false,monitoringUpdatedAt:'',monitoringError:'',selectedMonitoringAttemptId:'',monitoringFilter:'all',assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
+const s={role:'teacher',page:'overview',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,monitoring:[],monitoringLoaded:false,monitoringUpdatedAt:'',monitoringError:'',selectedMonitoringAttemptId:'',monitoringFilter:'all',monitoringExpandedGroups:{},monitoringLoading:false,assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
 let monitoringPollInterval=null;
 let examSecurityActive=false,securityEventLastSent={},securityWarningCount=0;
 function sendSecurityEvent(eventType){
@@ -274,7 +274,9 @@ function sendSecurityEvent(eventType){
  const now=Date.now(),last=securityEventLastSent[eventType]||0;
  if(now-last<2500)return;
  securityEventLastSent[eventType]=now;
- api('logEvent',{attemptId:s.activeAttempt.attemptId,eventType,details:{platform:/iPhone|iPad|iPod/.test(navigator.userAgent)?'iOS':/Android/i.test(navigator.userAgent)?'Android':'Other',visibilityState:document.visibilityState||'unknown'}}).catch(error=>console.warn('Security event:',error.message));
+ const ua=navigator.userAgent||'';
+ const platform=/iPhone|iPad|iPod/i.test(ua)?'iOS':/Android/i.test(ua)?'Android':/Windows/i.test(ua)?'Windows':/Macintosh|Mac OS/i.test(ua)?'macOS':/Linux/i.test(ua)?'Linux':'';
+ api('logEvent',{attemptId:s.activeAttempt.attemptId,eventType,details:{platform,visibilityState:document.visibilityState||'unknown'}}).catch(error=>console.warn('Security event:',error.message));
 }
 function handleExamVisibility(){
  if(!examSecurityActive)return;
@@ -311,22 +313,31 @@ async function requestExamFullscreen(){
  try{await target.requestFullscreen()}catch(error){toast('Browser tidak mengizinkan layar penuh. Lanjutkan asesmen seperti biasa.')}
 }
 function stopMonitoringPolling(){if(monitoringPollInterval){clearInterval(monitoringPollInterval);monitoringPollInterval=null}}
+function startMonitoringPolling(){
+ if(s.role!=='teacher')return;
+ stopMonitoringPolling();
+ loadMonitoring();
+ monitoringPollInterval=setInterval(function(){if(s.page==='monitoring')loadMonitoring()},20000);
+}
 async function loadMonitoring(){
-  if(s.role!=='teacher')return;
+  if(s.role!=='teacher'||s.monitoringLoading)return;
+  s.monitoringLoading=true;
   try{
    const result=await api('listMonitoring',{});
    if(!result||!result.ok)throw Error(result&&result.error?result.error:'Data pemantauan tidak tersedia');
    s.monitoring=Array.isArray(result.data)?result.data:[];
    s.monitoringLoaded=true;s.monitoringError='';s.monitoringUpdatedAt=new Date().toISOString();
    if(s.selectedMonitoringAttemptId&&!s.monitoring.some(item=>item.attemptId===s.selectedMonitoringAttemptId))s.selectedMonitoringAttemptId='';
-   if(s.page==='monitoring')render();
   }catch(error){
    s.monitoringLoaded=true;s.monitoringError=error.message||'Gagal memuat data pemantauan';
+  }finally{
+   s.monitoringLoading=false;
    if(s.page==='monitoring')render();
   }
  }
  function selectMonitoringAttempt(attemptId){s.selectedMonitoringAttemptId=String(attemptId||'');render();if(s.selectedMonitoringAttemptId){requestAnimationFrame(function(){const panel=document.getElementById('monitoringDetailPanel');if(panel){panel.scrollIntoView({behavior:'smooth',block:'start'});panel.setAttribute('tabindex','-1');panel.focus({preventScroll:true})}})}}
  function setMonitoringFilter(filter){s.monitoringFilter=['all','active','review','completed'].includes(filter)?filter:'all';render()}
+ function toggleMonitoringGroup(groupKey){if(!s.monitoringExpandedGroups)s.monitoringExpandedGroups={};s.monitoringExpandedGroups[groupKey]=!s.monitoringExpandedGroups[groupKey];render()}
  function monitoringStatusLabel(status){
   const labels={in_progress:'Sedang mengerjakan',submitted:'Sudah dikumpulkan',graded:'Sudah dinilai',completed:'Selesai'};
   return labels[String(status||'').toLowerCase()]||String(status||'Status tidak diketahui').replace(/_/g,' ');
