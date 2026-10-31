@@ -1434,7 +1434,7 @@ function gradeAttempt_(payload) {
 function logEvent_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
-  const allowedTypes = ['exam_started','page_hidden','page_visible','window_blur','window_focus','fullscreen_exit','exam_submitted'];
+  const allowedTypes = ['exam_started','page_hidden','page_visible','window_blur','window_focus','fullscreen_exit','exam_submit_attempted'];
   const eventType = requiredText_(payload.eventType, 'Jenis kejadian', 80);
   if (allowedTypes.indexOf(eventType) < 0) throw new Error('Jenis event keamanan tidak dikenal.');
 
@@ -1457,6 +1457,11 @@ function logEvent_(payload) {
     }
   }
   if (rowNumber < 0) throw new Error('Sesi aktif tidak ditemukan.');
+
+  const cache = CacheService.getScriptCache();
+  const throttleKey = 'rumble_sec_' + attemptId + '_' + eventType;
+  if (cache.get(throttleKey)) return { logged: false, throttled: true };
+  cache.put(throttleKey, '1', 3);
 
   const details = payload.details && typeof payload.details === 'object' ? payload.details : {};
   const safeDetails = {
