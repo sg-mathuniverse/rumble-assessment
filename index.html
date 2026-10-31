@@ -382,7 +382,7 @@ async function loadMonitoring(){
    s.monitoringLoaded=true;s.monitoringError=error.message||'Gagal memuat data pemantauan';
   }finally{
    s.monitoringLoading=false;
-   if(s.page==='monitoring'){
+   if(s.page==='monitoring'||s.page==='overview'){
     const previousScroll=window.scrollY||0;
     render();
     requestAnimationFrame(function(){window.scrollTo(0,previousScroll)});
