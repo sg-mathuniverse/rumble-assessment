@@ -1538,6 +1538,7 @@ function listMonitoring_(payload) {
       startedAt: attempt.startedAt || '',
       submittedAt: attempt.submittedAt || '',
       focusLossCount: Number(attempt.focusLossCount) || 0,
+      windowBlurCount: attemptEvents.filter(function (event) { return String(event.eventType) === 'window_blur'; }).length,
       answeredCount: answeredCount,
       questionCount: questions.filter(function (question) {
         return String(question.assessmentId) === String(attempt.assessmentId);
