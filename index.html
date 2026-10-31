@@ -390,41 +390,55 @@ function overview(){
 }
 function monitoringPage(){
   const items=Array.isArray(s.monitoring)?s.monitoring:[];
+  const hiddenCount=item=>Number(item.focusLossCount)||0;
+  const blurCount=item=>Number(item.windowBlurCount)||0;
+  const flagged=item=>hiddenCount(item)>0||blurCount(item)>0;
   const active=items.filter(item=>item.status==='in_progress');
-  const warned=items.filter(item=>Number(item.focusLossCount)>0);
+  const warned=items.filter(flagged);
   const completed=items.filter(item=>item.status!=='in_progress');
   const filter=s.monitoringFilter||'all';
   const visible=items.filter(item=>{
    if(filter==='active')return item.status==='in_progress';
-   if(filter==='review')return Number(item.focusLossCount)>0;
+   if(filter==='review')return flagged(item);
    if(filter==='completed')return item.status!=='in_progress';
    return true;
   });
-  const rows=visible.length?visible.map(item=>{
-   const count=Number(item.questionCount)||0,done=Math.min(Number(item.answeredCount)||0,count);
-   const pct=count?Math.round(done/count*100):0;
-   const flagged=Number(item.focusLossCount)>0;
-   const recent=(item.recentEvents||[]).slice(0,2).map(event=>'<div class="muted monitoring-event-mini">'+esc(formatLocalDateTime(event.eventAt))+' · '+esc(monitoringEventLabel(event.eventType))+'</div>').join('');
-   const state='<span class="pill '+(item.status==='in_progress'?'live':'')+'">'+esc(monitoringStatusLabel(item.status))+'</span>';
-   const focus='<span class="monitoring-focus '+(flagged?'flag':'')+'">'+(flagged?Number(item.focusLossCount)+' indikator':'Tidak ada catatan')+'</span>';
-   return '<tr><td><b>'+esc(item.studentName)+'</b><div class="muted">'+esc(item.className||'')+'</div></td><td>'+esc(item.assessmentTitle)+'</td><td>'+state+'</td><td><b>'+done+' / '+count+'</b><div class="monitoring-progress"><i style="width:'+pct+'%"></i></div><small class="muted">'+pct+'% terjawab</small></td><td>'+focus+'</td><td>'+esc(formatLocalDateTime(item.lastActivityAt))+(recent?'<div>'+recent+'</div>':'')+'</td><td><button class="btn" data-attempt-id="'+esc(item.attemptId)+'" onclick="selectMonitoringAttempt(this.dataset.attemptId)">Detail</button></td></tr>';
-  }).join(''):'<tr><td colspan="7" class="muted">'+(items.length?'Tidak ada sesi yang sesuai filter ini.':(s.monitoringLoaded?'Belum ada sesi pengerjaan pada asesmen milik Anda.':'Memuat sesi pemantauan…'))+'</td></tr>';
+  const groups={};
+  visible.forEach(item=>{
+   const title=String(item.assessmentTitle||'Asesmen'),className=String(item.className||'Kelas tidak tercantum');
+   const key=String(item.assessmentId||title)+'::'+className;
+   if(!groups[key])groups[key]={key:key,title:title,className:className,items:[]};
+   groups[key].items.push(item);
+  });
+  const groupList=Object.keys(groups).map(key=>groups[key]).sort((a,b)=>a.title.localeCompare(b.title,'id')||a.className.localeCompare(b.className,'id'));
+  const groupHtml=groupList.length?groupList.map(group=>{
+   const groupActive=group.items.filter(item=>item.status==='in_progress').length,groupWarned=group.items.filter(flagged).length;
+   const expanded=!!(s.monitoringExpandedGroups&&s.monitoringExpandedGroups[group.key]);
+   const people=group.items.map(item=>{
+    const count=Number(item.questionCount)||0,done=Math.min(Number(item.answeredCount)||0,count),pct=count?Math.round(done/count*100):0;
+    const focus=hiddenCount(item),blur=blurCount(item),hasFlag=focus>0||blur>0;
+    const recent=(item.recentEvents||[]).slice(0,2).map(event=>'<div class="muted monitoring-event-mini">'+esc(formatLocalDateTime(event.eventAt))+' · '+esc(monitoringEventLabel(event.eventType))+'</div>').join('');
+    const state='<span class="pill '+(item.status==='in_progress'?'live':'')+'">'+esc(monitoringStatusLabel(item.status))+'</span>';
+    return '<div class="monitoring-student-row"><div class="monitoring-student-main"><b>'+esc(item.studentName)+'</b><span class="muted">'+state+' · '+done+'/'+count+' soal ('+pct+'%)</span><div class="monitoring-progress"><i style="width:'+pct+'%"></i></div><span class="monitoring-focus '+(hasFlag?'flag':'')+'">'+(hasFlag?focus+' halaman tidak terlihat · '+blur+' jendela kehilangan fokus':'Tidak ada catatan perubahan fokus')+'</span><span class="muted monitoring-last-activity">Aktivitas terakhir: '+esc(formatLocalDateTime(item.lastActivityAt))+'</span>'+(recent?'<div>'+recent+'</div>':'')+'</div><button class="btn" data-attempt-id="'+esc(item.attemptId)+'" onclick="selectMonitoringAttempt(this.dataset.attemptId)">Detail</button></div>';
+   }).join('');
+   return '<section class="monitoring-group"><button class="monitoring-group-toggle" aria-expanded="'+expanded+'" data-group-key="'+esc(group.key)+'" onclick="toggleMonitoringGroup(this.dataset.groupKey)"><span class="monitoring-group-chevron">'+(expanded?'▾':'▸')+'</span><span class="monitoring-group-title"><b>'+esc(group.title)+'</b><small>'+esc(group.className)+'</small></span><span class="monitoring-group-count">'+group.items.length+' sesi</span><span class="monitoring-group-meta">'+groupActive+' aktif · '+groupWarned+' perlu ditinjau</span></button>'+(expanded?'<div class="monitoring-group-people">'+people+'</div>':'')+'</section>';
+  }).join(''):'<div class="notice">'+(items.length?'Tidak ada sesi yang sesuai filter ini.':(s.monitoringLoaded?'Belum ada sesi pengerjaan pada asesmen milik Anda.':'Memuat sesi pemantauan…'))+'</div>';
   const selected=items.find(item=>String(item.attemptId)===String(s.selectedMonitoringAttemptId));
   const timeline=selected?(selected.recentEvents||[]).map(event=>{
-   const details=event.details&&typeof event.details==='object'?event.details:{};
-   const platform=details.platform?'<span class="muted"> · '+esc(details.platform)+'</span>':'';
+   const details=event.details&&typeof event.details==='object'?event.details:{},rawPlatform=details.platform||'';
+   const platform=rawPlatform?'<span class="muted"> · '+esc(rawPlatform==='Other'?'Perangkat tidak teridentifikasi':rawPlatform)+'</span>':'';
    return '<div class="monitoring-timeline-item"><span class="monitoring-timeline-dot"></span><div><b>'+esc(monitoringEventLabel(event.eventType))+'</b><div class="muted">'+esc(formatLocalDateTime(event.eventAt))+platform+'</div></div></div>';
   }).join(''):'';
-  const detail=selected?'<div class="card monitoring-detail" id="monitoringDetailPanel"><div class="actions"><div><div class="kicker">RINCIAN SESI</div><h3>'+esc(selected.studentName)+' · '+esc(selected.assessmentTitle)+'</h3></div><button class="btn" onclick="selectMonitoringAttempt(\'\')">Tutup detail</button></div><div class="grid monitoring-detail-grid"><div><small class="muted">Status</small><b>'+esc(monitoringStatusLabel(selected.status))+'</b></div><div><small class="muted">Progres</small><b>'+Math.min(Number(selected.answeredCount)||0,Number(selected.questionCount)||0)+' / '+(Number(selected.questionCount)||0)+' soal</b></div><div><small class="muted">Mulai</small><b>'+esc(formatLocalDateTime(selected.startedAt))+'</b></div><div><small class="muted">Dikumpulkan</small><b>'+esc(formatLocalDateTime(selected.submittedAt))+'</b></div><div><small class="muted">Indikator kehilangan fokus</small><b>'+Number(selected.focusLossCount||0)+' kali</b></div><div><small class="muted">Aktivitas terakhir</small><b>'+esc(formatLocalDateTime(selected.lastActivityAt))+'</b></div></div><h4>Riwayat aktivitas terbaru</h4>'+(timeline?'<div class="monitoring-timeline">'+timeline+'</div>':'<p class="muted">Belum ada event yang tercatat untuk sesi ini.</p>')+'<p class="footnote">Catatan browser bersifat terbatas dan dapat dipengaruhi notifikasi atau perilaku perangkat. Tinjau bersama konteks kelas; jangan jadikan satu event sebagai bukti pelanggaran.</p></div>':'';
-  const alert=warned.length?'<div class="monitoring-alert warning"><b>Perlu ditinjau: '+warned.length+' sesi memiliki indikator perubahan fokus.</b><span>Periksa detail aktivitas dan konfirmasi konteksnya sebelum mengambil tindakan.</span><button class="btn" onclick="setMonitoringFilter(\'review\')">Lihat sesi terkait</button></div>':'<div class="monitoring-alert"><b>Belum ada indikator perubahan fokus pada sesi yang tercatat.</b><span>Data ini hanya mencakup aktivitas yang dapat dideteksi browser.</span></div>';
-  const filterButtons=[['all','Semua ('+items.length+')'],['active','Aktif ('+active.length+')'],['review','Perlu ditinjau ('+warned.length+')'],['completed','Selesai ('+completed.length+')']];
-  return head('PENGAWASAN ASESMEN','Pemantauan siswa','Data diperbarui otomatis setiap 20 detik. Pemantauan browser bukan penguncian perangkat dan indikator fokus bukan bukti pasti kecurangan.','<button class="btn" onclick="loadMonitoring()">↻ Muat ulang</button>')+
-  '<div class="grid stats">'+stat('Sedang mengerjakan',String(active.length),'Sesi aktif')+stat('Ada indikator fokus',String(warned.length),'Perlu ditinjau guru')+stat('Selesai / lainnya',String(completed.length),'Status nonaktif')+stat('Total sesi',String(items.length),'Semua asesmen milik Anda')+'</div>'+
+  const detail=selected?'<div class="card monitoring-detail" id="monitoringDetailPanel"><div class="actions"><div><div class="kicker">RINCIAN SESI</div><h3>'+esc(selected.studentName)+' · '+esc(selected.assessmentTitle)+'</h3></div><button class="btn" onclick="selectMonitoringAttempt(\'\')">Tutup detail</button></div><div class="grid monitoring-detail-grid"><div><small class="muted">Status</small><b>'+esc(monitoringStatusLabel(selected.status))+'</b></div><div><small class="muted">Progres</small><b>'+Math.min(Number(selected.answeredCount)||0,Number(selected.questionCount)||0)+' / '+(Number(selected.questionCount)||0)+' soal</b></div><div><small class="muted">Mulai</small><b>'+esc(formatLocalDateTime(selected.startedAt))+'</b></div><div><small class="muted">Dikumpulkan</small><b>'+esc(formatLocalDateTime(selected.submittedAt))+'</b></div><div><small class="muted">Halaman tidak terlihat</small><b>'+hiddenCount(selected)+' kali</b></div><div><small class="muted">Jendela kehilangan fokus</small><b>'+blurCount(selected)+' kali</b></div><div><small class="muted">Aktivitas terakhir</small><b>'+esc(formatLocalDateTime(selected.lastActivityAt))+'</b></div></div><h4>Riwayat aktivitas terbaru</h4>'+(timeline?'<div class="monitoring-timeline">'+timeline+'</div>':'<p class="muted">Belum ada event yang tercatat untuk sesi ini.</p>')+'<p class="footnote">Kedua indikator ini berasal dari event browser yang berbeda. Satu perpindahan dapat memicu lebih dari satu event, dan browser tidak selalu dapat mendeteksi perpindahan aplikasi. Jangan jadikan event sebagai bukti pasti pelanggaran.</p></div>':'';
+  const alert=warned.length?'<div class="monitoring-alert warning"><b>Perlu ditinjau: '+warned.length+' sesi memiliki catatan perubahan fokus.</b><span>Periksa rincian aktivitas dan konfirmasi konteksnya sebelum mengambil tindakan.</span><button class="btn" onclick="setMonitoringFilter(\'review\')">Lihat sesi terkait</button></div>':'<div class="monitoring-alert"><b>Belum ada catatan perubahan fokus pada sesi yang tercatat.</b><span>Data ini hanya mencakup aktivitas yang dapat dideteksi browser.</span></div>';
+  const filterButtons=[['all','Semua sesi ('+items.length+')'],['active','Sedang aktif ('+active.length+')'],['review','Perlu ditinjau ('+warned.length+')'],['completed','Sudah selesai ('+completed.length+')']];
+  return head('PENGAWASAN ASESMEN','Pemantauan siswa','Sesi dikelompokkan berdasarkan asesmen dan kelas. Buka kelompok untuk melihat nama siswa. Data diperbarui otomatis setiap 20 detik.','<button class="btn" onclick="loadMonitoring()" '+(s.monitoringLoading?'disabled':'')+'>'+(s.monitoringLoading?'Memuat…':'↻ Muat ulang')+'</button>')+
+  '<div class="grid stats">'+stat('Sedang mengerjakan',String(active.length),'Sesi aktif')+stat('Ada catatan fokus',String(warned.length),'Perlu ditinjau guru')+stat('Sudah selesai',String(completed.length),'Sesi nonaktif')+stat('Total sesi',String(items.length),'Semua asesmen milik Anda')+'</div>'+
   alert+
-  '<div class="card"><div class="actions"><h3>Aktivitas peserta</h3><span class="muted">'+(s.monitoringUpdatedAt?'Terakhir diperbarui '+esc(formatLocalDateTime(s.monitoringUpdatedAt)):(s.monitoringLoaded?'Belum ada pembaruan berhasil':'Memuat data…'))+'</span></div>'+
+  '<div class="card"><div class="actions"><h3>Kelompok asesmen</h3><span class="muted">'+(s.monitoringUpdatedAt?'Terakhir diperbarui '+esc(formatLocalDateTime(s.monitoringUpdatedAt)):(s.monitoringLoaded?'Belum ada pembaruan berhasil':'Memuat data…'))+'</span></div>'+
   (s.monitoringError?'<div class="notice">Pembaruan gagal: '+esc(s.monitoringError)+'. Data yang terlihat mungkin merupakan data terakhir yang berhasil dimuat.</div>':'')+
   '<div class="actions monitoring-filters">'+filterButtons.map(([key,label])=>'<button class="btn '+(filter===key?'primary':'')+'" onclick="setMonitoringFilter(\''+key+'\')">'+label+'</button>').join('')+'</div>'+
-  '<div style="overflow-x:auto"><table class="table monitoring-table"><thead><tr><th>Siswa</th><th>Asesmen</th><th>Status</th><th>Progres</th><th>Indikator fokus</th><th>Aktivitas terakhir</th><th>Rincian</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+  groupHtml+
   '<p class="footnote">Data dibatasi pada asesmen yang dibuat oleh akun guru ini. Isi jawaban, kunci jawaban, dan email siswa tidak ditampilkan pada dashboard pemantauan.</p></div>'+detail;
  }
  function assessments(){return head('Jadwal & asesmen','Kelola ujian','Buat jadwal asesmen, tentukan kelas murid, lalu pilih bundel soal dari Bank Soal.','<button class="btn primary" onclick="newA()">＋ Buat asesmen</button>')+'<div class="card"><h3>Semua asesmen</h3>'+rows()+'</div>'+(s.assessmentEditorOpen?editor():'')+'<p class="footnote">Bundel soal disimpan terpisah agar dapat digunakan ulang.</p>'}
