@@ -1742,8 +1742,18 @@ function uploadAnswerImage_(payload) {
     [String(user.email || '').trim().toLowerCase(), teacherEmail].filter(function (email, index, all) {
       return email && all.indexOf(email) === index;
     }).forEach(function (email) {
-      try { file.addViewer(email); }
-      catch (shareError) { Logger.log('Akses foto jawaban tidak dapat diberikan ke ' + email + ': ' + shareError.message); }
+      try {
+        // Pertahankan akses viewer tanpa mengirim email notifikasi berbagi dari Google Drive.
+        if (file.getAccess(email) === null) {
+          Drive.Permissions.create(
+            { role: 'reader', type: 'user', emailAddress: email },
+            file.getId(),
+            { sendNotificationEmail: false }
+          );
+        }
+      } catch (shareError) {
+        Logger.log('Akses foto jawaban tidak dapat diberikan tanpa notifikasi ke ' + email + ': ' + shareError.message);
+      }
     });
     const fileId = makeId_('FILE');
     const imageUrl = 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.getId()) + '&sz=w1200';
