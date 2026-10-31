@@ -355,7 +355,11 @@ async function loadMonitoring(){
    s.monitoringLoaded=true;s.monitoringError=error.message||'Gagal memuat data pemantauan';
   }finally{
    s.monitoringLoading=false;
-   if(s.page==='monitoring')render();
+   if(s.page==='monitoring'){
+    const previousScroll=window.scrollY||0;
+    render();
+    requestAnimationFrame(function(){window.scrollTo(0,previousScroll)});
+   }
   }
  }
  function selectMonitoringAttempt(attemptId){s.selectedMonitoringAttemptId=String(attemptId||'');render();if(s.selectedMonitoringAttemptId){requestAnimationFrame(function(){const panel=document.getElementById('monitoringDetailPanel');if(panel){panel.scrollIntoView({behavior:'smooth',block:'start'});panel.setAttribute('tabindex','-1');panel.focus({preventScroll:true})}})}}
