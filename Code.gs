@@ -1342,8 +1342,20 @@ function listAttempts_(payload) {
       const viewer = payload.currentUser;
       if (viewer && viewer.role === 'teacher' && assessment && String(assessment.createdBy || '').trim().toLowerCase() === String(viewer.email || '').trim().toLowerCase()) {
         uploadedFiles.filter(function (file) { return String(file.attemptId) === String(attempt.attemptId) && file.driveFileId; }).forEach(function (file) {
-          try { DriveApp.getFileById(String(file.driveFileId)).addViewer(String(viewer.email)); }
-          catch (shareError) { Logger.log('Akses foto untuk guru belum dapat diberikan: ' + shareError.message); }
+          try {
+            const answerFile = DriveApp.getFileById(String(file.driveFileId));
+            const viewerEmail = String(viewer.email || '').trim().toLowerCase();
+            // Akses yang sudah ada dipertahankan; izin baru dibuat tanpa email notifikasi.
+            if (viewerEmail && answerFile.getAccess(viewerEmail) === null) {
+              Drive.Permissions.create(
+                { role: 'reader', type: 'user', emailAddress: viewerEmail },
+                answerFile.getId(),
+                { sendNotificationEmail: false }
+              );
+            }
+          } catch (shareError) {
+            Logger.log('Akses foto untuk guru belum dapat diberikan tanpa notifikasi: ' + shareError.message);
+          }
         });
       }
       return Object.assign({}, attempt, {
