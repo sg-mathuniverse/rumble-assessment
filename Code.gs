@@ -25,7 +25,7 @@ const TABLES = {
     'assessmentId', 'title', 'subject', 'className', 'duration',
     'startAt', 'endAt', 'passageText', 'passageImageUrl', 'status', 'createdBy', 'createdAt', 'updatedAt'
   ],
-  QuestionBundles: ['bundleId','title','subject','description','tpCode','passageText','passageImageUrl','passagesJson','questionsJson','status','createdBy','createdAt','updatedAt'],
+  QuestionBundles: ['bundleId','title','subject','description','tpCode','passageText','passageImageUrl','passagesJson','questionsJson','status','createdBy','createdAt','updatedAt','visibility'],
   LearningObjectives: ['objectiveId','tpCode','title','subject','description','createdBy','createdAt','updatedAt','active'],
   Questions: [
     'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
@@ -159,7 +159,7 @@ function routeAction_(action, payload) {
   });
   const teacherOnly = [
     'createAssessment','deleteAssessment','saveQuestionBundle','listQuestionBundles',
-    'getQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
+    'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
     'publishAssessment','gradeAttempt','listStudents','listMonitoring'
   ];
   const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt','saveAttempt'];
@@ -517,6 +517,7 @@ function saveQuestionBundle_(payload) {
     passagesJson: JSON.stringify(Array.isArray(payload.passages)?payload.passages:[]),
     questionsJson: JSON.stringify(questions),
     status: 'ready',
+    visibility: String(payload.visibility || 'shared') === 'private' ? 'private' : 'shared',
     createdBy: String(payload.createdBy || ''),
     createdAt: rowNumber > 0 ? String(values[rowNumber - 1][headers.indexOf('createdAt')] || now) : now,
     updatedAt: now
@@ -540,18 +541,22 @@ function listQuestionBundles_(payload) {
   return listRows_('QuestionBundles')
     .filter(function (bundle) {
       const owned = bundle.createdBy && String(bundle.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
+      // Bundel lama yang belum memiliki kolom visibility diperlakukan sebagai shared.
+      const shared = String(bundle.visibility || 'shared').toLowerCase() === 'shared';
       const statusMatches = !payload.status || String(bundle.status) === String(payload.status);
-      return owned && statusMatches;
+      return (owned || shared) && statusMatches;
     })
     .map(function (bundle) {
       const item = Object.assign({}, bundle);
       item.questionCount = parseJson_(bundle.questionsJson, []).length;
+      item.isOwner = !!bundle.createdBy && String(bundle.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
+      item.visibility = String(bundle.visibility || 'shared').toLowerCase();
       delete item.questionsJson;
       delete item.passagesJson;
+      delete item.createdBy;
       return item;
     });
 }
-
 function getQuestionBundle_(payload) {
   setupDatabase();
   const bundleId = requiredText_(payload.bundleId || payload.id, 'ID bundel', 100);
@@ -561,9 +566,9 @@ function getQuestionBundle_(payload) {
   if (!bundle) throw new Error('Bundel soal tidak ditemukan.');
   const user = payload.currentUser;
   if (!user || user.role !== 'teacher') throw new Error('Akun guru terverifikasi diperlukan.');
-  if (!bundle.createdBy || String(bundle.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
-    throw new Error('Akses ditolak. Bundel lama tanpa pemilik terverifikasi perlu dimigrasikan oleh administrator.');
-  }
+  const isOwner = !!bundle.createdBy && String(bundle.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
+  const isShared = String(bundle.visibility || 'shared').toLowerCase() === 'shared';
+  if (!isOwner && !isShared) throw new Error('Akses ditolak. Bundel ini hanya dapat dibuka oleh pembuatnya.');
   return {
     bundle: {
       bundleId: bundle.bundleId,
@@ -574,12 +579,13 @@ function getQuestionBundle_(payload) {
       passageText: bundle.passageText,
       passageImageUrl: bundle.passageImageUrl,
       passages: parseJson_(bundle.passagesJson, []),
-      status: bundle.status
+      status: bundle.status,
+      visibility: String(bundle.visibility || 'shared').toLowerCase(),
+      isOwner: isOwner
     },
     questions: parseJson_(bundle.questionsJson, [])
   };
 }
-
 function createAssessment_(payload) {
   setupDatabase();
   const title = requiredText_(payload.title, 'Judul', 180);
