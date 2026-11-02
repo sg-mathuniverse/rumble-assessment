@@ -30,7 +30,7 @@ const TABLES = {
   LearningObjectives: ['objectiveId','tpCode','title','subject','description','createdBy','createdAt','updatedAt','active'],
   Questions: [
     'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
-    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson', 'subquestionsJson', 'rubricLevelsJson', 'passageText', 'passageImageUrl'
+    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson', 'subquestionsJson', 'subquestionImagesJson', 'rubricLevelsJson', 'passageText', 'passageImageUrl'
   ],
   Attempts: [
     'attemptId', 'assessmentId', 'studentId', 'startedAt', 'submittedAt',
@@ -581,6 +581,12 @@ function getQuestionBundle_(payload) {
   const isOwner = !!bundle.createdBy && String(bundle.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
   const isShared = String(bundle.visibility || 'shared').toLowerCase() === 'shared';
   if (!isOwner && !isShared) throw new Error('Akses ditolak. Bundel ini hanya dapat dibuka oleh pembuatnya.');
+  const bundlePassages = parseJson_(bundle.passagesJson, []);
+  const bundleQuestions = parseJson_(bundle.questionsJson, []);
+  const bundleImageUrls = collectQuestionImageUrls_(bundleQuestions);
+  bundleImageUrls.push(bundle.passageImageUrl);
+  bundlePassages.forEach(function (passage) { if (passage) bundleImageUrls.push(passage.imageUrl); });
+  ensureAssessmentImageLinkAccess_(bundleImageUrls);
   return {
     bundle: {
       bundleId: bundle.bundleId,
@@ -590,12 +596,12 @@ function getQuestionBundle_(payload) {
       tpCode: String(bundle.tpCode || ''),
       passageText: bundle.passageText,
       passageImageUrl: bundle.passageImageUrl,
-      passages: parseJson_(bundle.passagesJson, []),
+      passages: bundlePassages,
       status: bundle.status,
       visibility: String(bundle.visibility || 'shared').toLowerCase(),
       isOwner: isOwner
     },
-    questions: parseJson_(bundle.questionsJson, [])
+    questions: bundleQuestions
   };
 }
 function createAssessment_(payload) {
@@ -665,7 +671,10 @@ function createAssessment_(payload) {
       imageUrl: String(question.imageUrl || ''),
       optionImagesJson: JSON.stringify(question.optionImages || []),
       subquestionsJson: JSON.stringify(question.subquestions || []),
+      subquestionImagesJson: JSON.stringify(question.subquestionImages || []),
       rubricLevelsJson: JSON.stringify(question.rubricLevels || []),
+      passageText: String(question.passageText || ''),
+      passageImageUrl: String(question.passageImageUrl || ''),
       passageText: String(question.passageText || ''),
       passageImageUrl: String(question.passageImageUrl || '')
     });
@@ -688,8 +697,64 @@ function getOrCreateChildFolder_(parentFolder, folderName) {
 }
 
 /**
+ * Mengambil URL gambar yang tersimpan pada struktur soal/bacaan.
+ */
+function collectQuestionImageUrls_(questions) {
+  const urls = [];
+  (questions || []).forEach(function (q) {
+    if (!q) return;
+    urls.push(q.imageUrl, q.passageImageUrl);
+    (Array.isArray(q.optionImages) ? q.optionImages : []).forEach(function (url) { urls.push(url); });
+    (Array.isArray(q.subquestionImages) ? q.subquestionImages : []).forEach(function (url) { urls.push(url); });
+    (Array.isArray(q.pairs) ? q.pairs : []).forEach(function (pair) {
+      if (pair) urls.push(pair.leftImageUrl, pair.rightImageUrl);
+    });
+  });
+  return urls.filter(function (url) { return !!String(url || '').trim(); });
+}
+
+/**
+ * Mengubah izin hanya untuk gambar yang benar-benar berada di folder gambar Rumble.
+ * Gambar lama ikut diperbaiki saat bundel atau asesmen dibuka.
+ */
+function ensureAssessmentImageLinkAccess_(imageUrls) {
+  const rootId = CONFIG.DRIVE_FOLDER_ID;
+  if (!rootId) throw new Error('Folder Drive belum dikonfigurasi.');
+  const ids = {};
+  (imageUrls || []).forEach(function (url) {
+    const value = String(url || '');
+    const match = value.match(/[?&]id=([^&]+)/) || value.match(/\/d\/([^/?]+)/);
+    if (match && match[1]) {
+      try { ids[decodeURIComponent(match[1])] = true; } catch (e) { ids[match[1]] = true; }
+    }
+  });
+  Object.keys(ids).forEach(function (fileId) {
+    let file;
+    try { file = DriveApp.getFileById(fileId); } catch (e) { return; }
+    const parents = file.getParents();
+    let isAppImage = false;
+    while (parents.hasNext()) {
+      const parent = parents.next();
+      if (folderHasNameInsideRoot_(parent, rootId, '01 - Gambar Asesmen', 0)) {
+        isAppImage = true;
+        break;
+      }
+    }
+    if (!isAppImage) return;
+    if (file.getSharingAccess() === DriveApp.Access.ANYONE_WITH_LINK &&
+        file.getSharingPermission() === DriveApp.Permission.VIEW) return;
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (sharingError) {
+      throw new Error('Gambar asesmen belum dapat dibuka oleh siswa tanpa akun Google. Kebijakan Google Workspace perlu mengizinkan berbagi file dengan siapa saja yang memiliki link.');
+    }
+  });
+}
+
+/**
  * Mengunggah gambar asesmen ke subfolder berdasarkan jenis gambar.
- * Gambar soal hanya dibagikan ke pengguna domain sekolah, bukan publik.
+ * Siswa memakai login internal tanpa akun Google, sehingga gambar harus
+ * dapat dibaca melalui tautan Drive oleh pemegang URL.
  */
 function uploadAssessmentImage_(payload) {
   if (!CONFIG.DRIVE_FOLDER_ID) throw new Error('Folder Drive belum dikonfigurasi.');
@@ -728,11 +793,11 @@ function uploadAssessmentImage_(payload) {
     file.setDescription('Rumble Assessment owner: ' + String(currentUser.email).trim().toLowerCase());
   }
 
-  let domainSharingEnabled = true;
+  let linkSharingEnabled = true;
   try {
-    file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   } catch (sharingError) {
-    domainSharingEnabled = false;
+    linkSharingEnabled = false;
   }
 
   return {
@@ -741,8 +806,8 @@ function uploadAssessmentImage_(payload) {
     fileId: file.getId(),
     name: file.getName(),
     folder: '01 - Gambar Asesmen/' + subfolderNames[kind],
-    domainSharingEnabled: domainSharingEnabled,
-    warning: domainSharingEnabled ? '' : 'Gambar tersimpan, tetapi izin berbagi domain tidak dapat diatur otomatis. Admin Google Workspace mungkin membatasi izin Drive.'
+    linkSharingEnabled: linkSharingEnabled,
+    warning: linkSharingEnabled ? '' : 'Gambar tersimpan, tetapi Google Workspace menolak akses melalui tautan. Admin Workspace perlu mengizinkan berbagi file dengan siapa saja yang memiliki link.'
   };
 }
 
@@ -849,7 +914,10 @@ function updateAssessment_(payload) {
       imageUrl: String(question.imageUrl || ''),
       optionImagesJson: JSON.stringify(question.optionImages || []),
       subquestionsJson: JSON.stringify(question.subquestions || []),
-      rubricLevelsJson: JSON.stringify(question.rubricLevels || [])
+      subquestionImagesJson: JSON.stringify(question.subquestionImages || []),
+      rubricLevelsJson: JSON.stringify(question.rubricLevels || []),
+      passageText: String(question.passageText || ''),
+      passageImageUrl: String(question.passageImageUrl || '')
     });
   });
   return { id: assessmentId, title: updates.title, status: 'draft', questionCount: questions.length };
@@ -1012,12 +1080,16 @@ function getAssessment_(payload) {
         imageUrl: question.imageUrl,
         optionImages: parseJson_(question.optionImagesJson, []),
         subquestions: parseJson_(question.subquestionsJson, []),
+        subquestionImages: parseJson_(question.subquestionImagesJson, []),
         rubricLevels: parseJson_(question.rubricLevelsJson, []),
         passageText: String(question.passageText || ''),
         passageImageUrl: String(question.passageImageUrl || '')
       };
     });
 
+  const assessmentImageUrls = collectQuestionImageUrls_(questions);
+  assessmentImageUrls.push(assessment.passageImageUrl);
+  ensureAssessmentImageLinkAccess_(assessmentImageUrls);
   const safeAssessment = Object.assign({}, assessment);
   delete safeAssessment.createdBy;
   return {
