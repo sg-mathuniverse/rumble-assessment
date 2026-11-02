@@ -1665,8 +1665,10 @@ function listMonitoring_(payload) {
   return rows;
 }
 function getCurrentUser_(sessionToken) {
-  const sessionUser = resolveStudentSession_(sessionToken);
+  const suppliedToken = String(sessionToken || '').trim();
+  const sessionUser = resolveStudentSession_(suppliedToken);
   if (sessionUser) return { authenticated: true, email: '', user: sessionUser, authType: 'student_password' };
+  if (suppliedToken) return { authenticated: false, email: '', user: null, reason: 'session_expired' };
 
   const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
   if (!email) return { authenticated: false, email: '', user: null, reason: 'email_unavailable' };
