@@ -650,9 +650,6 @@ function userCanReadAssessmentImage_(fileId, user) {
 function getAssessmentImage_(payload) {
   const user = payload.currentUser;
   const fileId = requiredText_(payload.fileId, 'ID gambar', 200);
-  if (!userCanReadAssessmentImage_(fileId, user)) {
-    throw new Error('Akses gambar ditolak atau gambar tidak terhubung dengan asesmen yang dapat diakses.');
-  }
   const file = DriveApp.getFileById(fileId);
   const parents = file.getParents();
   let inAssessmentImageFolder = false;
@@ -663,6 +660,12 @@ function getAssessmentImage_(payload) {
     }
   }
   if (!inAssessmentImageFolder) throw new Error('File bukan gambar dari folder asesmen Rumble.');
+  const expectedOwner = 'Rumble Assessment owner: ' + String(user && user.email || '').trim().toLowerCase();
+  const isNewImageOwnedByTeacher = user && user.role === 'teacher' &&
+    String(file.getDescription() || '') === expectedOwner;
+  if (!userCanReadAssessmentImage_(fileId, user) && !isNewImageOwnedByTeacher) {
+    throw new Error('Akses gambar ditolak atau gambar tidak terhubung dengan asesmen yang dapat diakses.');
+  }
   // Jika versi sebelumnya pernah membuat tautan publik, cabut saat file pertama
   // kali disajikan melalui jalur terautentikasi ini.
   if (file.getSharingAccess() === DriveApp.Access.ANYONE_WITH_LINK) {
