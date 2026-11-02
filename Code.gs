@@ -170,7 +170,7 @@ function routeAction_(action, payload) {
     'publishAssessment','gradeAttempt','listStudents','listMonitoring','getTeacherSummary'
   ];
   const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt','saveAttempt'];
-  const shared = ['listAssessments','getAssessment','listAttempts'];
+  const shared = ['listAssessments','getAssessment','getAssessmentImage','listAttempts'];
   if (teacherOnly.indexOf(action) >= 0 && user.role !== 'teacher') {
     throw new Error('Fitur ini hanya dapat digunakan oleh akun guru terverifikasi.');
   }
@@ -200,6 +200,7 @@ function routeAction_(action, payload) {
     deleteAssessmentImage: function () { return deleteAssessmentImage_(trusted); },
     listAssessments: function () { return listAssessments_(trusted); },
     getAssessment: function () { return getAssessment_(Object.assign({}, trusted, { includeAnswers: user.role === 'teacher' && payload.includeAnswers === true })); },
+    getAssessmentImage: function () { return getAssessmentImage_(trusted); },
     publishAssessment: function () { assertAssessmentOwner_(payload.id || payload.assessmentId, user); return publishAssessment_(trusted); },
     startAttempt: function () { return startAttempt_(trusted); },
     saveAttempt: function () { return saveAttempt_(trusted); },
@@ -569,6 +570,115 @@ function listQuestionBundles_(payload) {
       return item;
     });
 }
+/**
+ * Mengubah URL Drive menjadi ID file tanpa mengunduhnya dari browser.
+ */
+function assessmentImageFileId_(url) {
+  const value = String(url || '');
+  const match = value.match(/[?&]id=([^&]+)/) || value.match(/\/d\/([^/?]+)/);
+  if (!match || !match[1]) return '';
+  try { return decodeURIComponent(match[1]); } catch (e) { return match[1]; }
+}
+
+/**
+ * Memeriksa apakah suatu gambar benar-benar dirujuk oleh konten yang boleh
+ * diakses pengguna. Siswa hanya dapat mengambil gambar dari asesmen kelasnya
+ * yang sedang memiliki sesi pengerjaan aktif.
+ */
+function userCanReadAssessmentImage_(fileId, user) {
+  if (!user || (user.role !== 'teacher' && user.role !== 'student')) return false;
+  const assessments = listRows_('Assessments');
+  const questions = listRows_('Questions');
+  const bundles = listRows_('QuestionBundles');
+
+  function contains(url) { return assessmentImageFileId_(url) === fileId; }
+  function questionUsesImage(q) {
+    if (collectQuestionImageUrls_([{
+      imageUrl: q.imageUrl,
+      passageImageUrl: q.passageImageUrl,
+      optionImages: parseJson_(q.optionImagesJson, []),
+      subquestionImages: parseJson_(q.subquestionImagesJson, []),
+      pairs: parseJson_(q.pairsJson, [])
+    }]).some(contains)) return true;
+    return false;
+  }
+
+  if (user.role === 'teacher') {
+    const ownedIds = {};
+    assessments.forEach(function (a) {
+      if (String(a.createdBy || '').trim().toLowerCase() === String(user.email || '').trim().toLowerCase()) {
+        if (contains(a.passageImageUrl)) return;
+        ownedIds[String(a.assessmentId)] = true;
+      }
+    });
+    for (let i = 0; i < assessments.length; i++) {
+      const a = assessments[i];
+      if (String(a.createdBy || '').trim().toLowerCase() === String(user.email || '').trim().toLowerCase() && contains(a.passageImageUrl)) return true;
+    }
+    if (questions.some(function (q) { return !!ownedIds[String(q.assessmentId)] && questionUsesImage(q); })) return true;
+    return bundles.some(function (b) {
+      const owner = String(b.createdBy || '').trim().toLowerCase() === String(user.email || '').trim().toLowerCase();
+      const shared = String(b.visibility || 'shared').toLowerCase() === 'shared';
+      if (!owner && !shared) return false;
+      const qs = parseJson_(b.questionsJson, []);
+      const passages = parseJson_(b.passagesJson, []);
+      return collectQuestionImageUrls_(qs).some(contains) ||
+        contains(b.passageImageUrl) || passages.some(function (p) { return p && contains(p.imageUrl); });
+    });
+  }
+
+  for (let i = 0; i < assessments.length; i++) {
+    const a = assessments[i];
+    if (String(a.status).toLowerCase() !== 'published' ||
+        String(a.className || '').trim().toLowerCase() !== String(user.className || '').trim().toLowerCase()) continue;
+    const activeAttempt = listRows_('Attempts').some(function (attempt) {
+      return String(attempt.assessmentId) === String(a.assessmentId) &&
+        String(attempt.studentId) === String(user.userId) &&
+        String(attempt.status) === 'in_progress';
+    });
+    if (!activeAttempt) continue;
+    if (contains(a.passageImageUrl)) return true;
+    if (questions.some(function (q) { return String(q.assessmentId) === String(a.assessmentId) && questionUsesImage(q); })) return true;
+  }
+  return false;
+}
+
+/**
+ * Mengirim gambar sebagai data URL melalui sesi Apps Script yang terautentikasi.
+ * Tidak memerlukan izin Anyone with the link pada file Drive.
+ */
+function getAssessmentImage_(payload) {
+  const user = payload.currentUser;
+  const fileId = requiredText_(payload.fileId, 'ID gambar', 200);
+  if (!userCanReadAssessmentImage_(fileId, user)) {
+    throw new Error('Akses gambar ditolak atau gambar tidak terhubung dengan asesmen yang dapat diakses.');
+  }
+  const file = DriveApp.getFileById(fileId);
+  const parents = file.getParents();
+  let inAssessmentImageFolder = false;
+  while (parents.hasNext()) {
+    if (folderHasNameInsideRoot_(parents.next(), CONFIG.DRIVE_FOLDER_ID, '01 - Gambar Asesmen', 0)) {
+      inAssessmentImageFolder = true;
+      break;
+    }
+  }
+  if (!inAssessmentImageFolder) throw new Error('File bukan gambar dari folder asesmen Rumble.');
+  const blob = file.getBlob();
+  const mimeType = String(blob.getContentType() || file.getMimeType() || '').toLowerCase();
+  if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].indexOf(mimeType) < 0) {
+    throw new Error('Format file bukan gambar yang didukung.');
+  }
+  const bytes = blob.getBytes();
+  if (!bytes || bytes.length > 4 * 1024 * 1024) {
+    throw new Error('Ukuran gambar melebihi batas pengiriman 4 MB.');
+  }
+  return {
+    fileId: fileId,
+    mimeType: mimeType,
+    dataUrl: 'data:' + mimeType + ';base64,' + Utilities.base64Encode(bytes)
+  };
+}
+
 function getQuestionBundle_(payload) {
   setupDatabase();
   const bundleId = requiredText_(payload.bundleId || payload.id, 'ID bundel', 100);
@@ -804,21 +914,16 @@ function uploadAssessmentImage_(payload) {
     file.setDescription('Rumble Assessment owner: ' + String(currentUser.email).trim().toLowerCase());
   }
 
-  let linkSharingEnabled = true;
-  try {
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  } catch (sharingError) {
-    linkSharingEnabled = false;
-  }
-
+  // File tetap privat di Drive. Frontend memuatnya melalui endpoint gambar
+  // terautentikasi sehingga tidak perlu akses Anyone with the link.
   return {
     url: file.getUrl(),
     imageUrl: 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1600',
     fileId: file.getId(),
     name: file.getName(),
     folder: '01 - Gambar Asesmen/' + subfolderNames[kind],
-    linkSharingEnabled: linkSharingEnabled,
-    warning: linkSharingEnabled ? '' : 'Gambar tersimpan, tetapi Google Workspace menolak akses melalui tautan. Admin Workspace perlu mengizinkan berbagi file dengan siapa saja yang memiliki link.'
+    linkSharingEnabled: false,
+    warning: ''
   };
 }
 
