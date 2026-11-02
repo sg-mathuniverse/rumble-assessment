@@ -586,8 +586,10 @@ function getQuestionBundle_(payload) {
   const bundleImageUrls = collectQuestionImageUrls_(bundleQuestions);
   bundleImageUrls.push(bundle.passageImageUrl);
   bundlePassages.forEach(function (passage) { if (passage) bundleImageUrls.push(passage.imageUrl); });
-  ensureAssessmentImageLinkAccess_(bundleImageUrls);
+  const imageAccess = ensureAssessmentImageLinkAccess_(bundleImageUrls);
   return {
+    imageAccessWarning: imageAccess.warning,
+    imageAccessFailedCount: imageAccess.failedCount,
     bundle: {
       bundleId: bundle.bundleId,
       title: bundle.title,
@@ -719,7 +721,7 @@ function collectQuestionImageUrls_(questions) {
  */
 function ensureAssessmentImageLinkAccess_(imageUrls) {
   const rootId = CONFIG.DRIVE_FOLDER_ID;
-  if (!rootId) throw new Error('Folder Drive belum dikonfigurasi.');
+  if (!rootId) return { failedCount: 0, warning: '' };
   const ids = {};
   (imageUrls || []).forEach(function (url) {
     const value = String(url || '');
@@ -728,6 +730,7 @@ function ensureAssessmentImageLinkAccess_(imageUrls) {
       try { ids[decodeURIComponent(match[1])] = true; } catch (e) { ids[match[1]] = true; }
     }
   });
+  let failedCount = 0;
   Object.keys(ids).forEach(function (fileId) {
     let file;
     try { file = DriveApp.getFileById(fileId); } catch (e) { return; }
@@ -746,9 +749,17 @@ function ensureAssessmentImageLinkAccess_(imageUrls) {
     try {
       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     } catch (sharingError) {
-      throw new Error('Gambar asesmen belum dapat dibuka oleh siswa tanpa akun Google. Kebijakan Google Workspace perlu mengizinkan berbagi file dengan siapa saja yang memiliki link.');
+      // Jangan gagalkan pemuatan bundel/draft hanya karena kebijakan Workspace.
+      // Admin masih dapat memperbaiki izin Drive tanpa kehilangan soal.
+      failedCount++;
     }
   });
+  return {
+    failedCount: failedCount,
+    warning: failedCount
+      ? failedCount + ' gambar belum dapat dibagikan melalui tautan. Bundel tetap dimuat, tetapi gambar tersebut mungkin belum terlihat oleh siswa sampai Admin Workspace mengizinkan berbagi eksternal.'
+      : ''
+  };
 }
 
 /**
@@ -1089,10 +1100,12 @@ function getAssessment_(payload) {
 
   const assessmentImageUrls = collectQuestionImageUrls_(questions);
   assessmentImageUrls.push(assessment.passageImageUrl);
-  ensureAssessmentImageLinkAccess_(assessmentImageUrls);
+  const imageAccess = ensureAssessmentImageLinkAccess_(assessmentImageUrls);
   const safeAssessment = Object.assign({}, assessment);
   delete safeAssessment.createdBy;
   return {
+    imageAccessWarning: imageAccess.warning,
+    imageAccessFailedCount: imageAccess.failedCount,
     assessment: safeAssessment,
     questions: questions
   };
