@@ -1695,7 +1695,7 @@ function ensureUserAuthColumns_() {
 
 function passwordDigest_(password, salt) {
   let value = String(salt) + '|' + String(password);
-  for (let i = 0; i < 1200; i++) {
+  for (let i = 0; i < 250; i++) {
     const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value, Utilities.Charset.UTF_8);
     value = bytes.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
   }
@@ -1794,7 +1794,7 @@ function adminListStudents_() {
 function adminImportStudents_(payload) {
   ensureUserAuthColumns_();
   const records = Array.isArray(payload.students) ? payload.students : [];
-  if (!records.length || records.length > 500) throw new Error('Impor harus berisi 1 sampai 500 siswa per proses.');
+  if (!records.length || records.length > 100) throw new Error('Impor dibatasi maksimal 100 siswa per proses agar pembuatan akun tetap stabil.');
   const existing = listRows_('Users');
   const seen = {};
   const credentials = [], skipped = [];
