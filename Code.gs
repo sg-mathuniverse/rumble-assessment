@@ -1512,6 +1512,8 @@ function listAttempts_(payload) {
       }
       return Object.assign({}, attempt, {
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
+        assessmentDate: assessment ? String(assessment.startAt || assessment.createdAt || '') : '',
+        assessmentStartAt: assessment ? String(assessment.startAt || '') : '',
         subject: assessment ? String(assessment.subject || '') : '',
         className: assessment ? String(assessment.className || '') : '',
         answers: (function () {
