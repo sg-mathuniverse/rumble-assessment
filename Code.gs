@@ -699,9 +699,6 @@ function getQuestionBundle_(payload) {
   if (!isOwner && !isShared) throw new Error('Akses ditolak. Bundel ini hanya dapat dibuka oleh pembuatnya.');
   const bundlePassages = parseJson_(bundle.passagesJson, []);
   const bundleQuestions = parseJson_(bundle.questionsJson, []);
-  const bundleImageUrls = collectQuestionImageUrls_(bundleQuestions);
-  bundleImageUrls.push(bundle.passageImageUrl);
-  bundlePassages.forEach(function (passage) { if (passage) bundleImageUrls.push(passage.imageUrl); });
   return {
     bundle: {
       bundleId: bundle.bundleId,
@@ -826,53 +823,6 @@ function collectQuestionImageUrls_(questions) {
     });
   });
   return urls.filter(function (url) { return !!String(url || '').trim(); });
-}
-
-/**
- * Mengubah izin hanya untuk gambar yang benar-benar berada di folder gambar Rumble.
- * Gambar lama ikut diperbaiki saat bundel atau asesmen dibuka.
- */
-function ensureAssessmentImageLinkAccess_(imageUrls) {
-  const rootId = CONFIG.DRIVE_FOLDER_ID;
-  if (!rootId) return { failedCount: 0, warning: '' };
-  const ids = {};
-  (imageUrls || []).forEach(function (url) {
-    const value = String(url || '');
-    const match = value.match(/[?&]id=([^&]+)/) || value.match(/\/d\/([^/?]+)/);
-    if (match && match[1]) {
-      try { ids[decodeURIComponent(match[1])] = true; } catch (e) { ids[match[1]] = true; }
-    }
-  });
-  let failedCount = 0;
-  Object.keys(ids).forEach(function (fileId) {
-    let file;
-    try { file = DriveApp.getFileById(fileId); } catch (e) { return; }
-    const parents = file.getParents();
-    let isAppImage = false;
-    while (parents.hasNext()) {
-      const parent = parents.next();
-      if (folderHasNameInsideRoot_(parent, rootId, '01 - Gambar Asesmen', 0)) {
-        isAppImage = true;
-        break;
-      }
-    }
-    if (!isAppImage) return;
-    if (file.getSharingAccess() === DriveApp.Access.ANYONE_WITH_LINK &&
-        file.getSharingPermission() === DriveApp.Permission.VIEW) return;
-    try {
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    } catch (sharingError) {
-      // Jangan gagalkan pemuatan bundel/draft hanya karena kebijakan Workspace.
-      // Admin masih dapat memperbaiki izin Drive tanpa kehilangan soal.
-      failedCount++;
-    }
-  });
-  return {
-    failedCount: failedCount,
-    warning: failedCount
-      ? failedCount + ' gambar belum dapat dibagikan melalui tautan. Bundel tetap dimuat, tetapi gambar tersebut mungkin belum terlihat oleh siswa sampai Admin Workspace mengizinkan berbagi eksternal.'
-      : ''
-  };
 }
 
 /**
@@ -1206,8 +1156,6 @@ function getAssessment_(payload) {
       };
     });
 
-  const assessmentImageUrls = collectQuestionImageUrls_(questions);
-  assessmentImageUrls.push(assessment.passageImageUrl);
   const safeAssessment = Object.assign({}, assessment);
   delete safeAssessment.createdBy;
   return {
