@@ -663,6 +663,12 @@ function getAssessmentImage_(payload) {
     }
   }
   if (!inAssessmentImageFolder) throw new Error('File bukan gambar dari folder asesmen Rumble.');
+  // Jika versi sebelumnya pernah membuat tautan publik, cabut saat file pertama
+  // kali disajikan melalui jalur terautentikasi ini.
+  if (file.getSharingAccess() === DriveApp.Access.ANYONE_WITH_LINK) {
+    try { file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE); }
+    catch (sharingError) { throw new Error('Akses tautan lama belum dapat dicabut. Minta pemilik Drive memeriksa izin file.'); }
+  }
   const blob = file.getBlob();
   const mimeType = String(blob.getContentType() || file.getMimeType() || '').toLowerCase();
   if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].indexOf(mimeType) < 0) {
@@ -696,10 +702,7 @@ function getQuestionBundle_(payload) {
   const bundleImageUrls = collectQuestionImageUrls_(bundleQuestions);
   bundleImageUrls.push(bundle.passageImageUrl);
   bundlePassages.forEach(function (passage) { if (passage) bundleImageUrls.push(passage.imageUrl); });
-  const imageAccess = ensureAssessmentImageLinkAccess_(bundleImageUrls);
   return {
-    imageAccessWarning: imageAccess.warning,
-    imageAccessFailedCount: imageAccess.failedCount,
     bundle: {
       bundleId: bundle.bundleId,
       title: bundle.title,
@@ -1205,12 +1208,9 @@ function getAssessment_(payload) {
 
   const assessmentImageUrls = collectQuestionImageUrls_(questions);
   assessmentImageUrls.push(assessment.passageImageUrl);
-  const imageAccess = ensureAssessmentImageLinkAccess_(assessmentImageUrls);
   const safeAssessment = Object.assign({}, assessment);
   delete safeAssessment.createdBy;
   return {
-    imageAccessWarning: imageAccess.warning,
-    imageAccessFailedCount: imageAccess.failedCount,
     assessment: safeAssessment,
     questions: questions
   };
