@@ -19,7 +19,8 @@ const CONFIG = {
 
 const TABLES = {
   Users: [
-    'userId', 'name', 'email', 'role', 'className', 'active', 'createdAt'
+    'userId', 'name', 'email', 'role', 'className', 'active', 'createdAt',
+    'username', 'nisn', 'passwordSalt', 'passwordHash'
   ],
   Assessments: [
     'assessmentId', 'title', 'subject', 'className', 'duration',
@@ -144,10 +145,12 @@ function routeAction_(action, payload) {
   if (action === 'health') {
     return { app: CONFIG.APP_NAME, time: new Date().toISOString() };
   }
-  if (action === 'getCurrentUser') return getCurrentUser_();
+  if (action === 'getCurrentUser') return getCurrentUser_(payload.sessionToken || '');
+  if (action === 'studentLogin') return studentLogin_(payload);
+  if (action === 'studentLogout') return studentLogout_(payload.sessionToken || '');
 
-  // Identitas berasal dari sesi Google server, bukan dari payload browser.
-  const auth = getCurrentUser_();
+  // Identitas siswa internal diverifikasi melalui token server; guru/admin tetap memakai Google sekolah.
+  const auth = getCurrentUser_(payload.sessionToken || '');
   if (!auth || !auth.authenticated || !auth.user) {
     throw new Error('Akses ditolak. Masuk menggunakan akun Google sekolah yang terdaftar dan aktif.');
   }
@@ -157,6 +160,10 @@ function routeAction_(action, payload) {
     studentId: user.role === 'student' ? String(user.userId || '') : String(payload.studentId || ''),
     createdBy: user.email
   });
+  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive'];
+  if (adminOnly.indexOf(action) >= 0 && user.role !== 'admin') {
+    throw new Error('Fitur ini hanya dapat digunakan oleh administrator sekolah.');
+  }
   const teacherOnly = [
     'createAssessment','deleteAssessment','saveQuestionBundle','listQuestionBundles',
     'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
@@ -230,6 +237,10 @@ function routeAction_(action, payload) {
     },
     listMonitoring: function () { return listMonitoring_(trusted); },
     getTeacherSummary: function () { return getTeacherSummary_(trusted); },
+    adminListStudents: function () { return adminListStudents_(); },
+    adminImportStudents: function () { return adminImportStudents_(trusted); },
+    adminResetStudentPassword: function () { return adminResetStudentPassword_(trusted); },
+    adminSetStudentActive: function () { return adminSetStudentActive_(trusted); },
     listStudents: function () {
       return listRows_('Users').filter(function (item) {
         return String(item.role).toLowerCase() === 'student' &&
@@ -1653,7 +1664,10 @@ function listMonitoring_(payload) {
   });
   return rows;
 }
-function getCurrentUser_() {
+function getCurrentUser_(sessionToken) {
+  const sessionUser = resolveStudentSession_(sessionToken);
+  if (sessionUser) return { authenticated: true, email: '', user: sessionUser, authType: 'student_password' };
+
   const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
   if (!email) return { authenticated: false, email: '', user: null, reason: 'email_unavailable' };
   const user = listRows_('Users').find(function (item) { return String(item.email || '').trim().toLowerCase() === email; });
@@ -1661,8 +1675,167 @@ function getCurrentUser_() {
   const active = user.active === true || String(user.active).toLowerCase() === 'true' || String(user.active) === '1';
   if (!active) return { authenticated: false, email: email, user: null, reason: 'inactive' };
   const role = String(user.role || '').trim().toLowerCase();
-  if (role !== 'teacher' && role !== 'student') return { authenticated: false, email: email, user: null, reason: 'invalid_role' };
-  return { authenticated: true, email: email, user: { userId: user.userId, name: user.name, email: email, role: role, className: user.className || '' } };
+  if (['teacher', 'student', 'admin'].indexOf(role) === -1) return { authenticated: false, email: email, user: null, reason: 'invalid_role' };
+  return { authenticated: true, email: email, user: { userId: user.userId, name: user.name, email: email, role: role, className: user.className || '' }, authType: 'google' };
+}
+
+function ensureUserAuthColumns_() {
+  const sheet = getSheet_('Users');
+  const lastColumn = Math.max(1, sheet.getLastColumn());
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(String);
+  ['username','nisn','passwordSalt','passwordHash'].forEach(function (header) {
+    if (headers.indexOf(header) < 0) {
+      sheet.getRange(1, sheet.getLastColumn() + 1).setValue(header);
+      headers.push(header);
+    }
+  });
+}
+
+function passwordDigest_(password, salt) {
+  let value = String(salt) + '|' + String(password);
+  for (let i = 0; i < 1200; i++) {
+    const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value, Utilities.Charset.UTF_8);
+    value = bytes.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+  }
+  return value;
+}
+
+function generateStudentPassword_() {
+  return Utilities.getUuid().replace(/-/g, '').slice(0, 16).toUpperCase();
+}
+
+function makeStudentSession_(user) {
+  const token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  const keyBytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token, Utilities.Charset.UTF_8);
+  const key = 'ra_student_session_' + keyBytes.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+  const safeUser = { userId: String(user.userId), name: String(user.name || ''), email: '', role: 'student', className: String(user.className || '') };
+  CacheService.getScriptCache().put(key, JSON.stringify(safeUser), 21600);
+  return token;
+}
+
+function resolveStudentSession_(token) {
+  token = String(token || '').trim();
+  if (!/^[a-f0-9]{64}$/i.test(token)) return null;
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token, Utilities.Charset.UTF_8);
+  const key = 'ra_student_session_' + bytes.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+  const cached = CacheService.getScriptCache().get(key);
+  if (!cached) return null;
+  let session;
+  try { session = JSON.parse(cached); } catch (error) { return null; }
+  const current = listRows_('Users').find(function (item) { return String(item.userId) === String(session.userId); });
+  if (!current || String(current.role).toLowerCase() !== 'student' ||
+      !(current.active === true || String(current.active).toLowerCase() === 'true' || String(current.active) === '1')) {
+    CacheService.getScriptCache().remove(key);
+    return null;
+  }
+  return { userId: String(current.userId), name: String(current.name || ''), email: '', role: 'student', className: String(current.className || '') };
+}
+
+function studentLogin_(payload) {
+  ensureUserAuthColumns_();
+  const username = requiredText_(payload.username, 'NIS / username', 80).toLowerCase();
+  const password = requiredText_(payload.password, 'Kata sandi', 100);
+  const failKeyBytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, username, Utilities.Charset.UTF_8);
+  const failKey = 'ra_login_fail_' + failKeyBytes.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+  const cache = CacheService.getScriptCache();
+  const failures = Number(cache.get(failKey) || 0);
+  if (failures >= 8) throw new Error('Terlalu banyak percobaan masuk. Silakan tunggu 10 menit lalu coba lagi.');
+
+  const user = listRows_('Users').find(function (item) {
+    return String(item.username || '').trim().toLowerCase() === username && String(item.role || '').toLowerCase() === 'student';
+  });
+  const active = user && (user.active === true || String(user.active).toLowerCase() === 'true' || String(user.active) === '1');
+  const valid = !!(user && active && user.passwordSalt && user.passwordHash &&
+    passwordDigest_(password, user.passwordSalt) === String(user.passwordHash));
+  if (!valid) {
+    cache.put(failKey, String(failures + 1), 600);
+    throw new Error('NIS atau kata sandi tidak sesuai, atau akun belum aktif.');
+  }
+  cache.remove(failKey);
+  return { token: makeStudentSession_(user), user: { userId: String(user.userId), name: String(user.name || ''), role: 'student', className: String(user.className || '') } };
+}
+
+function studentLogout_(token) {
+  token = String(token || '').trim();
+  if (/^[a-f0-9]{64}$/i.test(token)) {
+    const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token, Utilities.Charset.UTF_8);
+    const key = 'ra_student_session_' + bytes.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+    CacheService.getScriptCache().remove(key);
+  }
+  return { loggedOut: true };
+}
+
+function updateUserAuthFields_(userId, fields) {
+  const sheet = getSheet_('Users');
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) throw new Error('Pengguna tidak ditemukan.');
+  const headers = values[0].map(String);
+  const idCol = headers.indexOf('userId');
+  const rowIndex = values.findIndex(function (row, index) { return index > 0 && String(row[idCol]) === String(userId); });
+  if (rowIndex < 1) throw new Error('Pengguna tidak ditemukan.');
+  Object.keys(fields).forEach(function (key) {
+    const col = headers.indexOf(key);
+    if (col < 0) throw new Error('Kolom ' + key + ' tidak tersedia.');
+    sheet.getRange(rowIndex + 1, col + 1).setValue(fields[key]);
+  });
+}
+
+function adminListStudents_() {
+  ensureUserAuthColumns_();
+  return listRows_('Users').filter(function (item) {
+    return String(item.role || '').toLowerCase() === 'student';
+  }).map(function (item) {
+    return { userId: String(item.userId || ''), name: String(item.name || ''), username: String(item.username || ''), nisn: String(item.nisn || ''), className: String(item.className || ''), active: item.active === true || String(item.active).toLowerCase() === 'true' || String(item.active) === '1' };
+  });
+}
+
+function adminImportStudents_(payload) {
+  ensureUserAuthColumns_();
+  const records = Array.isArray(payload.students) ? payload.students : [];
+  if (!records.length || records.length > 500) throw new Error('Impor harus berisi 1 sampai 500 siswa per proses.');
+  const existing = listRows_('Users');
+  const seen = {};
+  const credentials = [], skipped = [];
+  records.forEach(function (record, index) {
+    const username = requiredText_(record.nis, 'NIS pada baris ' + (index + 1), 80).toLowerCase();
+    const name = requiredText_(record.name, 'Nama pada baris ' + (index + 1), 120);
+    const className = requiredText_(record.className, 'Kelas pada baris ' + (index + 1), 80);
+    const nisn = String(record.nisn || '').trim().slice(0, 40);
+    if (seen[username]) { skipped.push({ username: username, reason: 'Duplikat dalam file' }); return; }
+    seen[username] = true;
+    if (existing.some(function (item) { return String(item.username || '').trim().toLowerCase() === username; })) {
+      skipped.push({ username: username, reason: 'NIS sudah terdaftar' }); return;
+    }
+    const password = generateStudentPassword_();
+    const salt = Utilities.getUuid().replace(/-/g, '');
+    const userId = makeId_('USR');
+    appendRow_('Users', {
+      userId: userId, name: name, email: '', role: 'student', className: className,
+      active: true, createdAt: currentTimestamp_(), username: username, nisn: nisn,
+      passwordSalt: salt, passwordHash: passwordDigest_(password, salt)
+    });
+    credentials.push({ userId: userId, name: name, username: username, className: className, password: password });
+  });
+  return { created: credentials.length, skipped: skipped, credentials: credentials };
+}
+
+function adminResetStudentPassword_(payload) {
+  ensureUserAuthColumns_();
+  const userId = requiredText_(payload.userId, 'ID siswa', 100);
+  const user = listRows_('Users').find(function (item) { return String(item.userId) === userId && String(item.role).toLowerCase() === 'student'; });
+  if (!user) throw new Error('Akun siswa tidak ditemukan.');
+  const password = generateStudentPassword_(), salt = Utilities.getUuid().replace(/-/g, '');
+  updateUserAuthFields_(userId, { passwordSalt: salt, passwordHash: passwordDigest_(password, salt) });
+  return { userId: userId, name: String(user.name || ''), username: String(user.username || ''), password: password };
+}
+
+function adminSetStudentActive_(payload) {
+  const userId = requiredText_(payload.userId, 'ID siswa', 100);
+  const active = payload.active === true;
+  const user = listRows_('Users').find(function (item) { return String(item.userId) === userId && String(item.role).toLowerCase() === 'student'; });
+  if (!user) throw new Error('Akun siswa tidak ditemukan.');
+  updateUserAuthFields_(userId, { active: active });
+  return { userId: userId, active: active };
 }
 
 function saveUser_(payload) {
