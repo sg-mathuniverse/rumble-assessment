@@ -962,7 +962,55 @@ async function loadCurrentUser(){
 }
 
 async function retryAuth(){sessionStorage.removeItem('rumbleStudentSession');s.authChecked=false;s.authReason='';render();await loadCurrentUser()}
-function render(){if(!s.authChecked||!s.authenticated||!s.currentUser){document.getElementById('app').innerHTML=renderAccessGate();return}let p=s.page,c=p==='adminUsers'?adminUsersPage():p==='overview'?overview():p==='bundles'?bundlesPage():p==='assessments'?assessments():p==='monitoring'?monitoringPage():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='gradebook'?gradebook():p==='progress'?progress():settings();const isStudentExam=s.page==='detail'&&s.role==='student';if(isStudentExam){document.getElementById('app').innerHTML='<div class="layout exam-layout"><main class="main"><div class="content">'+c+'</div></main></div>';}else{document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Belajar, ukur, tumbuh.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Aman · Terukur · Inklusif</footer></aside><main class="main"><header class="top"><span class="muted">Ruang kerja / '+esc(p)+'</span><span class="account-chip"><span class="account-dot"></span>'+((s.currentUser&&s.currentUser.name)?esc(s.currentUser.name)+' · ':'')+(s.role==='teacher'?'Guru':s.role==='admin'?'Administrator':'Siswa')+' <span class="role-lock" title="Peran ditentukan akun sekolah">Terverifikasi</span></span></header><div class="content">'+c+'</div></main></div>';}document.querySelectorAll('.question p,.question label,.question li,.math-content,.passage-content,.report-question-text p,.report-question-text li,.report-answer-text').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));if(s.page==='detail'&&s.role==='student')updateAnswerProgress();}
+/**
+ * Memuat gambar soal/bacaan melalui endpoint Apps Script terautentikasi.
+ * Hanya URL yang memang terhubung dengan konten yang sedang ditampilkan.
+ */
+async function hydrateAssessmentImages(){
+ const ids=new Set();
+ const visited=new Set();
+ function scan(value){
+  if(!value||typeof value!=='object'||visited.has(value))return;
+  visited.add(value);
+  if(Array.isArray(value)){value.forEach(scan);return}
+  ['imageUrl','passageImageUrl','leftImageUrl','rightImageUrl'].forEach(key=>{
+   const id=imageFileId(value[key]);if(id)ids.add(id);
+  });
+  ['optionImages','subquestionImages'].forEach(key=>{
+   if(Array.isArray(value[key]))value[key].forEach(url=>{const id=imageFileId(url);if(id)ids.add(id)});
+  });
+  Object.keys(value).forEach(key=>{
+   if(key!=='answer'&&key!=='answersJson'&&key!=='passwordHash')scan(value[key]);
+  });
+ }
+ scan(s.currentAssessment);
+ scan(s.qs);
+ scan(s.passages);
+ scan(s.meta);
+ if(!ids.size)return;
+ const images=Array.from(document.querySelectorAll('img'));
+ const pending=[];
+ images.forEach(img=>{
+  const id=imageFileId(img.getAttribute('src')||'');
+  if(!id||!ids.has(id)||img.dataset.rumbleImageRequested==='1')return;
+  img.dataset.rumbleImageRequested='1';
+  pending.push({img,id});
+ });
+ for(let i=0;i<pending.length;i+=5){
+  await Promise.all(pending.slice(i,i+5).map(async item=>{
+   try{
+    const result=await api('getAssessmentImage',{fileId:item.id});
+    if(!result||!result.ok)throw new Error(result&&result.error?result.error:'Gambar tidak dapat dimuat');
+    if(item.img.isConnected)item.img.src=result.data.dataUrl;
+   }catch(error){
+    item.img.dataset.rumbleImageFailed='1';
+    console.warn('Gambar asesmen gagal dimuat:',item.id,error.message);
+   }
+  }));
+ }
+}
+
+function render(){if(!s.authChecked||!s.authenticated||!s.currentUser){document.getElementById('app').innerHTML=renderAccessGate();return}let p=s.page,c=p==='adminUsers'?adminUsersPage():p==='overview'?overview():p==='bundles'?bundlesPage():p==='assessments'?assessments():p==='monitoring'?monitoringPage():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='gradebook'?gradebook():p==='progress'?progress():settings();const isStudentExam=s.page==='detail'&&s.role==='student';if(isStudentExam){document.getElementById('app').innerHTML='<div class="layout exam-layout"><main class="main"><div class="content">'+c+'</div></main></div>';}else{document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Belajar, ukur, tumbuh.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Aman · Terukur · Inklusif</footer></aside><main class="main"><header class="top"><span class="muted">Ruang kerja / '+esc(p)+'</span><span class="account-chip"><span class="account-dot"></span>'+((s.currentUser&&s.currentUser.name)?esc(s.currentUser.name)+' · ':'')+(s.role==='teacher'?'Guru':s.role==='admin'?'Administrator':'Siswa')+' <span class="role-lock" title="Peran ditentukan akun sekolah">Terverifikasi</span></span></header><div class="content">'+c+'</div></main></div>';}document.querySelectorAll('.question p,.question label,.question li,.math-content,.passage-content,.report-question-text p,.report-question-text li,.report-answer-text').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));if(s.page==='detail'&&s.role==='student')updateAnswerProgress();hydrateAssessmentImages();}
 render();
 loadCurrentUser();
 
