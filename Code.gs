@@ -2063,12 +2063,43 @@ function migrateDatabaseV1_() {
     return {success:true,migrationId:migrationId,bundles:bundles.length,createdVersions:created,reusedVersions:reused};
   }finally{lock.releaseLock();}
 }
-function updateRowByKey_(tableName,keyHeader,keyValue,fields){
-  const sheet=getSheet_(tableName),values=sheet.getDataRange().getValues(),headers=values[0].map(String),keyCol=headers.indexOf(keyHeader);
-  if(keyCol<0)throw new Error('Kolom '+keyHeader+' tidak tersedia pada '+tableName+'.');
-  let row=-1;for(let i=1;i<values.length;i++)if(String(values[i][keyCol])===String(keyValue)){row=i+1;break;}
-  if(row<0)throw new Error('Data '+tableName+' tidak ditemukan: '+keyValue);
-  Object.keys(fields).forEach(function(k){const c=headers.indexOf(k);if(c<0)throw new Error('Kolom '+k+' tidak tersedia pada '+tableName+'.');sheet.getRange(row,c+1).setValue(fields[k]);});
+function updateRowByKey_(tableName, keyHeader, keyValue, fields) {
+  const sheet = getSheet_(tableName);
+  const lastColumn = sheet.getLastColumn();
+  const lastRow = sheet.getLastRow();
+  if (lastColumn < 1 || lastRow < 1) {
+    throw new Error('Sheet ' + tableName + ' belum memiliki header yang valid.');
+  }
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(function (h) { return String(h).trim(); });
+  const keyCol = headers.indexOf(keyHeader);
+  if (keyCol < 0) throw new Error('Kolom ' + keyHeader + ' tidak tersedia pada ' + tableName + '.');
+  const columns = {};
+  Object.keys(fields).forEach(function (key) {
+    const col = headers.indexOf(key);
+    if (col < 0) throw new Error('Kolom ' + key + ' tidak tersedia pada ' + tableName + '.');
+    columns[key] = col;
+  });
+  const data = sheet.getRange(2, 1, Math.max(lastRow - 1, 1), lastColumn).getValues();
+  let rowNumber = -1;
+  for (let i = 0; i < data.length; i++) {
+    if (String(data[i][keyCol]) === String(keyValue)) {
+      rowNumber = i + 2;
+      break;
+    }
+  }
+  if (rowNumber < 0) throw new Error('Data ' + tableName + ' tidak ditemukan: ' + keyValue);
+
+  const rowRange = sheet.getRange(rowNumber, 1, 1, lastColumn);
+  const updatedRow = rowRange.getValues()[0];
+  const formulas = rowRange.getFormulas()[0];
+  // Preserve formulas in untouched columns while applying the requested values.
+  formulas.forEach(function (formula, index) {
+    if (formula) updatedRow[index] = formula;
+  });
+  Object.keys(columns).forEach(function (key) {
+    updatedRow[columns[key]] = fields[key];
+  });
+  rowRange.setValues([updatedRow]);
 }
 function bundleSnapshotFromRecord_(bundle,classification){
   return {schemaVersion:1,bundleId:String(bundle.bundleId),classification:String(classification||'REGULER').toUpperCase(),title:String(bundle.title||''),subject:String(bundle.subject||''),description:String(bundle.description||''),tpCode:String(bundle.tpCode||''),passageText:String(bundle.passageText||''),passageImageUrl:String(bundle.passageImageUrl||''),passages:parseJson_(bundle.passagesJson,[]),questions:parseJson_(bundle.questionsJson,[])};
@@ -2164,11 +2195,36 @@ function migrateLearningRepositoryV1_() {
   }
 }
 
+function validateRepositorySheetHeaders_(sheet, sheetName, requiredHeaders) {
+  if (!sheet) throw new Error('Sheet ' + sheetName + ' belum tersedia.');
+  const lastColumn = sheet.getLastColumn();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 1 || lastColumn < 1) {
+    throw new Error('Sheet ' + sheetName + ' kosong atau belum memiliki baris header. Periksa struktur sheet sebelum menjalankan endpoint repositori.');
+  }
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(function (value) {
+    return String(value == null ? '' : value).trim();
+  });
+  const seen = {};
+  headers.forEach(function (header, index) {
+    if (!header) throw new Error('Header kosong pada kolom ' + (index + 1) + ' di sheet ' + sheetName + '.');
+    if (seen[header]) throw new Error('Header duplikat "' + header + '" pada sheet ' + sheetName + '.');
+    seen[header] = true;
+  });
+  requiredHeaders.forEach(function (header) {
+    if (headers.indexOf(header) < 0) {
+      throw new Error('Kolom ' + header + ' belum tersedia pada ' + sheetName + '. Jalankan migrasi repositori.');
+    }
+  });
+  return headers;
+}
 function learningRepositoryAssertReady_() {
-  const migrationSheet = getSpreadsheet_().getSheetByName('SchemaMigrations');
+  const spreadsheet = getSpreadsheet_();
+  const migrationSheet = spreadsheet.getSheetByName('SchemaMigrations');
   if (!migrationSheet) {
     throw new Error('Sheet SchemaMigrations belum tersedia. Selesaikan migrasi fondasi versioning dan repositori pembelajaran terlebih dahulu.');
   }
+  validateRepositorySheetHeaders_(migrationSheet, 'SchemaMigrations', ['migrationId', 'status']);
   const migrationCompleted = listRows_('SchemaMigrations').some(function (row) {
     return String(row.migrationId) === 'LEARNING_REPOSITORY_V1' &&
       String(row.status) === 'completed';
@@ -2177,24 +2233,42 @@ function learningRepositoryAssertReady_() {
     throw new Error('Migrasi LEARNING_REPOSITORY_V1 belum tercatat completed. Jalankan migrasi repositori secara eksplisit setelah BUNDLE_VERSIONING_V1 selesai.');
   }
   Object.keys(LEARNING_REPOSITORY_TABLES_).forEach(function (name) {
-    const sheet = getSpreadsheet_().getSheetByName(name);
+    const sheet = spreadsheet.getSheetByName(name);
     if (!sheet) throw new Error('Repositori Pembelajaran belum dimigrasikan. Jalankan migrateLearningRepositoryV1_() secara eksplisit.');
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
-    LEARNING_REPOSITORY_TABLES_[name].forEach(function (h) {
-      if (headers.indexOf(h) < 0) throw new Error('Kolom ' + h + ' belum tersedia pada ' + name + '. Jalankan migrasi repositori.');
-    });
+    validateRepositorySheetHeaders_(sheet, name, LEARNING_REPOSITORY_TABLES_[name]);
   });
 }
 function learningActive_(value) {
   return value === true || String(value).toLowerCase() === 'true' || String(value) === '1';
 }
-function learningAudit_(user, action, entityType, entityId, beforeValue, afterValue) {
+function learningAuditBegin_(user, action, entityType, entityId, beforeValue, afterValue) {
+  const logId = makeId_('AUD');
   appendRow_('AdminAuditLog', {
-    logId: makeId_('AUD'), actorUserId: String(user.userId || ''),
-    actorEmail: String(user.email || ''), action: action, entityType: entityType,
-    entityId: String(entityId), beforeJson: beforeValue == null ? '' : JSON.stringify(beforeValue),
-    afterJson: afterValue == null ? '' : JSON.stringify(afterValue), createdAt: currentTimestamp_()
+    logId: logId, actorUserId: String(user.userId || ''),
+    actorEmail: String(user.email || ''), action: 'PENDING_' + action,
+    entityType: entityType, entityId: String(entityId),
+    beforeJson: beforeValue == null ? '' : JSON.stringify(beforeValue),
+    afterJson: afterValue == null ? '' : JSON.stringify(afterValue),
+    createdAt: currentTimestamp_()
   });
+  return logId;
+}
+function learningAuditComplete_(logId, action) {
+  updateRowByKey_('AdminAuditLog', 'logId', logId, { action: action });
+}
+function learningAuditedWrite_(user, action, entityType, entityId, beforeValue, afterValue, writeFn) {
+  // Catat intent terlebih dahulu agar perubahan tidak dapat terjadi tanpa jejak audit.
+  const logId = learningAuditBegin_(user, action, entityType, entityId, beforeValue, afterValue);
+  try {
+    writeFn();
+  } catch (writeError) {
+    throw new Error('Penulisan ' + entityType + ' gagal atau belum dapat dipastikan selesai. Audit ' + logId + ' tetap berstatus PENDING_' + action + ' untuk rekonsiliasi. Detail: ' + writeError.message);
+  }
+  try {
+    learningAuditComplete_(logId, action);
+  } catch (auditError) {
+    throw new Error(entityType + ' telah ditulis, tetapi audit ' + logId + ' belum dapat ditandai selesai. Periksa AdminAuditLog dan rekonsiliasi entri PENDING_' + action + '. Detail: ' + auditError.message);
+  }
 }
 function learningObjectivePublic_(row) {
   return {
@@ -2246,9 +2320,10 @@ function adminSaveLearningObjective_(payload) {
       createdAt: before ? String(before.createdAt || now) : now, updatedAt: now,
       active: before ? learningActive_(before.active) : true
     };
-    if (before) updateRowByKey_('LearningObjectives', 'objectiveId', id, after);
-    else appendRow_('LearningObjectives', after);
-    learningAudit_(payload.currentUser, before ? 'UPDATE' : 'CREATE', 'LearningObjective', after.objectiveId, before || null, after);
+    learningAuditedWrite_(payload.currentUser, before ? 'UPDATE' : 'CREATE', 'LearningObjective', after.objectiveId, before || null, after, function () {
+      if (before) updateRowByKey_('LearningObjectives', 'objectiveId', id, after);
+      else appendRow_('LearningObjectives', after);
+    });
     return learningObjectivePublic_(after);
   } finally { lock.releaseLock(); }
 }
@@ -2261,8 +2336,9 @@ function adminSetLearningObjectiveActive_(payload) {
     const before = listRows_('LearningObjectives').find(function (r) { return String(r.objectiveId) === id; });
     if (!before) throw new Error('TP tidak ditemukan.');
     const after = Object.assign({}, before, { active: payload.active, updatedAt: currentTimestamp_() });
-    updateRowByKey_('LearningObjectives', 'objectiveId', id, after);
-    learningAudit_(payload.currentUser, payload.active ? 'ACTIVATE' : 'DEACTIVATE', 'LearningObjective', id, before, after);
+    learningAuditedWrite_(payload.currentUser, payload.active ? 'ACTIVATE' : 'DEACTIVATE', 'LearningObjective', id, before, after, function () {
+      updateRowByKey_('LearningObjectives', 'objectiveId', id, after);
+    });
     return learningObjectivePublic_(after);
   } finally { lock.releaseLock(); }
 }
@@ -2310,9 +2386,10 @@ function adminSaveLearningIndicator_(payload) {
       description: description, active: before ? learningActive_(before.active) : true,
       createdAt: before ? String(before.createdAt || now) : now, updatedAt: now
     };
-    if (before) updateRowByKey_('LearningIndicators', 'indicatorId', id, after);
-    else appendRow_('LearningIndicators', after);
-    learningAudit_(payload.currentUser, before ? 'UPDATE' : 'CREATE', 'LearningIndicator', after.indicatorId, before || null, after);
+    learningAuditedWrite_(payload.currentUser, before ? 'UPDATE' : 'CREATE', 'LearningIndicator', after.indicatorId, before || null, after, function () {
+      if (before) updateRowByKey_('LearningIndicators', 'indicatorId', id, after);
+      else appendRow_('LearningIndicators', after);
+    });
     return learningIndicatorPublic_(after);
   } finally { lock.releaseLock(); }
 }
@@ -2325,8 +2402,9 @@ function adminSetLearningIndicatorActive_(payload) {
     const before = listRows_('LearningIndicators').find(function (r) { return String(r.indicatorId) === id; });
     if (!before) throw new Error('Indikator tidak ditemukan.');
     const after = Object.assign({}, before, { active: payload.active, updatedAt: currentTimestamp_() });
-    updateRowByKey_('LearningIndicators', 'indicatorId', id, after);
-    learningAudit_(payload.currentUser, payload.active ? 'ACTIVATE' : 'DEACTIVATE', 'LearningIndicator', id, before, after);
+    learningAuditedWrite_(payload.currentUser, payload.active ? 'ACTIVATE' : 'DEACTIVATE', 'LearningIndicator', id, before, after, function () {
+      updateRowByKey_('LearningIndicators', 'indicatorId', id, after);
+    });
     return learningIndicatorPublic_(after);
   } finally { lock.releaseLock(); }
 }
