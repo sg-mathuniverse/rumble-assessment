@@ -452,7 +452,7 @@ const raceContext = Object.assign({}, assessmentContext, {
 vm.createContext(raceContext);
 vm.runInContext(extractFunction('createAssessment_', source), raceContext);
 assert.throws(function () {
-  raceContext.createAssessment_({ title: 'Asesmen race', sourceBundleId: 'BND-1', currentUser: assessmentUser });
+  raceContext.createAssessment_({ title: 'Asesmen race', sourceBundleId: 'BND-1', currentUser: assessmentUser, questions: [{ type: 'essay', points: 1 }] });
 }, /Versi Bundel Soal berubah/, 'Assessment creation must reject a bundle version changed before the locked write');
 assert.equal(raceContext.assessmentRows.length, 0, 'Version race must be detected before writing the assessment row');
 assert.equal(raceContext.questionRows.length, 0, 'Version race must be detected before writing question rows');
