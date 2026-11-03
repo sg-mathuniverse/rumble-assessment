@@ -34,3 +34,33 @@ Aksi: health, createAssessment, listAssessments, getAssessment, submitAttempt, l
 
 ## Anti-kecurangan
 Timer dan pencatatan perpindahan tab membantu pengawasan, tetapi browser tidak dapat menjamin siswa tidak menggunakan perangkat lain atau AI. Penguncian lebih kuat memerlukan perangkat sekolah terkelola atau solusi ujian khusus.
+
+
+## Repositori Pembelajaran (Tahap 2A)
+
+Branch `feature/learning-repository-backend` menambahkan backend Admin untuk mengelola TP dan indikator:
+- `LearningObjectives` tetap menjadi master TP bersama.
+- `LearningIndicators` menyimpan indikator yang terhubung ke satu TP.
+- `AdminAuditLog` mencatat aktor, aksi, serta kondisi sebelum/sesudah perubahan.
+- Endpoint baca aktif tersedia untuk Admin/Guru; seluruh CRUD dan daftar lengkap hanya untuk Admin.
+- Data dinonaktifkan secara soft-delete; tidak ada penghapusan permanen.
+
+### Migrasi repositori
+
+Setelah meninjau kode dan mencadangkan spreadsheet uji, jalankan fungsi `migrateLearningRepositoryV1_()` secara manual dari editor Apps Script. Fungsi ini terpisah dari `setupDatabase()` dan `migrateDatabaseV1_()`, membuat sheet yang belum ada, menambahkan header yang kurang tanpa menghapus baris, lalu mencatat `LEARNING_REPOSITORY_V1` pada `SchemaMigrations`. Migrasi ini BELUM dijalankan pada spreadsheet mana pun oleh proses pengembangan.
+
+### API backend Tahap 2A
+
+Admin:
+- `adminListLearningObjectives`, `adminSaveLearningObjective`, `adminSetLearningObjectiveActive`
+- `adminListLearningIndicators`, `adminSaveLearningIndicator`, `adminSetLearningIndicatorActive`
+
+Admin/Guru:
+- `listAvailableLearningObjectives`
+- `listAvailableLearningIndicators` (memerlukan `objectiveId`)
+
+Semua aksi memerlukan sesi terautentikasi. Otorisasi dilakukan di server, bukan berdasarkan peran yang dikirim browser. Penulisan memakai ScriptLock. Kode TP unik per mata pelajaran; kode indikator unik dalam satu TP aktif. Snapshot Bundel/Asesmen yang telah tersimpan tidak disentuh oleh CRUD master ini.
+
+### Batasan dan validasi
+
+Google Sheets tidak menyediakan transaksi multi-sheet. Jika penulisan data berhasil tetapi pencatatan audit gagal, perubahan data mungkin sudah tersimpan tanpa baris audit; periksa log dan lakukan rekonsiliasi manual. Audit log tidak dapat dianggap sebagai tamper-proof terhadap pemilik spreadsheet. Uji integrasi dan runtime Apps Script tetap wajib dilakukan pada salinan spreadsheet sebelum deployment.
