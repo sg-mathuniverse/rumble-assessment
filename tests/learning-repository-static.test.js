@@ -58,6 +58,65 @@ assert.match(html, /adminReconcileLearningAudit/, 'Admin UI must submit audit re
 assert.match(html, /auditResolution_/, 'Admin UI must require a reconciliation decision');
 assert.match(html, /auditNote_/, 'Admin UI must collect a reconciliation note');
 
+const reconciliationRows = [
+  { logId: 'AUD-PENDING-1', actorUserId: 'admin-1', actorEmail: 'admin@example.test',
+    action: 'PENDING_UPDATE', entityType: 'LearningObjective', entityId: 'TP-1',
+    beforeJson: '{}', afterJson: '{}', createdAt: '2026-01-01T00:00:00.000Z' }
+];
+let appendCount = 0;
+let failNextOriginalUpdate = true;
+const reconciliationContext = {
+  learningRepositoryAssertReady_: function () {},
+  requiredText_: function (value, label) {
+    const result = String(value || '').trim();
+    if (!result) throw new Error(label + ' wajib diisi.');
+    return result;
+  },
+  LockService: { getScriptLock: function () {
+    return { waitLock: function () {}, releaseLock: function () {} };
+  } },
+  listRows_: function () { return reconciliationRows.map(function (row) { return Object.assign({}, row); }); },
+  appendRow_: function (_table, row) { reconciliationRows.push(Object.assign({}, row)); appendCount++; },
+  updateRowByKey_: function (_table, _key, id, fields) {
+    if (id === 'AUD-PENDING-1' && failNextOriginalUpdate) {
+      failNextOriginalUpdate = false;
+      throw new Error('simulated write failure');
+    }
+    const row = reconciliationRows.find(function (item) { return item.logId === id; });
+    if (!row) throw new Error('missing row');
+    Object.assign(row, fields);
+  },
+  makeId_: function () { return 'AUD-DECISION-1'; },
+  currentTimestamp_: function () { return '2026-01-01T00:01:00.000Z'; },
+  JSON: JSON
+};
+vm.createContext(reconciliationContext);
+vm.runInContext(reconcile, reconciliationContext);
+assert.throws(function () {
+  reconciliationContext.adminReconcileLearningAudit_(
+    { logId: 'AUD-PENDING-1', resolution: 'unknown', note: 'uji' },
+    { userId: 'admin-1', email: 'admin@example.test' }
+  );
+}, /tidak valid/, 'Unknown reconciliation decisions must be rejected');
+assert.throws(function () {
+  reconciliationContext.adminReconcileLearningAudit_(
+    { logId: 'AUD-PENDING-1', resolution: 'applied', note: 'sudah diperiksa' },
+    { userId: 'admin-1', email: 'admin@example.test' }
+  );
+}, /simulated write failure/, 'First attempt should expose the simulated finalization failure');
+assert.equal(appendCount, 1, 'First attempt must append exactly one decision audit');
+assert.equal(reconciliationRows[0].action, 'PENDING_UPDATE', 'Failed finalization must leave the original record pending');
+const retryResult = reconciliationContext.adminReconcileLearningAudit_(
+  { logId: 'AUD-PENDING-1', resolution: 'not_applied', note: 'permintaan retry berbeda' },
+  { userId: 'admin-1', email: 'admin@example.test' }
+);
+assert.equal(retryResult.action, 'RECONCILED_APPLIED', 'Retry must reuse the first recorded decision');
+assert.equal(retryResult.reusedDecision, true, 'Retry must report reuse of the original decision');
+assert.equal(appendCount, 1, 'Retry must not append a duplicate decision audit');
+assert.equal(reconciliationRows[0].action, 'RECONCILED_APPLIED', 'Retry must close the original pending record');
+
+
+
 const audit = bodyOf('learningAuditedWrite_', 'learningObjectivePublic_');
 assert.match(audit, /learningAuditBegin_/, 'Audit intent must be persisted before entity write');
 assert.match(audit, /writeFn\(\)/, 'Audited write must execute the entity write');
