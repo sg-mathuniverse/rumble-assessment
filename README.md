@@ -43,7 +43,7 @@ Timer dan pencatatan perpindahan tab membantu pengawasan, tetapi browser tidak d
 Branch `feature/learning-repository-backend` menambahkan backend Admin untuk mengelola TP dan indikator:
 - `LearningObjectives` tetap menjadi master TP bersama.
 - `LearningIndicators` menyimpan indikator yang terhubung ke satu TP.
-- `AdminAuditLog` mencatat aktor, aksi, serta kondisi sebelum/sesudah perubahan.
+- `AdminAuditLog` mencatat aktor, aksi, serta kondisi sebelum/sesudah perubahan. Intent ditulis sebagai `PENDING_*` sebelum perubahan master; Admin dapat memeriksa dan merekonsiliasi entri tertunda melalui UI.
 - Endpoint baca aktif tersedia untuk Admin/Guru; seluruh CRUD dan daftar lengkap hanya untuk Admin.
 - Data dinonaktifkan secara soft-delete; tidak ada penghapusan permanen.
 
@@ -56,6 +56,7 @@ Setelah meninjau kode dan mencadangkan spreadsheet uji, pastikan migrasi fondasi
 Admin:
 - `adminListLearningObjectives`, `adminSaveLearningObjective`, `adminSetLearningObjectiveActive`
 - `adminListLearningIndicators`, `adminSaveLearningIndicator`, `adminSetLearningIndicatorActive`
+- `adminListPendingLearningAudits`, `adminReconcileLearningAudit` (rekonsiliasi khusus Admin; keputusan dicatat sebagai audit baru dan retry memakai keputusan yang sudah tercatat)
 
 Admin/Guru:
 - `listAvailableLearningObjectives`
@@ -65,7 +66,7 @@ Semua aksi memerlukan sesi terautentikasi. Otorisasi dilakukan di server, bukan 
 
 ### Batasan dan validasi
 
-Google Sheets tidak menyediakan transaksi multi-sheet. Jika penulisan data berhasil tetapi pencatatan audit gagal, perubahan data mungkin sudah tersimpan tanpa baris audit; periksa log dan lakukan rekonsiliasi manual. Audit log tidak dapat dianggap sebagai tamper-proof terhadap pemilik spreadsheet. Uji integrasi dan runtime Apps Script tetap wajib dilakukan pada salinan spreadsheet sebelum deployment.
+Google Sheets tidak menyediakan transaksi multi-sheet. Google Sheets tidak menyediakan transaksi multi-sheet. Jika penulisan entitas atau penutupan audit gagal, status `PENDING_*` dapat memerlukan pemeriksaan Admin. UI rekonsiliasi menyimpan keputusan sebagai entri audit terpisah, kemudian menutup status awal; retry setelah keputusan tercatat menggunakan keputusan yang sama untuk menghindari entri rekonsiliasi duplikat. Keputusan `applied`/`not_applied`/`manual` adalah catatan hasil pemeriksaan Admin, bukan verifikasi otomatis terhadap isi sheet. Periksa kondisi entitas secara manual sebelum memilih keputusan. Audit log tidak dapat dianggap sebagai tamper-proof terhadap pemilik spreadsheet. Uji integrasi dan runtime Apps Script tetap wajib dilakukan pada salinan spreadsheet sebelum deployment.
 
 
 ### Repositori TP dan indikator
