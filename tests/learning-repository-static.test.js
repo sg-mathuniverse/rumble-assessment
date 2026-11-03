@@ -39,6 +39,21 @@ assert.match(headerValidation, /header duplikat/i, 'Readiness must reject duplic
 const readiness = bodyOf('learningRepositoryAssertReady_', 'learningActive_');
 assert.match(readiness, /LEARNING_REPOSITORY_V1/, 'Readiness must require completed migration');
 
+const pendingAuditList = bodyOf('adminListPendingLearningAudits_', 'adminReconcileLearningAudit_');
+assert.match(pendingAuditList, /PENDING_/, 'Pending audit endpoint must filter pending records');
+const reconcile = bodyOf('adminReconcileLearningAudit_', 'learningObjectivePublic_');
+assert.match(reconcile, /LockService\.getScriptLock/, 'Audit reconciliation must use a script lock');
+assert.match(reconcile, /RECONCILED_APPLIED/, 'Audit reconciliation must record applied decisions');
+assert.match(reconcile, /RECONCILED_NOT_APPLIED/, 'Audit reconciliation must record not-applied decisions');
+assert.match(reconcile, /RECONCILED_MANUAL/, 'Audit reconciliation must record manual decisions');
+assert.match(reconcile, /RECONCILE_PENDING/, 'Audit reconciliation must append a separate audit event');
+assert.match(reconcile, /updateRowByKey_\('AdminAuditLog'/, 'Audit reconciliation must close the original pending record');
+assert.match(source, /'adminListPendingLearningAudits','adminReconcileLearningAudit'/, 'Audit reconciliation endpoints must be admin-only');
+assert.match(html, /adminListPendingLearningAudits/, 'Admin UI must load pending audit records');
+assert.match(html, /adminReconcileLearningAudit/, 'Admin UI must submit audit reconciliation decisions');
+assert.match(html, /auditResolution_/, 'Admin UI must require a reconciliation decision');
+assert.match(html, /auditNote_/, 'Admin UI must collect a reconciliation note');
+
 const audit = bodyOf('learningAuditedWrite_', 'learningObjectivePublic_');
 assert.match(audit, /learningAuditBegin_/, 'Audit intent must be persisted before entity write');
 assert.match(audit, /writeFn\(\)/, 'Audited write must execute the entity write');
