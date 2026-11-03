@@ -526,4 +526,46 @@ assert.throws(function () {
 assert.equal(raceContext.assessmentRows.length, 0, 'Version race must be detected before writing the assessment row');
 assert.equal(raceContext.questionRows.length, 0, 'Version race must be detected before writing question rows');
 
+
+const auditFailureContext = {
+  pending: [],
+  learningAuditBegin_: function () {
+    auditFailureContext.pending.push({ logId: 'AUD-WRITE-FAIL', action: 'PENDING_UPDATE' });
+    return 'AUD-WRITE-FAIL';
+  },
+  learningAuditComplete_: function () { throw new Error('simulated completion failure'); }
+};
+vm.createContext(auditFailureContext);
+vm.runInContext(extractFunction('learningAuditedWrite_', source), auditFailureContext);
+let entityWriteAttempted = false;
+assert.throws(function () {
+  auditFailureContext.learningAuditedWrite_({}, 'UPDATE', 'LearningObjective', 'TP-1', {}, {}, function () {
+    entityWriteAttempted = true;
+    throw new Error('simulated entity write failure');
+  });
+}, /Audit AUD-WRITE-FAIL tetap berstatus PENDING_UPDATE/,
+'Failed entity write must leave a pending audit for reconciliation');
+assert.equal(entityWriteAttempted, true, 'Entity write callback must be attempted after pending audit is recorded');
+assert.equal(auditFailureContext.pending[0].action, 'PENDING_UPDATE', 'Failed entity write must preserve the pending audit marker');
+
+const auditFinalizeFailureContext = {
+  pending: [],
+  learningAuditBegin_: function () {
+    auditFinalizeFailureContext.pending.push({ logId: 'AUD-FINALIZE-FAIL', action: 'PENDING_UPDATE' });
+    return 'AUD-FINALIZE-FAIL';
+  },
+  learningAuditComplete_: function () { throw new Error('simulated audit update failure'); }
+};
+vm.createContext(auditFinalizeFailureContext);
+vm.runInContext(extractFunction('learningAuditedWrite_', source), auditFinalizeFailureContext);
+let committedEntity = false;
+assert.throws(function () {
+  auditFinalizeFailureContext.learningAuditedWrite_({}, 'UPDATE', 'LearningObjective', 'TP-2', {}, {}, function () {
+    committedEntity = true;
+  });
+}, /telah ditulis, tetapi audit AUD-FINALIZE-FAIL belum dapat ditandai selesai/,
+'Successful entity write with failed audit finalization must report the committed-write ambiguity');
+assert.equal(committedEntity, true, 'Entity write must complete before audit finalization is attempted');
+assert.equal(auditFinalizeFailureContext.pending[0].action, 'PENDING_UPDATE', 'Failed audit finalization must leave a pending marker for Admin reconciliation');
+
 console.log('PASS: learning repository static guard tests');
