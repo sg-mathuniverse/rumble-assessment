@@ -259,4 +259,60 @@ assert.equal(crudContext.rows.LearningObjectives.find(function (row) { return ro
 
 
 
+
+const headerContext = { LEARNING_REPOSITORY_TABLES_: {
+  LearningObjectives: ['objectiveId', 'tpCode', 'title'],
+  LearningIndicators: ['indicatorId', 'objectiveId', 'indicatorCode']
+} };
+vm.createContext(headerContext);
+vm.runInContext(extractFunction('validateRepositorySheetHeaders_', source), headerContext);
+vm.runInContext(extractFunction('validateLearningMigrationPreflight_', source), headerContext);
+function fakeSheet(headers, lastRow) {
+  return {
+    getLastRow: function () { return lastRow === undefined ? 1 : lastRow; },
+    getLastColumn: function () { return headers.length; },
+    getRange: function () { return { getValues: function () { return [headers]; } }; }
+  };
+}
+assert.deepEqual(Array.from(headerContext.validateRepositorySheetHeaders_(
+  fakeSheet(['objectiveId', 'tpCode', 'title']), 'LearningObjectives',
+  ['objectiveId', 'tpCode', 'title']
+)), ['objectiveId', 'tpCode', 'title'], 'Valid required headers must pass validation');
+assert.throws(function () {
+  headerContext.validateRepositorySheetHeaders_(fakeSheet(['objectiveId', '', 'title']), 'LearningObjectives', ['objectiveId']);
+}, /Header kosong/, 'Blank headers must be rejected');
+assert.throws(function () {
+  headerContext.validateRepositorySheetHeaders_(fakeSheet(['objectiveId', 'tpCode', 'tpCode']), 'LearningObjectives', ['objectiveId']);
+}, /Header duplikat/, 'Duplicate headers must be rejected');
+assert.throws(function () {
+  headerContext.validateRepositorySheetHeaders_(fakeSheet(['objectiveId']), 'LearningObjectives', ['objectiveId', 'tpCode']);
+}, /Kolom tpCode belum tersedia/, 'Missing required headers must be rejected by readiness validation');
+assert.throws(function () {
+  headerContext.validateRepositorySheetHeaders_(fakeSheet([], 0), 'LearningObjectives', ['objectiveId']);
+}, /kosong atau belum memiliki/, 'Empty sheets must be rejected by readiness validation');
+
+let mutationCount = 0;
+const malformedSpreadsheet = {
+  getSheetByName: function (name) {
+    if (name === 'SchemaMigrations') return fakeSheet(['migrationId', 'status']);
+    if (name === 'LearningObjectives') return fakeSheet(['objectiveId', ' ', 'title']);
+    return null;
+  },
+  insertSheet: function () { mutationCount++; throw new Error('must not mutate during preflight'); }
+};
+assert.throws(function () {
+  headerContext.validateLearningMigrationPreflight_(malformedSpreadsheet);
+}, /Header kosong/, 'Migration preflight must reject malformed headers');
+assert.equal(mutationCount, 0, 'Migration preflight must fail before any sheet mutation');
+
+const validPreflightSpreadsheet = {
+  getSheetByName: function (name) {
+    if (name === 'SchemaMigrations') return fakeSheet(['migrationId', 'status']);
+    if (name === 'LearningObjectives') return fakeSheet(['objectiveId', 'tpCode']);
+    if (name === 'LearningIndicators') return fakeSheet([], 0);
+    return null;
+  }
+};
+assert.equal(headerContext.validateLearningMigrationPreflight_(validPreflightSpreadsheet), true, 'Valid existing sheets and empty new sheets must pass migration preflight');
+
 console.log('PASS: learning repository static guard tests');
