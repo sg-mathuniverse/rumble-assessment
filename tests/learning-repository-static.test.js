@@ -11,7 +11,9 @@ const source = fs.readFileSync('Code.gs', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 assert.doesNotThrow(() => new vm.Script(source), 'Code.gs must be syntactically valid JavaScript');
 
-assert.doesNotThrow(() => new vm.Script(html.match(/<script>([\\s\\S]*?)<\\/script>/)[1]), 'index.html application script must be syntactically valid JavaScript');
+const appScriptMatch = html.match(new RegExp('<script>([\\\\s\\\\S]*?)<\\\\/script>'));
+assert.ok(appScriptMatch, 'index.html must contain the application script');
+assert.doesNotThrow(() => new vm.Script(appScriptMatch[1]), 'index.html application script must be syntactically valid JavaScript');
 assert.match(html, /\\['learningRepository'[^\\]]*TP & Indikator/, 'Admin navigation must expose the learning repository page');
 assert.match(html, /function learningRepositoryPage\\(\\)/, 'Admin learning repository page must be implemented');
 assert.match(html, /api\\('adminListPendingLearningAudits'\\)/, 'Admin UI must load pending audit records');
