@@ -516,6 +516,7 @@ function saveQuestionBundle_(payload) {
     if (existing && String(existing.status).toLowerCase()==='archived') throw new Error('Bundel yang sudah diarsipkan tidak dapat diubah.');
     const classification=String(payload.classification || (existing && existing.classification) || 'REGULER').trim().toUpperCase();
     if (['REGULER','SOLO_TAX'].indexOf(classification)<0) throw new Error('Klasifikasi bundel harus REGULER atau SOLO_TAX.');
+    if (classification === 'SOLO_TAX') throw new Error('Pembuatan Bundel SOLO Tax belum diaktifkan. Gunakan editor SOLO Tax setelah tahap pengembangan berikutnya selesai.');
     const now=currentTimestamp_();
     const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
     validateBundleSnapshot_(snapshot);
