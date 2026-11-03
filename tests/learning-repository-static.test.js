@@ -315,4 +315,81 @@ const validPreflightSpreadsheet = {
 };
 assert.equal(headerContext.validateLearningMigrationPreflight_(validPreflightSpreadsheet), true, 'Valid existing sheets and empty new sheets must pass migration preflight');
 
+
+const referenceContext = {
+  learningRepositoryAssertReady_: function () {},
+  learningActive_: function (value) { return value === true || String(value) === 'true' || String(value) === '1'; },
+  listRows_: function (name) {
+    if (name === 'LearningObjectives') return [
+      { objectiveId: 'TP-MATH', subject: 'Matematika', active: true },
+      { objectiveId: 'TP-OFF', subject: 'Matematika', active: false },
+      { objectiveId: 'TP-IPA', subject: 'IPA', active: true }
+    ];
+    if (name === 'LearningIndicators') return [
+      { indicatorId: 'IND-MATH', objectiveId: 'TP-MATH', active: true },
+      { indicatorId: 'IND-OFF', objectiveId: 'TP-MATH', active: false },
+      { indicatorId: 'IND-OTHER', objectiveId: 'TP-IPA', active: true }
+    ];
+    if (name === 'BundleVersions') return referenceContext.versionRows;
+    return [];
+  },
+  parseJson_: function (value, fallback) { try { return JSON.parse(value); } catch (e) { return fallback; } },
+  requiredText_: function (value, label, max) {
+    const result = String(value || '').trim();
+    if (!result) throw new Error(label + ' wajib diisi.');
+    if (max && result.length > max) throw new Error(label + ' terlalu panjang.');
+    return result;
+  }
+};
+vm.createContext(referenceContext);
+for (const name of ['validateBundleLearningReference_', 'validateBundleSnapshot_', 'getBundleVersion_']) {
+  vm.runInContext(extractFunction(name, source), referenceContext);
+}
+const validSnapshot = {
+  bundleId: 'BND-1', classification: 'REGULER', subject: 'Matematika',
+  learningObjectiveId: 'TP-MATH', learningIndicatorId: 'IND-MATH',
+  questions: [{ type: 'multiple_choice', points: 5 }]
+};
+assert.equal(referenceContext.validateBundleLearningReference_(validSnapshot), true, 'Active objective and its active indicator must validate');
+assert.throws(function () {
+  referenceContext.validateBundleLearningReference_(Object.assign({}, validSnapshot, { learningObjectiveId: '', learningIndicatorId: 'IND-MATH' }));
+}, /Pilih tujuan pembelajaran/, 'Indicator cannot be assigned without an objective');
+assert.throws(function () {
+  referenceContext.validateBundleLearningReference_(Object.assign({}, validSnapshot, { learningObjectiveId: 'TP-OFF' }));
+}, /tidak tersedia atau tidak aktif/, 'Inactive objective must be rejected');
+assert.throws(function () {
+  referenceContext.validateBundleLearningReference_(Object.assign({}, validSnapshot, { subject: 'IPA' }));
+}, /Mata pelajaran bundel harus sama/, 'Objective subject must match bundle subject');
+assert.throws(function () {
+  referenceContext.validateBundleLearningReference_(Object.assign({}, validSnapshot, { learningIndicatorId: 'IND-OFF' }));
+}, /tidak aktif atau tidak terhubung/, 'Inactive indicator must be rejected');
+assert.throws(function () {
+  referenceContext.validateBundleLearningReference_(Object.assign({}, validSnapshot, { learningIndicatorId: 'IND-OTHER' }));
+}, /tidak aktif atau tidak terhubung/, 'Indicator from another objective must be rejected');
+assert.equal(referenceContext.validateBundleLearningReference_({
+  bundleId: 'BND-LEGACY', classification: 'REGULER', subject: 'Matematika',
+  learningObjectiveId: '', learningIndicatorId: '', questions: [{ type: 'essay', points: 10 }]
+}), true, 'Legacy bundle without learning references must remain valid');
+
+const frozenSnapshot = {
+  bundleId: 'BND-1', classification: 'REGULER', subject: 'Matematika',
+  learningObjectiveId: 'TP-MATH', learningIndicatorId: 'IND-MATH',
+  questions: [{ type: 'multiple_choice', points: 5 }]
+};
+referenceContext.versionRows = [{
+  versionId: 'BVER-1', bundleId: 'BND-1', versionNumber: 1,
+  snapshotJson: JSON.stringify(frozenSnapshot), createdBy: 'teacher@example.test',
+  createdAt: '2026-11-03T00:00:00.000Z', changeNote: 'Versi awal'
+}];
+const loadedVersion = referenceContext.getBundleVersion_({ versionId: 'BVER-1' });
+assert.equal(loadedVersion.snapshot.learningObjectiveId, 'TP-MATH', 'Bundle version must preserve the learning objective ID');
+assert.equal(loadedVersion.snapshot.learningIndicatorId, 'IND-MATH', 'Bundle version must preserve the learning indicator ID');
+assert.throws(function () {
+  referenceContext.getBundleVersion_({ versionId: 'BVER-MISSING' });
+}, /Versi Bundel Soal tidak ditemukan/, 'Unknown bundle version must be rejected');
+referenceContext.versionRows[0].snapshotJson = JSON.stringify(Object.assign({}, frozenSnapshot, { questions: [] }));
+assert.throws(function () {
+  referenceContext.getBundleVersion_({ versionId: 'BVER-1' });
+}, /Snapshot harus memiliki/, 'Corrupted bundle snapshot must be rejected when loaded');
+
 console.log('PASS: learning repository static guard tests');
