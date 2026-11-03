@@ -750,4 +750,42 @@ assert.ok(assessmentBody.indexOf('String(current.latestVersionId)!==String(sourc
 assert.ok(assessmentBody.indexOf('bundleVersionId:sourceVersion?sourceVersion.versionId') >= 0,
 'Assessment must persist the exact source bundle version reference');
 
+
+const historicalBundleContext = {
+  assertBundleVersioningReady_: function () {},
+  requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('required'); return String(value).trim(); },
+  listRows_: function (table) {
+    if (table === 'QuestionBundles') return [{
+      bundleId: 'BUNDLE-1', createdBy: 'teacher@example.test', visibility: 'private',
+      latestVersionId: 'VERSION-1', latestVersionNumber: 1, status: 'draft'
+    }];
+    return [];
+  },
+  getBundleVersion_: function () {
+    return {
+      versionId: 'VERSION-1', versionNumber: 1,
+      snapshot: {
+        title: 'Bundel historis', subject: 'Matematika', description: '',
+        tpCode: 'TP-A', learningObjectiveId: 'TP-A', learningIndicatorId: 'IND-A',
+        classification: 'REGULER', questions: [{ questionId: 'Q-1' }]
+      }
+    };
+  },
+  bundleSnapshotFromRecord_: function () { throw new Error('historical version must be loaded'); }
+};
+vm.createContext(historicalBundleContext);
+vm.runInContext(extractFunction('getQuestionBundle_', source), historicalBundleContext);
+const historicalBundle = historicalBundleContext.getQuestionBundle_({
+  bundleId: 'BUNDLE-1',
+  currentUser: { role: 'teacher', email: 'teacher@example.test' }
+});
+assert.equal(historicalBundle.bundle.learningObjectiveId, 'TP-A',
+  'Historical bundle must retain its saved learning objective reference');
+assert.equal(historicalBundle.bundle.learningIndicatorId, 'IND-A',
+  'Historical bundle must retain its saved learning indicator reference');
+assert.equal(historicalBundle.questions[0].questionId, 'Q-1',
+  'Historical bundle must return the immutable saved question snapshot');
+assert.ok(source.includes('const snapshot=version?version.snapshot:bundleSnapshotFromRecord_'),
+  'Opening a versioned bundle must read its version snapshot rather than current learning master data');
+
 console.log('PASS: learning repository static guard tests');
