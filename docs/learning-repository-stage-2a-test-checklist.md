@@ -3,7 +3,9 @@
 Lakukan hanya pada salinan spreadsheet uji dan akun uji. Jangan gunakan data siswa nyata.
 
 ## Migrasi
-- [ ] Jalankan `migrateLearningRepositoryV1_()` dari editor Apps Script.
+- [ ] Pastikan migrasi fondasi versioning `BUNDLE_VERSIONING_V1` telah berstatus `completed` pada `SchemaMigrations`.
+- [ ] Jalankan `migrateLearningRepositoryV1_()` dari editor Apps Script hanya setelah prasyarat di atas terpenuhi.
+- [ ] Pastikan `SchemaMigrations` mencatat `LEARNING_REPOSITORY_V1` dengan status `completed`; endpoint repositori harus menolak akses jika catatan ini belum ada.
 - [ ] Pastikan sheet `LearningIndicators` dan `AdminAuditLog` dibuat dengan header sesuai spesifikasi.
 - [ ] Pastikan header `LearningObjectives` lama tetap ada; header yang kurang ditambahkan di kanan.
 - [ ] Jalankan migrasi sekali lagi; hasil harus menyatakan `alreadyApplied: true`.
