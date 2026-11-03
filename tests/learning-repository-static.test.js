@@ -612,4 +612,37 @@ assert.throws(function () {
 assert.equal(committedEntity, true, 'Entity write must complete before audit finalization is attempted');
 assert.equal(auditFinalizeFailureContext.pending[0].action, 'PENDING_UPDATE', 'Failed audit finalization must leave a pending marker for Admin reconciliation');
 
+
+const routeAuthContext = {
+  CONFIG: { APP_NAME: 'Rumble Assessment' },
+  getCurrentUser_: function () { return routeAuthContext.auth; },
+  adminListPendingLearningAudits_: function () { return { authorized: true, role: 'admin' }; },
+  adminReconcileLearningAudit_: function (payload, user) {
+    return { authorized: true, payload: payload, actorRole: user.role, actorId: user.userId };
+  }
+};
+vm.createContext(routeAuthContext);
+vm.runInContext(extractFunction('routeAction_', source), routeAuthContext);
+['teacher', 'student'].forEach(function (role) {
+  routeAuthContext.auth = { authenticated: true, user: { role: role, userId: role + '-1', email: role + '@example.test' } };
+  assert.throws(function () {
+    routeAuthContext.routeAction_('adminListPendingLearningAudits', {});
+  }, /hanya dapat digunakan oleh administrator sekolah/,
+  role + ' must not list pending learning audit records');
+  assert.throws(function () {
+    routeAuthContext.routeAction_('adminReconcileLearningAudit', {
+      logId: 'AUD-1', resolution: 'applied', note: 'test'
+    });
+  }, /hanya dapat digunakan oleh administrator sekolah/,
+  role + ' must not reconcile learning audit records');
+});
+routeAuthContext.auth = { authenticated: true, user: { role: 'admin', userId: 'admin-1', email: 'admin@example.test' } };
+assert.equal(routeAuthContext.routeAction_('adminListPendingLearningAudits', {}).authorized, true,
+  'Admin must be able to list pending audit records');
+const adminReconcileResult = routeAuthContext.routeAction_('adminReconcileLearningAudit', {
+  logId: 'AUD-1', resolution: 'applied', note: 'verified'
+});
+assert.equal(adminReconcileResult.actorRole, 'admin', 'Reconciliation must receive the server-authenticated Admin identity');
+assert.equal(adminReconcileResult.actorId, 'admin-1', 'Reconciliation actor ID must come from authenticated server identity');
+
 console.log('PASS: learning repository static guard tests');
