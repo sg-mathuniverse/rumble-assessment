@@ -24,6 +24,14 @@ assert.match(update, /getFormulas\(\)/, 'Untouched formulas must be preserved');
 assert.match(update, /setValues\(\[updatedRow\]\)/, 'A row update must use one range write');
 assert.doesNotMatch(update, /\.setValue\(/, 'A row update must not write cells individually');
 
+const migrationPreflight = bodyOf('validateLearningMigrationPreflight_', 'migrateLearningRepositoryV1_');
+assert.match(migrationPreflight, /header kosong/i, 'Migration preflight must reject blank headers');
+assert.match(migrationPreflight, /header duplikat/i, 'Migration preflight must reject duplicate headers');
+assert.match(migrationPreflight, /spasi di awal\/akhir/i, 'Migration preflight must reject padded headers');
+const migration = bodyOf('migrateLearningRepositoryV1_', 'validateRepositorySheetHeaders_');
+assert.match(migration, /validateLearningMigrationPreflight_\(spreadsheet\)/, 'Migration must run full preflight before writing sheets');
+assert.ok(migration.indexOf('validateLearningMigrationPreflight_(spreadsheet)') < migration.indexOf('spreadsheet.insertSheet'), 'Preflight must run before inserting any sheet');
+
 const headerValidation = bodyOf('validateRepositorySheetHeaders_', 'learningRepositoryAssertReady_');
 assert.match(headerValidation, /getLastColumn\(\)/, 'Header validation must check sheet dimensions');
 assert.match(headerValidation, /header kosong/i, 'Readiness must reject blank headers');
