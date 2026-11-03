@@ -198,7 +198,7 @@ assert.equal(routeContext.routeAction_('adminReconcileLearningAudit', { sessionT
 function extractFunction(name, sourceText) {
   const start = sourceText.indexOf('function ' + name + '(');
   assert.notEqual(start, -1, 'Missing function for isolated test: ' + name);
-  const next = sourceText.indexOf('\\nfunction ', start + 1);
+  const next = sourceText.indexOf(String.fromCharCode(10) + 'function ', start + 1);
   return sourceText.slice(start, next < 0 ? sourceText.length : next);
 }
 const crudContext = {
