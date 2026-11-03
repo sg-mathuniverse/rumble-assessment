@@ -24,13 +24,17 @@ const TABLES = {
   ],
   Assessments: [
     'assessmentId', 'title', 'subject', 'className', 'duration',
-    'startAt', 'endAt', 'passageText', 'passageImageUrl', 'status', 'createdBy', 'createdAt', 'updatedAt'
+    'startAt', 'endAt', 'passageText', 'passageImageUrl', 'status', 'createdBy', 'createdAt', 'updatedAt',
+    'bundleId', 'bundleVersionId', 'bundleVersionNumber', 'classification', 'archivedAt', 'archivedBy'
   ],
-  QuestionBundles: ['bundleId','title','subject','description','tpCode','passageText','passageImageUrl','passagesJson','questionsJson','status','createdBy','createdAt','updatedAt','visibility'],
+  QuestionBundles: ['bundleId','title','subject','description','tpCode','passageText','passageImageUrl','passagesJson','questionsJson','status','createdBy','createdAt','updatedAt','visibility','classification','latestVersionId','latestVersionNumber','archivedAt','archivedBy'],
+  BundleVersions: ['versionId','bundleId','versionNumber','snapshotJson','createdBy','createdAt','changeNote'],
+  SchemaMigrations: ['migrationId','version','appliedAt','appliedBy','status','detailsJson'],
   LearningObjectives: ['objectiveId','tpCode','title','subject','description','createdBy','createdAt','updatedAt','active'],
   Questions: [
     'questionId', 'assessmentId', 'order', 'type', 'text', 'points',
-    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson', 'subquestionsJson', 'subquestionImagesJson', 'rubricLevelsJson', 'passageText', 'passageImageUrl'
+    'optionsJson', 'answerJson', 'rubric', 'pairsJson', 'imageUrl', 'optionImagesJson', 'subquestionsJson', 'subquestionImagesJson', 'rubricLevelsJson', 'passageText', 'passageImageUrl',
+    'sourceBundleVersionId', 'sourceQuestionKey'
   ],
   Attempts: [
     'attemptId', 'assessmentId', 'studentId', 'startedAt', 'submittedAt',
@@ -62,14 +66,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v6';
+  const cacheKey = 'rumble_frontend_html_v7';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/uiux-security-refresh-2026-10-29/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/feature/bundle-versioning-foundation/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -493,82 +497,62 @@ function parseJson_(value, fallback) {
  * Soal disimpan sebagai JSON agar semua tipe soal dan aset tetap terjaga.
  */
 function saveQuestionBundle_(payload) {
-  setupDatabase();
+  assertBundleVersioningReady_();
   const title = requiredText_(payload.title, 'Judul bundel', 180);
   const questions = Array.isArray(payload.questions) ? payload.questions : [];
-  if (!questions.length || questions.length > 200) {
-    throw new Error('Jumlah soal bundel harus antara 1 dan 200.');
-  }
+  if (!questions.length || questions.length > 200) throw new Error('Jumlah soal bundel harus antara 1 dan 200.');
   questions.forEach(function (q, i) {
-    const type = String(q.type || 'multiple_choice');
-    const points = Number(q.points);
-    if (['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type) < 0) {
-      throw new Error('Tipe soal tidak valid pada soal nomor ' + (i + 1));
-    }
-    if (!isFinite(points) || points < 0 || points > 1000) {
-      throw new Error('Bobot nilai tidak valid pada soal nomor ' + (i + 1));
-    }
+    const type = String(q.type || 'multiple_choice'), points = Number(q.points);
+    if (['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type) < 0) throw new Error('Tipe soal tidak valid pada soal nomor ' + (i + 1));
+    if (!isFinite(points) || points < 0 || points > 1000) throw new Error('Bobot nilai tidak valid pada soal nomor ' + (i + 1));
   });
-  const bundleId = String(payload.bundleId || payload.id || makeId_('BND'));
-  const sheet = getSheet_('QuestionBundles');
-  const values = sheet.getDataRange().getValues();
-  const headers = values[0].map(String);
-  const idCol = headers.indexOf('bundleId');
-  let rowNumber = -1;
-  for (let i = 1; i < values.length; i++) {
-    if (String(values[i][idCol]) === bundleId) { rowNumber = i + 1; break; }
-  }
-  const now = currentTimestamp_();
-  const record = {
-    bundleId: bundleId,
-    title: title,
-    subject: String(payload.subject || ''),
-    description: String(payload.description || ''),
-    tpCode: String(payload.tpCode || '').trim().toUpperCase(),
-    passageText: String(payload.passageText || ''),
-    passageImageUrl: String(payload.passageImageUrl || ''),
-    passagesJson: JSON.stringify(Array.isArray(payload.passages)?payload.passages:[]),
-    questionsJson: JSON.stringify(questions),
-    status: 'ready',
-    visibility: String(payload.visibility || 'shared') === 'private' ? 'private' : 'shared',
-    createdBy: String(payload.createdBy || ''),
-    createdAt: rowNumber > 0 ? String(values[rowNumber - 1][headers.indexOf('createdAt')] || now) : now,
-    updatedAt: now
-  };
-  if (rowNumber > 0) {
-    headers.forEach(function (header, col) {
-      if (Object.prototype.hasOwnProperty.call(record, header)) {
-        sheet.getRange(rowNumber, col + 1).setValue(record[header]);
-      }
-    });
-  } else {
-    appendRow_('QuestionBundles', record);
-  }
-  return { bundleId: bundleId, title: title, questionCount: questions.length, status: 'ready' };
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const bundleId = String(payload.bundleId || payload.id || makeId_('BND'));
+    const sheet = getSheet_('QuestionBundles'), values = sheet.getDataRange().getValues(), headers = values[0].map(String);
+    const idCol = headers.indexOf('bundleId');
+    let rowNumber = -1, existing = null;
+    for (let i=1;i<values.length;i++) if (String(values[i][idCol])===bundleId) { rowNumber=i+1; existing=listRows_('QuestionBundles').find(function(b){return String(b.bundleId)===bundleId;}); break; }
+    if (existing && String(existing.status).toLowerCase()==='archived') throw new Error('Bundel yang sudah diarsipkan tidak dapat diubah.');
+    const classification=String(payload.classification || (existing && existing.classification) || 'REGULER').trim().toUpperCase();
+    if (['REGULER','SOLO_TAX'].indexOf(classification)<0) throw new Error('Klasifikasi bundel harus REGULER atau SOLO_TAX.');
+    if (classification === 'SOLO_TAX') throw new Error('Pembuatan Bundel SOLO Tax belum diaktifkan. Gunakan editor SOLO Tax setelah tahap pengembangan berikutnya selesai.');
+    const now=currentTimestamp_();
+    const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
+    validateBundleSnapshot_(snapshot);
+    const snapshotJson=JSON.stringify(snapshot);
+    let latest=null;
+    if(existing && existing.latestVersionId){
+      const prior=listRows_('BundleVersions').find(function(v){return String(v.versionId)===String(existing.latestVersionId);});
+      if(prior && String(prior.snapshotJson)===snapshotJson) latest={versionId:prior.versionId,versionNumber:Number(prior.versionNumber)};
+    }
+    if(!latest) latest=createBundleVersion_(bundleId,snapshot,String(payload.changeNote||(existing?'Perubahan isi bundel':'Versi awal')),String(payload.createdBy||(existing&&existing.createdBy)||''));
+    const record={bundleId:bundleId,title:title,subject:snapshot.subject,description:snapshot.description,tpCode:snapshot.tpCode,passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passagesJson:JSON.stringify(snapshot.passages),questionsJson:JSON.stringify(questions),status:'ready',classification:classification,latestVersionId:String(latest.versionId),latestVersionNumber:Number(latest.versionNumber),visibility:String(payload.visibility||(existing&&existing.visibility)||'shared')==='private'?'private':'shared',createdBy:String(payload.createdBy||(existing&&existing.createdBy)||''),createdAt:existing?String(existing.createdAt||now):now,updatedAt:now,archivedAt:'',archivedBy:''};
+    if(rowNumber>0) headers.forEach(function(h,col){if(Object.prototype.hasOwnProperty.call(record,h))sheet.getRange(rowNumber,col+1).setValue(record[h]);});
+    else appendRow_('QuestionBundles',record);
+    return {bundleId:bundleId,title:title,questionCount:questions.length,status:'ready',classification:classification,versionId:String(latest.versionId),versionNumber:Number(latest.versionNumber)};
+  } finally {lock.releaseLock();}
 }
 
 function listQuestionBundles_(payload) {
-  setupDatabase();
-  const user = payload.currentUser;
-  if (!user || user.role !== 'teacher') throw new Error('Akun guru terverifikasi diperlukan.');
-  return listRows_('QuestionBundles')
-    .filter(function (bundle) {
-      const owned = bundle.createdBy && String(bundle.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
-      // Bundel lama yang belum memiliki kolom visibility diperlakukan sebagai shared.
-      const shared = String(bundle.visibility || 'shared').toLowerCase() === 'shared';
-      const statusMatches = !payload.status || String(bundle.status) === String(payload.status);
-      return (owned || shared) && statusMatches;
-    })
-    .map(function (bundle) {
-      const item = Object.assign({}, bundle);
-      item.questionCount = parseJson_(bundle.questionsJson, []).length;
-      item.isOwner = !!bundle.createdBy && String(bundle.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
-      item.visibility = String(bundle.visibility || 'shared').toLowerCase();
-      delete item.questionsJson;
-      delete item.passagesJson;
-      delete item.createdBy;
-      return item;
-    });
+  assertBundleVersioningReady_();
+  const user=payload.currentUser;
+  if(!user||user.role!=='teacher')throw new Error('Akun guru terverifikasi diperlukan.');
+  return listRows_('QuestionBundles').filter(function(bundle){
+    const owned=bundle.createdBy&&String(bundle.createdBy).trim().toLowerCase()===String(user.email).trim().toLowerCase();
+    const shared=String(bundle.visibility||'shared').toLowerCase()==='shared';
+    const statusMatches=payload.status?String(bundle.status)===String(payload.status):String(bundle.status).toLowerCase()!=='archived';
+    return (owned||shared)&&statusMatches;
+  }).map(function(bundle){
+    const item=Object.assign({},bundle);
+    item.questionCount=parseJson_(bundle.questionsJson,[]).length;
+    item.isOwner=!!bundle.createdBy&&String(bundle.createdBy).trim().toLowerCase()===String(user.email).trim().toLowerCase();
+    item.visibility=String(bundle.visibility||'shared').toLowerCase();
+    item.classification=String(bundle.classification||'REGULER').toUpperCase();
+    item.latestVersionNumber=Number(bundle.latestVersionNumber)||0;
+    delete item.questionsJson;delete item.passagesJson;delete item.createdBy;
+    return item;
+  });
 }
 /**
  * Mengubah URL Drive menjadi ID file tanpa mengunduhnya dari browser.
@@ -689,118 +673,57 @@ function getAssessmentImage_(payload) {
 }
 
 function getQuestionBundle_(payload) {
-  setupDatabase();
-  const bundleId = requiredText_(payload.bundleId || payload.id, 'ID bundel', 100);
-  const bundle = listRows_('QuestionBundles').find(function (item) {
-    return String(item.bundleId) === bundleId;
-  });
-  if (!bundle) throw new Error('Bundel soal tidak ditemukan.');
-  const user = payload.currentUser;
-  if (!user || user.role !== 'teacher') throw new Error('Akun guru terverifikasi diperlukan.');
-  const isOwner = !!bundle.createdBy && String(bundle.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
-  const isShared = String(bundle.visibility || 'shared').toLowerCase() === 'shared';
-  if (!isOwner && !isShared) throw new Error('Akses ditolak. Bundel ini hanya dapat dibuka oleh pembuatnya.');
-  const bundlePassages = parseJson_(bundle.passagesJson, []);
-  const bundleQuestions = parseJson_(bundle.questionsJson, []);
-  return {
-    bundle: {
-      bundleId: bundle.bundleId,
-      title: bundle.title,
-      subject: bundle.subject,
-      description: bundle.description,
-      tpCode: String(bundle.tpCode || ''),
-      passageText: bundle.passageText,
-      passageImageUrl: bundle.passageImageUrl,
-      passages: bundlePassages,
-      status: bundle.status,
-      visibility: String(bundle.visibility || 'shared').toLowerCase(),
-      isOwner: isOwner
-    },
-    questions: bundleQuestions
-  };
+  assertBundleVersioningReady_();
+  const bundleId=requiredText_(payload.bundleId||payload.id,'ID bundel',100);
+  const bundle=listRows_('QuestionBundles').find(function(item){return String(item.bundleId)===bundleId;});
+  if(!bundle)throw new Error('Bundel soal tidak ditemukan.');
+  const user=payload.currentUser;
+  if(!user||user.role!=='teacher')throw new Error('Akun guru terverifikasi diperlukan.');
+  const isOwner=!!bundle.createdBy&&String(bundle.createdBy).trim().toLowerCase()===String(user.email).trim().toLowerCase();
+  const isShared=String(bundle.visibility||'shared').toLowerCase()==='shared';
+  if(!isOwner&&!isShared)throw new Error('Akses ditolak. Bundel ini hanya dapat dibuka oleh pembuatnya.');
+  let version=null;
+  if(payload.versionId||payload.versionNumber!==undefined)version=getBundleVersion_({versionId:payload.versionId,bundleId:bundleId,versionNumber:payload.versionNumber});
+  else if(bundle.latestVersionId)version=getBundleVersion_({versionId:bundle.latestVersionId});
+  const snapshot=version?version.snapshot:bundleSnapshotFromRecord_(bundle,bundle.classification||'REGULER');
+  return {bundle:{bundleId:bundle.bundleId,title:snapshot.title,subject:snapshot.subject,description:snapshot.description,tpCode:String(snapshot.tpCode||''),passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passages:snapshot.passages||[],status:bundle.status,visibility:String(bundle.visibility||'shared').toLowerCase(),isOwner:isOwner,classification:String(snapshot.classification||bundle.classification||'REGULER'),versionId:version?version.versionId:String(bundle.latestVersionId||''),versionNumber:version?version.versionNumber:Number(bundle.latestVersionNumber||0)},questions:snapshot.questions||[]};
 }
 function createAssessment_(payload) {
-  setupDatabase();
-  const title = requiredText_(payload.title, 'Judul', 180);
-  const questions = Array.isArray(payload.questions)
-    ? payload.questions
-    : [];
-
-  if (questions.length < 1 || questions.length > 200) {
-    throw new Error('Jumlah soal harus antara 1 dan 200.');
+  const title=requiredText_(payload.title,'Judul',180);
+  let questions=Array.isArray(payload.questions)?payload.questions:[];
+  if(questions.length<1||questions.length>200)throw new Error('Jumlah soal harus antara 1 dan 200.');
+  const sourceBundleId=String(payload.sourceBundleId||payload.bundleId||'').trim();
+  let sourceVersion=null;
+  if(sourceBundleId){
+    assertBundleVersioningReady_();
+    const bundle=listRows_('QuestionBundles').find(function(b){return String(b.bundleId)===sourceBundleId;});
+    if(!bundle||String(bundle.status).toLowerCase()==='archived')throw new Error('Bundel sumber tidak tersedia.');
+    const user=payload.currentUser,owner=bundle.createdBy&&String(bundle.createdBy).trim().toLowerCase()===String(user&&user.email||'').trim().toLowerCase(),shared=String(bundle.visibility||'shared').toLowerCase()==='shared';
+    if(!owner&&!shared)throw new Error('Akses ke Bundel Soal sumber ditolak.');
+    if(!bundle.latestVersionId)throw new Error('Bundel sumber belum memiliki versi. Jalankan migrasi versioning terlebih dahulu.');
+    sourceVersion=getBundleVersion_({versionId:bundle.latestVersionId});
+    questions=sourceVersion.snapshot.questions;
   }
-
-  const assessmentId = makeId_('ASM');
-  const timestamp = currentTimestamp_();
-
-  appendRow_('Assessments', {
-    assessmentId: assessmentId,
-    title: title,
-    subject: String(payload.subject || ''),
-    className: String(payload.className || ''),
-    duration: Math.max(1, Math.min(300, Number(payload.duration) || 60)),
-    startAt: String(payload.startAt || ''),
-    endAt: String(payload.endAt || ''),
-    passageText: String(payload.passageText || ''),
-    passageImageUrl: String(payload.passageImageUrl || ''),
-    status: 'draft',
-    createdBy: String(payload.createdBy || ''),
-    createdAt: timestamp,
-    updatedAt: timestamp
+  if(!questions.length||questions.length>200)throw new Error('Versi Bundel Soal harus memiliki 1 sampai 200 soal.');
+  questions.forEach(function(question,index){
+    const type=String(question.type||'multiple_choice'),points=Number(question.points);
+    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(index+1));
+    if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal tidak valid pada soal nomor '+(index+1));
   });
-
-  questions.forEach(function (question, index) {
-    const type = String(question.type || 'multiple_choice');
-    const points = Number(question.points);
-
-    const allowedTypes = [
-      'multiple_choice',
-      'true_false',
-      'true_false_multi',
-      'multi_select',
-      'matching',
-      'essay'
-    ];
-
-    if (allowedTypes.indexOf(type) === -1) {
-      throw new Error('Tipe soal tidak valid pada soal nomor ' + (index + 1));
+  const lock=LockService.getScriptLock();lock.waitLock(10000);
+  try{
+    if(sourceBundleId){
+      const current=listRows_('QuestionBundles').find(function(b){return String(b.bundleId)===sourceBundleId;});
+      if(!current||String(current.latestVersionId)!==String(sourceVersion.versionId))throw new Error('Versi Bundel Soal berubah saat Asesmen dibuat. Silakan ulangi proses.');
     }
-
-    if (!isFinite(points) || points < 0 || points > 1000) {
-      throw new Error('Bobot soal tidak valid pada soal nomor ' + (index + 1));
-    }
-
-    appendRow_('Questions', {
-      questionId: makeId_('Q'),
-      assessmentId: assessmentId,
-      order: index + 1,
-      type: type,
-      text: String(question.text || ''),
-      points: points,
-      optionsJson: JSON.stringify(question.options || []),
-      answerJson: JSON.stringify(
-        question.answer === undefined ? null : question.answer
-      ),
-      rubric: String(question.rubric || ''),
-      pairsJson: JSON.stringify(question.pairs || ''),
-      imageUrl: String(question.imageUrl || ''),
-      optionImagesJson: JSON.stringify(question.optionImages || []),
-      subquestionsJson: JSON.stringify(question.subquestions || []),
-      subquestionImagesJson: JSON.stringify(question.subquestionImages || []),
-      rubricLevelsJson: JSON.stringify(question.rubricLevels || []),
-      passageText: String(question.passageText || ''),
-      passageImageUrl: String(question.passageImageUrl || ''),
-      passageText: String(question.passageText || ''),
-      passageImageUrl: String(question.passageImageUrl || '')
+    const assessmentId=makeId_('ASM'),timestamp=currentTimestamp_(),classification=sourceVersion?String(sourceVersion.snapshot.classification||'REGULER'):'REGULER';
+    appendRow_('Assessments',{assessmentId:assessmentId,title:title,subject:String(sourceVersion?sourceVersion.snapshot.subject:(payload.subject||'')),className:String(payload.className||''),duration:Math.max(1,Math.min(300,Number(payload.duration)||60)),startAt:String(payload.startAt||''),endAt:String(payload.endAt||''),passageText:String(sourceVersion?sourceVersion.snapshot.passageText:(payload.passageText||'')),passageImageUrl:String(sourceVersion?sourceVersion.snapshot.passageImageUrl:(payload.passageImageUrl||'')),status:'draft',createdBy:String(payload.createdBy||''),createdAt:timestamp,updatedAt:timestamp,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification,archivedAt:'',archivedBy:''});
+    questions.forEach(function(question,index){
+      const type=String(question.type||'multiple_choice'),points=Number(question.points);
+      appendRow_('Questions',{questionId:makeId_('Q'),assessmentId:assessmentId,order:index+1,type:type,text:String(question.text||''),points:points,optionsJson:JSON.stringify(question.options||[]),answerJson:JSON.stringify(question.answer===undefined?null:question.answer),rubric:String(question.rubric||''),pairsJson:JSON.stringify(question.pairs||''),imageUrl:String(question.imageUrl||''),optionImagesJson:JSON.stringify(question.optionImages||[]),subquestionsJson:JSON.stringify(question.subquestions||[]),subquestionImagesJson:JSON.stringify(question.subquestionImages||[]),rubricLevelsJson:JSON.stringify(question.rubricLevels||[]),passageText:String(question.passageText||''),passageImageUrl:String(question.passageImageUrl||''),sourceBundleVersionId:sourceVersion?sourceVersion.versionId:'',sourceQuestionKey:sourceVersion?String(question.questionId||question.id||('Q-'+(index+1))):''});
     });
-  });
-
-  return {
-    id: assessmentId,
-    title: title,
-    status: 'draft',
-    questionCount: questions.length
-  };
+    return {id:assessmentId,title:title,status:'draft',questionCount:questions.length,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification};
+  }finally{lock.releaseLock();}
 }
 
 /**
@@ -908,6 +831,37 @@ function folderHasNameInsideRoot_(folder, rootId, targetName, depth) {
   return false;
 }
 
+function objectReferencesAssessmentImage_(value, fileId, depth) {
+  if ((depth || 0) > 20 || value === null || value === undefined) return false;
+  if (typeof value === 'string') return assessmentImageFileId_(value) === String(fileId);
+  if (Array.isArray(value)) return value.some(function (item) { return objectReferencesAssessmentImage_(item, fileId, (depth || 0) + 1); });
+  if (typeof value === 'object') return Object.keys(value).some(function (key) { return objectReferencesAssessmentImage_(value[key], fileId, (depth || 0) + 1); });
+  return false;
+}
+
+/** Cegah penghapusan file yang masih dirujuk versi bundel atau Asesmen historis. */
+function isAssessmentImageReferenced_(fileId) {
+  const id = String(fileId);
+  if (listRows_('QuestionBundles').some(function (bundle) {
+    return assessmentImageFileId_(bundle.passageImageUrl) === id ||
+      objectReferencesAssessmentImage_(parseJson_(bundle.passagesJson, []), id, 0) ||
+      objectReferencesAssessmentImage_(parseJson_(bundle.questionsJson, []), id, 0);
+  })) return true;
+  if (listRows_('BundleVersions').some(function (version) {
+    return objectReferencesAssessmentImage_(parseJson_(version.snapshotJson, null), id, 0);
+  })) return true;
+  if (listRows_('Assessments').some(function (assessment) {
+    return assessmentImageFileId_(assessment.passageImageUrl) === id;
+  })) return true;
+  if (listRows_('Questions').some(function (question) {
+    return [question.imageUrl, question.passageImageUrl].some(function (url) { return assessmentImageFileId_(url) === id; }) ||
+      objectReferencesAssessmentImage_(parseJson_(question.optionImagesJson, []), id, 0) ||
+      objectReferencesAssessmentImage_(parseJson_(question.subquestionImagesJson, []), id, 0) ||
+      objectReferencesAssessmentImage_(parseJson_(question.pairsJson, []), id, 0);
+  })) return true;
+  return false;
+}
+
 function deleteAssessmentImage_(payload) {
   const fileId = requiredText_(payload.fileId, 'ID gambar', 200);
   const rootId = CONFIG.DRIVE_FOLDER_ID;
@@ -924,6 +878,9 @@ function deleteAssessmentImage_(payload) {
   if (!found || !inAssessmentImageFolder) {
     throw new Error('Hanya gambar asesmen di folder gambar aplikasi yang dapat dihapus.');
   }
+  if (isAssessmentImageReferenced_(fileId)) {
+    throw new Error('Gambar masih digunakan oleh Bundel Soal, versi historis, atau Asesmen. Gambar tidak dihapus.');
+  }
   const user = payload.currentUser;
   const expectedDescription = 'Rumble Assessment owner: ' + String(user && user.email || '').trim().toLowerCase();
   if (!user || user.role !== 'teacher' || String(file.getDescription() || '') !== expectedDescription) {
@@ -934,7 +891,6 @@ function deleteAssessmentImage_(payload) {
 }
 
 function updateAssessment_(payload) {
-  setupDatabase();
   const assessmentId = requiredText_(payload.id || payload.assessmentId, 'ID asesmen', 100);
   const questions = Array.isArray(payload.questions) ? payload.questions : [];
   if (!questions.length || questions.length > 200) throw new Error('Jumlah soal harus antara 1 dan 200.');
@@ -945,6 +901,8 @@ function updateAssessment_(payload) {
   let rowNumber = -1;
   for (let i = 1; i < aValues.length; i++) if (String(aValues[i][idCol]) === assessmentId) { rowNumber = i + 1; break; }
   if (rowNumber < 0) throw new Error('Asesmen tidak ditemukan.');
+  const currentAssessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
+  if (currentAssessment && String(currentAssessment.status).toLowerCase() === 'archived') throw new Error('Asesmen yang diarsipkan tidak dapat diedit.');
   const statusCol = aHeaders.indexOf('status');
   if (statusCol >= 0 && String(aValues[rowNumber - 1][statusCol]) === 'published') {
     throw new Error('Asesmen yang sudah dipublikasikan tidak dapat diedit. Buat salinan/draft baru agar hasil siswa sebelumnya tetap aman.');
@@ -964,34 +922,37 @@ function updateAssessment_(payload) {
     const col = aHeaders.indexOf(key);
     if (col >= 0) assessmentSheet.getRange(rowNumber, col + 1).setValue(updates[key]);
   });
-  const qSheet = getSheet_('Questions');
-  const qValues = qSheet.getDataRange().getValues();
-  const qHeaders = qValues[0].map(String);
-  const qAssessmentCol = qHeaders.indexOf('assessmentId');
-  for (let i = qValues.length - 1; i >= 1; i--) {
-    if (String(qValues[i][qAssessmentCol]) === assessmentId) qSheet.deleteRow(i + 1);
-  }
-  questions.forEach(function (question, index) {
-    const type = String(question.type || 'multiple_choice');
-    const points = Number(question.points);
-    const allowedTypes = ['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'];
-    if (allowedTypes.indexOf(type) === -1) throw new Error('Tipe soal tidak valid pada soal nomor ' + (index + 1));
-    if (!isFinite(points) || points < 0 || points > 1000) throw new Error('Bobot soal tidak valid pada soal nomor ' + (index + 1));
-    appendRow_('Questions', {
-      questionId: makeId_('Q'), assessmentId: assessmentId, order: index + 1, type: type,
-      text: String(question.text || ''), points: points,
-      optionsJson: JSON.stringify(question.options || []),
-      answerJson: JSON.stringify(question.answer === undefined ? null : question.answer),
-      rubric: String(question.rubric || ''), pairsJson: JSON.stringify(question.pairs || ''),
-      imageUrl: String(question.imageUrl || ''),
-      optionImagesJson: JSON.stringify(question.optionImages || []),
-      subquestionsJson: JSON.stringify(question.subquestions || []),
-      subquestionImagesJson: JSON.stringify(question.subquestionImages || []),
-      rubricLevelsJson: JSON.stringify(question.rubricLevels || []),
-      passageText: String(question.passageText || ''),
-      passageImageUrl: String(question.passageImageUrl || '')
+  if (!currentAssessment || !currentAssessment.bundleVersionId) {
+    const qSheet = getSheet_('Questions');
+    const qValues = qSheet.getDataRange().getValues();
+    const qHeaders = qValues[0].map(String);
+    const qAssessmentCol = qHeaders.indexOf('assessmentId');
+    for (let i = qValues.length - 1; i >= 1; i--) {
+      if (String(qValues[i][qAssessmentCol]) === assessmentId) qSheet.deleteRow(i + 1);
+    }
+    questions.forEach(function (question, index) {
+      const type = String(question.type || 'multiple_choice');
+      const points = Number(question.points);
+      const allowedTypes = ['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'];
+      if (allowedTypes.indexOf(type) === -1) throw new Error('Tipe soal tidak valid pada soal nomor ' + (index + 1));
+      if (!isFinite(points) || points < 0 || points > 1000) throw new Error('Bobot soal tidak valid pada soal nomor ' + (index + 1));
+      appendRow_('Questions', {
+        questionId: makeId_('Q'), assessmentId: assessmentId, order: index + 1, type: type,
+        text: String(question.text || ''), points: points,
+        optionsJson: JSON.stringify(question.options || []),
+        answerJson: JSON.stringify(question.answer === undefined ? null : question.answer),
+        rubric: String(question.rubric || ''), pairsJson: JSON.stringify(question.pairs || ''),
+        imageUrl: String(question.imageUrl || ''),
+        optionImagesJson: JSON.stringify(question.optionImages || []),
+        subquestionsJson: JSON.stringify(question.subquestions || []),
+        subquestionImagesJson: JSON.stringify(question.subquestionImages || []),
+        rubricLevelsJson: JSON.stringify(question.rubricLevels || []),
+        passageText: String(question.passageText || ''),
+        passageImageUrl: String(question.passageImageUrl || '')
+      });
     });
-  });
+  
+  }
   return { id: assessmentId, title: updates.title, status: 'draft', questionCount: questions.length };
 }
 
@@ -999,63 +960,23 @@ function updateAssessment_(payload) {
  * Menghapus asesmen draft dan soal-soalnya. Asesmen terpublikasi dilindungi.
  */
 function deleteAssessment_(payload) {
-  setupDatabase();
-  const assessmentId = requiredText_(payload.id || payload.assessmentId, 'ID asesmen', 100);
-  const assessmentSheet = getSheet_('Assessments');
-  const values = assessmentSheet.getDataRange().getValues();
-  if (!values.length) throw new Error('Asesmen tidak ditemukan.');
-  const headers = values[0].map(String);
-  const idCol = headers.indexOf('assessmentId');
-  const statusCol = headers.indexOf('status');
-  let rowNumber = -1;
-  let status = '';
-  for (let i = 1; i < values.length; i++) {
-    if (String(values[i][idCol]) === assessmentId) {
-      rowNumber = i + 1;
-      status = statusCol >= 0 ? String(values[i][statusCol]) : '';
-      break;
-    }
-  }
-  if (rowNumber < 0) throw new Error('Asesmen tidak ditemukan.');
-  const attemptsSheet = getSheet_('Attempts');
-  const attemptValues = attemptsSheet.getDataRange().getValues();
-  if (attemptValues.length > 1) {
-    const attemptHeaders = attemptValues[0].map(String);
-    const attemptAssessmentCol = attemptHeaders.indexOf('assessmentId');
-    if (attemptAssessmentCol >= 0) {
-      for (let i = attemptValues.length - 1; i >= 1; i--) {
-        if (String(attemptValues[i][attemptAssessmentCol]) === assessmentId) attemptsSheet.deleteRow(i + 1);
-      }
-    }
-  }
-  const questionSheet = getSheet_('Questions');
-  const qValues = questionSheet.getDataRange().getValues();
-  if (qValues.length > 1) {
-    const qHeaders = qValues[0].map(String);
-    const qIdCol = qHeaders.indexOf('assessmentId');
-    for (let i = qValues.length - 1; i >= 1; i--) {
-      if (qIdCol >= 0 && String(qValues[i][qIdCol]) === assessmentId) {
-        questionSheet.deleteRow(i + 1);
-      }
-    }
-  }
-  assessmentSheet.deleteRow(rowNumber);
-  return { assessmentId: assessmentId, deleted: true };
+  const id=requiredText_(payload.id||payload.assessmentId,'ID asesmen',100);
+  const assessment=listRows_('Assessments').find(function(a){return String(a.assessmentId)===id;});
+  if(!assessment)throw new Error('Asesmen tidak ditemukan.');
+  if(String(assessment.status).toLowerCase()==='archived')return {assessmentId:id,archived:true,alreadyArchived:true};
+  const now=currentTimestamp_();
+  updateRowByKey_('Assessments','assessmentId',id,{status:'archived',archivedAt:now,archivedBy:String(payload.currentUser&&payload.currentUser.email||''),updatedAt:now});
+  return {assessmentId:id,archived:true,deleted:false};
 }
 
 function deleteQuestionBundle_(payload) {
-  setupDatabase();
-  const bundleId = requiredText_(payload.id || payload.bundleId, 'ID bundel', 100);
-  const sheet = getSheet_('QuestionBundles');
-  const values = sheet.getDataRange().getValues();
-  if (values.length < 2) throw new Error('Bundel soal tidak ditemukan.');
-  const headers = values[0].map(String), idCol = headers.indexOf('bundleId');
-  if (idCol < 0) throw new Error('Kolom ID bundel tidak ditemukan.');
-  let rowNumber = -1;
-  for (let i = 1; i < values.length; i++) if (String(values[i][idCol]) === bundleId) { rowNumber = i + 1; break; }
-  if (rowNumber < 0) throw new Error('Bundel soal tidak ditemukan.');
-  sheet.deleteRow(rowNumber);
-  return { bundleId: bundleId, deleted: true };
+  const id=requiredText_(payload.id||payload.bundleId,'ID bundel',100);
+  const bundle=listRows_('QuestionBundles').find(function(b){return String(b.bundleId)===id;});
+  if(!bundle)throw new Error('Bundel soal tidak ditemukan.');
+  if(String(bundle.status).toLowerCase()==='archived')return {bundleId:id,archived:true,alreadyArchived:true};
+  const now=currentTimestamp_();
+  updateRowByKey_('QuestionBundles','bundleId',id,{status:'archived',archivedAt:now,archivedBy:String(payload.currentUser&&payload.currentUser.email||''),updatedAt:now});
+  return {bundleId:id,archived:true,deleted:false};
 }
 
 function listAssessments_(payload) {
@@ -1077,16 +998,16 @@ function listAssessments_(payload) {
           (!assessment.createdBy || String(assessment.createdBy).trim().toLowerCase() !== String(user.email).trim().toLowerCase())) {
         return false;
       }
-      const matchesStatus = !payload.status || String(assessment.status) === String(payload.status);
+      const matchesStatus = payload.status ? String(assessment.status) === String(payload.status) : String(assessment.status).toLowerCase() !== 'archived';
       const matchesClass = user.role === 'student' ||
         (!payload.className || String(assessment.className) === String(payload.className));
       return matchesStatus && matchesClass;
     })
     .map(function (assessment) {
       const item = Object.assign({}, assessment);
-      item.questionCount = questions.filter(function (question) {
-        return question.assessmentId === assessment.assessmentId;
-      }).length;
+      item.questionCount = questions.filter(function (question) { return question.assessmentId === assessment.assessmentId; }).length;
+      item.classification = String(assessment.classification || 'REGULER').toUpperCase();
+      item.bundleVersionNumber = Number(assessment.bundleVersionNumber) || 0;
       if (user.role === 'student') {
         const studentAttempt = listRows_('Attempts').find(function (attempt) {
           return String(attempt.assessmentId) === String(assessment.assessmentId) && String(attempt.studentId) === String(user.userId);
@@ -2023,7 +1944,6 @@ function saveUser_(payload) {
  * Payload base64 dibatasi agar tidak menerima file terlalu besar.
  */
 function uploadAnswerImage_(payload) {
-  setupDatabase();
   if (!CONFIG.DRIVE_FOLDER_ID) throw new Error('Folder Drive jawaban belum dikonfigurasi.');
   const mimeType = String(payload.mimeType || 'image/jpeg').toLowerCase();
   const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
@@ -2104,3 +2024,61 @@ function uploadAnswerImage_(payload) {
   } finally { lock.releaseLock(); }
 }
 
+
+
+/** Explicit database migration and immutable BundleVersions helpers. */
+function migrateDatabaseV1_() {
+  setupDatabase();
+  const migrationId='BUNDLE_VERSIONING_V1';
+  if(listRows_('SchemaMigrations').some(function(r){return String(r.migrationId)===migrationId&&String(r.status)==='completed';}))return {success:true,alreadyApplied:true,migrationId:migrationId};
+  const lock=LockService.getScriptLock();lock.waitLock(10000);
+  try{
+    const bundles=listRows_('QuestionBundles');let created=0,reused=0;
+    bundles.forEach(function(bundle){
+      const id=requiredText_(bundle.bundleId,'ID bundel',100),classification=String(bundle.classification||'REGULER').toUpperCase();
+      if(['REGULER','SOLO_TAX'].indexOf(classification)<0)throw new Error('Klasifikasi bundel '+id+' tidak valid; migrasi dihentikan.');
+      let versions=listRows_('BundleVersions').filter(function(v){return String(v.bundleId)===id;}).sort(function(a,b){return Number(a.versionNumber)-Number(b.versionNumber);});
+      let latest=versions.length?versions[versions.length-1]:null;
+      if(!latest){latest=createBundleVersion_(id,bundleSnapshotFromRecord_(bundle,classification),'Migrasi versi awal',String(bundle.createdBy||''));created++;}
+      else reused++;
+      updateRowByKey_('QuestionBundles','bundleId',id,{classification:classification,latestVersionId:String(latest.versionId),latestVersionNumber:Number(latest.versionNumber),archivedAt:String(bundle.archivedAt||''),archivedBy:String(bundle.archivedBy||'')});
+    });
+    appendRow_('SchemaMigrations',{migrationId:migrationId,version:1,appliedAt:currentTimestamp_(),appliedBy:'Apps Script editor',status:'completed',detailsJson:JSON.stringify({bundles:bundles.length,createdVersions:created,reusedVersions:reused})});
+    return {success:true,migrationId:migrationId,bundles:bundles.length,createdVersions:created,reusedVersions:reused};
+  }finally{lock.releaseLock();}
+}
+function updateRowByKey_(tableName,keyHeader,keyValue,fields){
+  const sheet=getSheet_(tableName),values=sheet.getDataRange().getValues(),headers=values[0].map(String),keyCol=headers.indexOf(keyHeader);
+  if(keyCol<0)throw new Error('Kolom '+keyHeader+' tidak tersedia pada '+tableName+'.');
+  let row=-1;for(let i=1;i<values.length;i++)if(String(values[i][keyCol])===String(keyValue)){row=i+1;break;}
+  if(row<0)throw new Error('Data '+tableName+' tidak ditemukan: '+keyValue);
+  Object.keys(fields).forEach(function(k){const c=headers.indexOf(k);if(c<0)throw new Error('Kolom '+k+' tidak tersedia pada '+tableName+'.');sheet.getRange(row,c+1).setValue(fields[k]);});
+}
+function bundleSnapshotFromRecord_(bundle,classification){
+  return {schemaVersion:1,bundleId:String(bundle.bundleId),classification:String(classification||'REGULER').toUpperCase(),title:String(bundle.title||''),subject:String(bundle.subject||''),description:String(bundle.description||''),tpCode:String(bundle.tpCode||''),passageText:String(bundle.passageText||''),passageImageUrl:String(bundle.passageImageUrl||''),passages:parseJson_(bundle.passagesJson,[]),questions:parseJson_(bundle.questionsJson,[])};
+}
+function validateBundleSnapshot_(snapshot){
+  if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot))throw new Error('Snapshot bundel tidak valid.');
+  requiredText_(snapshot.bundleId,'ID bundel',100);
+  if(['REGULER','SOLO_TAX'].indexOf(String(snapshot.classification||'').toUpperCase())<0)throw new Error('Klasifikasi bundel tidak valid.');
+  if(!Array.isArray(snapshot.questions)||snapshot.questions.length<1||snapshot.questions.length>200)throw new Error('Snapshot harus memiliki 1 sampai 200 soal.');
+  snapshot.questions.forEach(function(q,i){const type=String(q&&q.type||'multiple_choice'),points=Number(q&&q.points);if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal snapshot tidak valid pada nomor '+(i+1));if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal snapshot tidak valid pada nomor '+(i+1));});
+  return true;
+}
+/** Caller must hold ScriptLock while updating the parent bundle's latest-version pointer. */
+function createBundleVersion_(bundleId,snapshot,changeNote,createdBy){
+  const id=requiredText_(bundleId,'ID bundel',100),copy=JSON.parse(JSON.stringify(snapshot));copy.bundleId=id;validateBundleSnapshot_(copy);
+  const versions=listRows_('BundleVersions').filter(function(v){return String(v.bundleId)===id;}),number=versions.reduce(function(m,v){return Math.max(m,Number(v.versionNumber)||0);},0)+1,versionId=makeId_('BVER');
+  appendRow_('BundleVersions',{versionId:versionId,bundleId:id,versionNumber:number,snapshotJson:JSON.stringify(copy),createdBy:String(createdBy||''),createdAt:currentTimestamp_(),changeNote:String(changeNote||'').slice(0,500)});
+  return {versionId:versionId,bundleId:id,versionNumber:number,snapshot:copy};
+}
+function getBundleVersion_(payload){
+  const id=String(payload.versionId||'').trim(),bundleId=String(payload.bundleId||'').trim(),number=payload.versionNumber===undefined?null:Number(payload.versionNumber);
+  const row=listRows_('BundleVersions').find(function(v){return id?String(v.versionId)===id:String(v.bundleId)===bundleId&&Number(v.versionNumber)===number;});
+  if(!row)throw new Error('Versi Bundel Soal tidak ditemukan.');
+  const snapshot=parseJson_(row.snapshotJson,null);validateBundleSnapshot_(snapshot);
+  return {versionId:String(row.versionId),bundleId:String(row.bundleId),versionNumber:Number(row.versionNumber),createdBy:String(row.createdBy||''),createdAt:String(row.createdAt||''),changeNote:String(row.changeNote||''),snapshot:snapshot};
+}
+function assertBundleVersioningReady_(){
+  if(!listRows_('SchemaMigrations').some(function(r){return String(r.migrationId)==='BUNDLE_VERSIONING_V1'&&String(r.status)==='completed';}))throw new Error('Fondasi versioning belum dimigrasikan. Administrator harus menjalankan migrateDatabaseV1_() terlebih dahulu.');
+}
