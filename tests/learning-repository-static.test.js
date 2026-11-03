@@ -11,9 +11,10 @@ const source = fs.readFileSync('Code.gs', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 assert.doesNotThrow(() => new vm.Script(source), 'Code.gs must be syntactically valid JavaScript');
 
-const appScriptMatch = html.match(new RegExp('<script>([\\\\s\\\\S]*?)<\\\\/script>'));
-assert.ok(appScriptMatch, 'index.html must contain the application script');
-assert.doesNotThrow(() => new vm.Script(appScriptMatch[1]), 'index.html application script must be syntactically valid JavaScript');
+const appScriptStart = html.indexOf('<script>', html.indexOf('<body'));
+const appScriptEnd = html.indexOf('</script>', appScriptStart);
+assert.ok(appScriptStart >= 0 && appScriptEnd > appScriptStart, 'index.html must contain the application script');
+assert.doesNotThrow(() => new vm.Script(html.slice(appScriptStart + 8, appScriptEnd)), 'index.html application script must be syntactically valid JavaScript');
 assert.ok(html.includes("['learningRepository','▤ TP & Indikator']"), 'Admin navigation must expose the learning repository page');
 assert.ok(html.includes('function learningRepositoryPage()'), 'Admin learning repository page must be implemented');
 assert.ok(html.includes("api('adminListPendingLearningAudits')"), 'Admin UI must load pending audit records');
