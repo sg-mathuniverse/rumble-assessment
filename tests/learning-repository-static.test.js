@@ -240,9 +240,6 @@ const currentUser = { userId: 'admin-1', email: 'admin@example.test' };
 assert.throws(function () {
   crudContext.adminSaveLearningObjective_({ tpCode: 'tp01', title: 'TP duplikat', subject: 'Matematika', currentUser: currentUser });
 }, /Kode TP sudah digunakan/, 'Duplicate objective code in the same subject must be rejected');
-assert.throws(function () {
-  crudContext.adminSaveLearningObjective_({ tpCode: 'TP01', title: 'TP mapel lain', subject: 'IPA', currentUser: currentUser });
-}, /Kode TP sudah digunakan/, 'Case-normalized duplicate objective code is rejected only for matching subject');
 const otherSubject = crudContext.adminSaveLearningObjective_({ tpCode: 'tp01', title: 'TP IPA', subject: 'IPA', currentUser: currentUser });
 assert.equal(otherSubject.tpCode, 'TP01', 'Objective codes must be normalized to uppercase');
 assert.throws(function () {
