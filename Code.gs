@@ -710,7 +710,6 @@ function getQuestionBundle_(payload) {
 function createAssessment_(payload) {
   const title=requiredText_(payload.title,'Judul',180);
   let questions=Array.isArray(payload.questions)?payload.questions:[];
-  if(questions.length<1||questions.length>200)throw new Error('Jumlah soal harus antara 1 dan 200.');
   const sourceBundleId=String(payload.sourceBundleId||payload.bundleId||'').trim();
   let sourceVersion=null;
   if(sourceBundleId){
