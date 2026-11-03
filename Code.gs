@@ -169,7 +169,7 @@ function routeAction_(action, payload) {
     studentId: user.role === 'student' ? String(user.userId || '') : String(payload.studentId || ''),
     createdBy: user.email
   });
-  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive'];
+  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit'];
   if (['listAvailableLearningObjectives','listAvailableLearningIndicators'].indexOf(action) >= 0 && user.role !== 'admin' && user.role !== 'teacher') {
     throw new Error('Repositori pembelajaran hanya dapat diakses oleh Admin dan Guru.');
   }
@@ -254,6 +254,8 @@ function routeAction_(action, payload) {
     adminImportStudents: function () { return adminImportStudents_(trusted); },
     adminResetStudentPassword: function () { return adminResetStudentPassword_(trusted); },
     adminSetStudentActive: function () { return adminSetStudentActive_(trusted); },
+    adminListPendingLearningAudits: function () { return adminListPendingLearningAudits_(); },
+    adminReconcileLearningAudit: function () { return adminReconcileLearningAudit_(payload, user); },
     adminListLearningObjectives: function () { return adminListLearningObjectives_(); },
     adminSaveLearningObjective: function () { return adminSaveLearningObjective_(trusted); },
     adminSetLearningObjectiveActive: function () { return adminSetLearningObjectiveActive_(trusted); },
@@ -2328,6 +2330,56 @@ function learningAuditedWrite_(user, action, entityType, entityId, beforeValue, 
     throw new Error(entityType + ' telah ditulis, tetapi audit ' + logId + ' belum dapat ditandai selesai. Periksa AdminAuditLog dan rekonsiliasi entri PENDING_' + action + '. Detail: ' + auditError.message);
   }
 }
+function adminListPendingLearningAudits_() {
+  learningRepositoryAssertReady_();
+  return listRows_('AdminAuditLog').filter(function (row) {
+    return String(row.action || '').indexOf('PENDING_') === 0;
+  }).map(function (row) {
+    return {
+      logId: String(row.logId || ''), actorUserId: String(row.actorUserId || ''),
+      actorEmail: String(row.actorEmail || ''), action: String(row.action || ''),
+      entityType: String(row.entityType || ''), entityId: String(row.entityId || ''),
+      beforeJson: String(row.beforeJson || ''), afterJson: String(row.afterJson || ''),
+      createdAt: String(row.createdAt || '')
+    };
+  });
+}
+
+function adminReconcileLearningAudit_(payload, user) {
+  learningRepositoryAssertReady_();
+  const logId = requiredText_(payload.logId, 'ID audit', 100);
+  const resolution = requiredText_(payload.resolution, 'Hasil rekonsiliasi', 30).toLowerCase();
+  const note = requiredText_(payload.note, 'Catatan rekonsiliasi', 2000);
+  const allowed = ['applied', 'not_applied', 'manual'];
+  if (allowed.indexOf(resolution) < 0) throw new Error('Hasil rekonsiliasi tidak valid.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const row = listRows_('AdminAuditLog').find(function (item) {
+      return String(item.logId || '') === logId;
+    });
+    if (!row) throw new Error('Catatan audit tidak ditemukan.');
+    if (String(row.action || '').indexOf('PENDING_') !== 0) {
+      throw new Error('Catatan audit ini bukan lagi berstatus PENDING atau sudah direkonsiliasi.');
+    }
+    const finalAction = resolution === 'applied' ? 'RECONCILED_APPLIED' :
+      (resolution === 'not_applied' ? 'RECONCILED_NOT_APPLIED' : 'RECONCILED_MANUAL');
+    // Simpan keputusan sebagai entri audit baru sebelum menutup status PENDING.
+    appendRow_('AdminAuditLog', {
+      logId: makeId_('AUD'), actorUserId: String(user.userId || ''),
+      actorEmail: String(user.email || ''), action: 'RECONCILE_PENDING',
+      entityType: 'AdminAuditLog', entityId: logId,
+      beforeJson: JSON.stringify({ action: String(row.action || '') }),
+      afterJson: JSON.stringify({ resolution: resolution, note: note, finalAction: finalAction }),
+      createdAt: currentTimestamp_()
+    });
+    updateRowByKey_('AdminAuditLog', 'logId', logId, { action: finalAction });
+    return { logId: logId, action: finalAction };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function learningObjectivePublic_(row) {
   return {
     objectiveId: String(row.objectiveId || ''), tpCode: String(row.tpCode || ''),
