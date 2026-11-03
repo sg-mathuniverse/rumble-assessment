@@ -788,4 +788,75 @@ assert.equal(historicalBundle.questions[0].questionId, 'Q-1',
 assert.ok(source.includes('const snapshot=version?version.snapshot:bundleSnapshotFromRecord_'),
   'Opening a versioned bundle must read its version snapshot rather than current learning master data');
 
+
+function makeAssessmentTestContext(latestVersionSequence) {
+  return {
+    LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () {} }; } },
+    assertBundleVersioningReady_: function () {},
+    requiredText_: function (v) { if (!String(v || '').trim()) throw new Error('required'); return String(v).trim(); },
+    listRows_: function (table) {
+      if (table === 'QuestionBundles') {
+        const index = Math.min(this.bundleReads++, latestVersionSequence.length - 1);
+        return [{ bundleId: 'BUNDLE-1', status: 'ready', visibility: 'shared',
+          createdBy: 'teacher@example.test', latestVersionId: latestVersionSequence[index] }];
+      }
+      return [];
+    },
+    bundleReads: 0,
+    getBundleVersion_: function () {
+      return { versionId: 'VERSION-7', versionNumber: 7, snapshot: {
+        classification: 'REGULER', subject: 'Matematika', passageText: 'Teks historis',
+        passageImageUrl: 'https://example.test/passage.png',
+        learningObjectiveId: 'TP-OLD', learningIndicatorId: 'IND-OLD',
+        questions: [{ questionId: 'Q-OLD', type: 'multiple_choice', points: 5,
+          text: 'Soal dari snapshot', options: ['A', 'B'], answer: 'A' }]
+      } };
+    },
+    makeId_: function (prefix) { return prefix + '-CREATED'; },
+    currentTimestamp_: function () { return '2026-11-03T00:00:00Z'; },
+    written: [],
+    appendRow_: function (table, row) { this.written.push({ table: table, row: row }); }
+  };
+}
+const assessmentSnapshotContext = makeAssessmentTestContext(['VERSION-7', 'VERSION-7']);
+vm.createContext(assessmentSnapshotContext);
+vm.runInContext(extractFunction('createAssessment_', source), assessmentSnapshotContext);
+const assessmentCreated = assessmentSnapshotContext.createAssessment_({
+  title: 'Asesmen snapshot', sourceBundleId: 'BUNDLE-1',
+  currentUser: { role: 'teacher', email: 'teacher@example.test' }
+});
+const assessmentRow = assessmentSnapshotContext.written.find(function (x) { return x.table === 'Assessments'; }).row;
+const questionRow = assessmentSnapshotContext.written.find(function (x) { return x.table === 'Questions'; }).row;
+assert.equal(assessmentCreated.bundleVersionId, 'VERSION-7',
+  'Assessment response must expose the exact source bundle version');
+assert.equal(assessmentRow.bundleVersionId, 'VERSION-7',
+  'Assessment record must persist the exact source bundle version');
+assert.equal(assessmentRow.bundleVersionNumber, 7,
+  'Assessment record must persist the source version number');
+assert.equal(assessmentRow.subject, 'Matematika',
+  'Assessment metadata must come from the immutable source snapshot');
+assert.equal(assessmentRow.passageText, 'Teks historis',
+  'Assessment passage must come from the immutable source snapshot');
+assert.equal(assessmentRow.classification, 'REGULER',
+  'Assessment classification must come from the immutable source snapshot');
+assert.equal(questionRow.sourceBundleVersionId, 'VERSION-7',
+  'Each assessment question must retain its source bundle version');
+assert.equal(questionRow.sourceQuestionKey, 'Q-OLD',
+  'Each assessment question must retain its original snapshot question key');
+assert.equal(questionRow.text, 'Soal dari snapshot',
+  'Assessment questions must be copied from the immutable snapshot');
+
+const changedPointerContext = makeAssessmentTestContext(['VERSION-7', 'VERSION-8']);
+vm.createContext(changedPointerContext);
+vm.runInContext(extractFunction('createAssessment_', source), changedPointerContext);
+assert.throws(function () {
+  changedPointerContext.createAssessment_({
+    title: 'Asesmen race', sourceBundleId: 'BUNDLE-1',
+    currentUser: { role: 'teacher', email: 'teacher@example.test' }
+  });
+}, /Versi Bundel Soal berubah saat Asesmen dibuat/,
+'Assessment creation must abort if the bundle latest-version pointer changes');
+assert.equal(changedPointerContext.written.length, 0,
+  'A bundle-version race must not write a partial assessment or questions');
+
 console.log('PASS: learning repository static guard tests');
