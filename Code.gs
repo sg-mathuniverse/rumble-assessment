@@ -101,8 +101,9 @@ function getFrontendHtml_() {
  * Jembatan frontend untuk google.script.run.
  * Semua operasi data diproses di server, bukan melalui fetch lintas domain.
  *
- * PENTING: deployment yang dibatasi domain saja belum merupakan otorisasi
- * per-peran. Tambahkan pemeriksaan izin guru/siswa sebelum memakai data nyata.
+ * Otorisasi sesi dan pemeriksaan peran dilakukan di routeAction_() pada
+ * server untuk setiap aksi terdaftar. Tetap lakukan pengujian runtime/integrasi
+ * dan tinjau konfigurasi deployment sebelum memakai data siswa sungguhan.
  */
 function clientApi(action, payload) {
   try {
@@ -2164,6 +2165,17 @@ function migrateLearningRepositoryV1_() {
 }
 
 function learningRepositoryAssertReady_() {
+  const migrationSheet = getSpreadsheet_().getSheetByName('SchemaMigrations');
+  if (!migrationSheet) {
+    throw new Error('Sheet SchemaMigrations belum tersedia. Selesaikan migrasi fondasi versioning dan repositori pembelajaran terlebih dahulu.');
+  }
+  const migrationCompleted = listRows_('SchemaMigrations').some(function (row) {
+    return String(row.migrationId) === 'LEARNING_REPOSITORY_V1' &&
+      String(row.status) === 'completed';
+  });
+  if (!migrationCompleted) {
+    throw new Error('Migrasi LEARNING_REPOSITORY_V1 belum tercatat completed. Jalankan migrasi repositori secara eksplisit setelah BUNDLE_VERSIONING_V1 selesai.');
+  }
   Object.keys(LEARNING_REPOSITORY_TABLES_).forEach(function (name) {
     const sheet = getSpreadsheet_().getSheetByName(name);
     if (!sheet) throw new Error('Repositori Pembelajaran belum dimigrasikan. Jalankan migrateLearningRepositoryV1_() secara eksplisit.');
