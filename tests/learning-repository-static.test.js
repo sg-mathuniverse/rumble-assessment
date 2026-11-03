@@ -14,14 +14,14 @@ assert.doesNotThrow(() => new vm.Script(source), 'Code.gs must be syntactically 
 const appScriptMatch = html.match(new RegExp('<script>([\\\\s\\\\S]*?)<\\\\/script>'));
 assert.ok(appScriptMatch, 'index.html must contain the application script');
 assert.doesNotThrow(() => new vm.Script(appScriptMatch[1]), 'index.html application script must be syntactically valid JavaScript');
-assert.match(html, /\\['learningRepository'[^\\]]*TP & Indikator/, 'Admin navigation must expose the learning repository page');
-assert.match(html, /function learningRepositoryPage\\(\\)/, 'Admin learning repository page must be implemented');
-assert.match(html, /api\\('adminListPendingLearningAudits'\\)/, 'Admin UI must load pending audit records');
-assert.match(html, /api\\('adminReconcileLearningAudit'/, 'Admin UI must provide audit reconciliation');
-assert.match(html, /api\\('listAvailableLearningObjectives'\\)/, 'Teacher editor must load active learning objectives');
-assert.match(html, /api\\('listAvailableLearningIndicators'/, 'Teacher editor must load indicators for the selected objective');
-assert.match(html, /learningObjectiveId:\\(s\\.meta\\|\\|\\{\\}\\)\\.learningObjectiveId/, 'Bundle save must include the selected learning objective ID');
-assert.match(html, /learningIndicatorId:\\(s\\.meta\\|\\|\\{\\}\\)\\.learningIndicatorId/, 'Bundle save must include the selected learning indicator ID');
+assert.ok(html.includes("['learningRepository','▤ TP & Indikator']"), 'Admin navigation must expose the learning repository page');
+assert.ok(html.includes('function learningRepositoryPage()'), 'Admin learning repository page must be implemented');
+assert.ok(html.includes("api('adminListPendingLearningAudits')"), 'Admin UI must load pending audit records');
+assert.ok(html.includes("api('adminReconcileLearningAudit'"), 'Admin UI must provide audit reconciliation');
+assert.ok(html.includes("api('listAvailableLearningObjectives')"), 'Teacher editor must load active learning objectives');
+assert.ok(html.includes("api('listAvailableLearningIndicators'"), 'Teacher editor must load indicators for the selected objective');
+assert.ok(html.includes('learningObjectiveId:(s.meta||{}).learningObjectiveId'), 'Bundle save must include the selected learning objective ID');
+assert.ok(html.includes('learningIndicatorId:(s.meta||{}).learningIndicatorId'), 'Bundle save must include the selected learning indicator ID');
 
 
 function bodyOf(name, nextName) {
