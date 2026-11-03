@@ -258,7 +258,7 @@ assert.throws(function () {
   migrationContext.validateLearningMigrationPreflight_(mockSpreadsheet(Object.assign({}, validMigrationSheets, {
     LearningObjectives: mockSheet(['objectiveId', ' tpCode ', 'title'])
   })));
-}, /spasi di awal\\/akhir/, 'Padded target header must fail preflight');
+}, /spasi di awal.*akhir/, 'Padded target header must fail preflight');
 assert.throws(function () {
   migrationContext.validateLearningMigrationPreflight_(mockSpreadsheet({
     LearningObjectives: validMigrationSheets.LearningObjectives
