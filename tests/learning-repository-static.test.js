@@ -47,6 +47,10 @@ assert.match(reconcile, /RECONCILED_APPLIED/, 'Audit reconciliation must record 
 assert.match(reconcile, /RECONCILED_NOT_APPLIED/, 'Audit reconciliation must record not-applied decisions');
 assert.match(reconcile, /RECONCILED_MANUAL/, 'Audit reconciliation must record manual decisions');
 assert.match(reconcile, /RECONCILE_PENDING/, 'Audit reconciliation must append a separate audit event');
+assert.match(reconcile, /priorDecision/, 'Audit reconciliation retries must detect an existing decision');
+assert.match(reconcile, /reusedDecision: true/, 'Audit reconciliation retries must reuse the prior decision');
+assert.match(reconcile, /JSON\.parse\(String\(priorDecision\.afterJson/, 'Prior reconciliation decision must be validated before reuse');
+
 assert.match(reconcile, /updateRowByKey_\('AdminAuditLog'/, 'Audit reconciliation must close the original pending record');
 assert.match(source, /'adminListPendingLearningAudits','adminReconcileLearningAudit'/, 'Audit reconciliation endpoints must be admin-only');
 assert.match(html, /adminListPendingLearningAudits/, 'Admin UI must load pending audit records');
