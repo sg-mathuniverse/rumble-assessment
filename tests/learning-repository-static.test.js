@@ -23,10 +23,11 @@ assert.match(update, /getFormulas\(\)/, 'Untouched formulas must be preserved');
 assert.match(update, /setValues\(\[updatedRow\]\)/, 'A row update must use one range write');
 assert.doesNotMatch(update, /\.setValue\(/, 'A row update must not write cells individually');
 
+const headerValidation = bodyOf('validateRepositorySheetHeaders_', 'learningRepositoryAssertReady_');
+assert.match(headerValidation, /getLastColumn\(\)/, 'Header validation must check sheet dimensions');
+assert.match(headerValidation, /header kosong/i, 'Readiness must reject blank headers');
+assert.match(headerValidation, /header duplikat/i, 'Readiness must reject duplicate headers');
 const readiness = bodyOf('learningRepositoryAssertReady_', 'learningActive_');
-assert.match(readiness, /getLastColumn\(\)/, 'Readiness must check sheet dimensions');
-assert.match(readiness, /header kosong/i, 'Readiness must reject blank headers');
-assert.match(readiness, /header duplikat/i, 'Readiness must reject duplicate headers');
 assert.match(readiness, /LEARNING_REPOSITORY_V1/, 'Readiness must require completed migration');
 
 const audit = bodyOf('learningAuditedWrite_', 'learningObjectivePublic_');
