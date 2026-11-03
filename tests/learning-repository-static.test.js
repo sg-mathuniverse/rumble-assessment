@@ -120,14 +120,21 @@ assert.throws(function () {
 }, /simulated write failure/, 'First attempt should expose the simulated finalization failure');
 assert.equal(appendCount, 1, 'First attempt must append exactly one decision audit');
 assert.equal(reconciliationRows[0].action, 'PENDING_UPDATE', 'Failed finalization must leave the original record pending');
+assert.throws(function () {
+  reconciliationContext.adminReconcileLearningAudit_(
+    { logId: 'AUD-PENDING-1', resolution: 'not_applied', note: 'permintaan retry berbeda' },
+    { userId: 'admin-1', email: 'admin@example.test' }
+  );
+}, /keputusan rekonsiliasi yang berbeda/, 'Conflicting retry must not silently reuse the first decision');
+assert.equal(reconciliationRows[0].action, 'PENDING_UPDATE', 'Conflicting retry must leave the original record pending');
 const retryResult = reconciliationContext.adminReconcileLearningAudit_(
-  { logId: 'AUD-PENDING-1', resolution: 'not_applied', note: 'permintaan retry berbeda' },
+  { logId: 'AUD-PENDING-1', resolution: 'applied', note: 'sudah diperiksa' },
   { userId: 'admin-1', email: 'admin@example.test' }
 );
-assert.equal(retryResult.action, 'RECONCILED_APPLIED', 'Retry must reuse the first recorded decision');
-assert.equal(retryResult.reusedDecision, true, 'Retry must report reuse of the original decision');
+assert.equal(retryResult.action, 'RECONCILED_APPLIED', 'Matching retry must reuse the first recorded decision');
+assert.equal(retryResult.reusedDecision, true, 'Matching retry must report reuse of the original decision');
 assert.equal(appendCount, 1, 'Retry must not append a duplicate decision audit');
-assert.equal(reconciliationRows[0].action, 'RECONCILED_APPLIED', 'Retry must close the original pending record');
+assert.equal(reconciliationRows[0].action, 'RECONCILED_APPLIED', 'Matching retry must close the original pending record');
 
 
 
