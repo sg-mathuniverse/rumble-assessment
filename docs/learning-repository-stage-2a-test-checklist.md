@@ -37,7 +37,11 @@ Lakukan hanya pada salinan spreadsheet uji dan akun uji. Jangan gunakan data sis
 - [ ] Data Bundel Soal, versi Bundel, Asesmen, Attempts, dan Files tidak berubah.
 - [ ] Snapshot versi Bundel lama tetap identik setelah TP/indikator master diedit.
 - [ ] Dua penulisan bersamaan tidak menghasilkan kode duplikat.
-- [ ] Uji kegagalan audit setelah perubahan dan verifikasi prosedur rekonsiliasi manual.
+- [ ] Simulasikan kegagalan setelah intent audit `PENDING_*` tercatat; verifikasi Admin dapat melihat snapshot dan mencatat keputusan rekonsiliasi.
+- [ ] Uji tiga keputusan: `applied`, `not_applied`, dan `manual`; pastikan setiap keputusan menghasilkan entri `RECONCILE_PENDING` dan status akhir pada baris asal.
+- [ ] Simulasikan retry setelah entri keputusan tercatat tetapi pembaruan baris asal gagal; pastikan retry menggunakan keputusan lama dan tidak membuat entri duplikat.
+- [ ] Pastikan Guru dan Siswa ditolak saat memanggil kedua endpoint rekonsiliasi secara langsung.
+- [ ] Pastikan daftar audit tertunda menampilkan keadaan kosong dengan benar setelah seluruh entri direkonsiliasi.
 - [ ] Jalankan pemeriksaan sintaks dan uji integrasi pada Apps Script test deployment sebelum merge/deploy.
 
 ## Pemeriksaan otomatis statis
