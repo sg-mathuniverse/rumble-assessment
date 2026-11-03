@@ -215,6 +215,61 @@ function extractFunction(name, sourceText) {
   const next = sourceText.indexOf(String.fromCharCode(10) + 'function ', start + 1);
   return sourceText.slice(start, next < 0 ? sourceText.length : next);
 }
+
+const migrationContext = {
+  LEARNING_REPOSITORY_TABLES_: {
+    LearningObjectives: ['objectiveId', 'tpCode', 'title'],
+    LearningIndicators: ['indicatorId', 'objectiveId', 'indicatorCode'],
+    AdminAuditLog: ['logId', 'action']
+  }
+};
+vm.createContext(migrationContext);
+vm.runInContext(extractFunction('validateRepositorySheetHeaders_', source), migrationContext);
+vm.runInContext(extractFunction('validateLearningMigrationPreflight_', source), migrationContext);
+function mockSheet(headers, lastRow) {
+  return {
+    getLastRow: function () { return lastRow === undefined ? 1 : lastRow; },
+    getLastColumn: function () { return headers.length; },
+    getRange: function () { return { getValues: function () { return [headers]; } }; }
+  };
+}
+function mockSpreadsheet(sheets) {
+  return { getSheetByName: function (name) { return sheets[name] || null; } };
+}
+const validMigrationSheets = {
+  SchemaMigrations: mockSheet(['migrationId', 'version', 'appliedAt', 'appliedBy', 'status', 'detailsJson']),
+  LearningObjectives: mockSheet(['objectiveId', 'tpCode', 'title', 'subject']),
+  LearningIndicators: mockSheet(['indicatorId', 'objectiveId', 'indicatorCode']),
+  AdminAuditLog: mockSheet(['logId', 'action'])
+};
+assert.equal(migrationContext.validateLearningMigrationPreflight_(mockSpreadsheet(validMigrationSheets)), true,
+  'Valid existing headers must pass migration preflight; missing required columns can be appended later');
+assert.throws(function () {
+  migrationContext.validateLearningMigrationPreflight_(mockSpreadsheet(Object.assign({}, validMigrationSheets, {
+    LearningIndicators: mockSheet(['indicatorId', '', 'indicatorCode'])
+  })));
+}, /Header kosong/, 'Blank target header must fail preflight');
+assert.throws(function () {
+  migrationContext.validateLearningMigrationPreflight_(mockSpreadsheet(Object.assign({}, validMigrationSheets, {
+    LearningObjectives: mockSheet(['objectiveId', 'tpCode', 'tpCode'])
+  })));
+}, /Header duplikat/, 'Duplicate target header must fail preflight');
+assert.throws(function () {
+  migrationContext.validateLearningMigrationPreflight_(mockSpreadsheet(Object.assign({}, validMigrationSheets, {
+    LearningObjectives: mockSheet(['objectiveId', ' tpCode ', 'title'])
+  })));
+}, /spasi di awal\\/akhir/, 'Padded target header must fail preflight');
+assert.throws(function () {
+  migrationContext.validateLearningMigrationPreflight_(mockSpreadsheet({
+    LearningObjectives: validMigrationSheets.LearningObjectives
+  }));
+}, /SchemaMigrations belum tersedia/, 'Missing migration ledger must fail before touching target sheets');
+const migrationBody = extractFunction('migrateLearningRepositoryV1_', source);
+assert.ok(migrationBody.indexOf('validateLearningMigrationPreflight_(spreadsheet)') <
+  migrationBody.indexOf('spreadsheet.insertSheet(tableName)'), 'All target headers must be preflighted before any sheet is created');
+assert.ok(migrationBody.indexOf('validateLearningMigrationPreflight_(spreadsheet)') <
+  migrationBody.indexOf("appendRow_('SchemaMigrations'"), 'Preflight must run before migration completion is recorded');
+
 const crudContext = {
   rows: {
     LearningObjectives: [
