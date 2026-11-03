@@ -46,3 +46,13 @@ Lakukan hanya pada salinan spreadsheet uji dan akun uji. Jangan gunakan data sis
 - [ ] Pemeriksaan ini hanya memvalidasi sintaks dan pola pengamanan sumber; bukan pengganti uji runtime Apps Script.
 - [ ] Uji runtime tetap dilakukan pada project/deployment dan spreadsheet salinan yang terisolasi.
 - [ ] Untuk simulasi kegagalan audit, verifikasi entri `PENDING_*` tetap terlihat dan dapat direkonsiliasi; jangan menganggap Google Sheets menyediakan transaksi atomik.
+
+## Integrasi UI TP dan indikator
+- [ ] Pada akun Administrator di lingkungan uji, halaman **TP & Indikator** dapat dibuka dan menampilkan daftar TP/indikator.
+- [ ] Administrator dapat membuat, mengedit, dan menonaktifkan TP serta indikator; periksa jejaknya di `AdminAuditLog`.
+- [ ] Pada akun Guru, editor bundel menampilkan pemilih TP dan indikator aktif.
+- [ ] Bundel Reguler tanpa referensi TP tetap dapat dibuat dan dibuka seperti sebelumnya.
+- [ ] Bundel dengan TP/indikator menyimpan kedua ID pada snapshot versi; buka kembali bundel dan pastikan pilihan tetap tampil.
+- [ ] Uji penolakan server untuk TP nonaktif, indikator nonaktif, indikator milik TP lain, dan ketidaksesuaian mata pelajaran.
+- [ ] Buat asesmen dari versi bundel yang sudah memiliki referensi; pastikan asesmen historis tetap menunjuk ke versi bundel yang sama.
+- [ ] Lakukan seluruh uji di spreadsheet salinan/lingkungan uji, bukan spreadsheet siswa aktif.
