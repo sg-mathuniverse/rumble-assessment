@@ -66,14 +66,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v6';
+  const cacheKey = 'rumble_frontend_html_v7';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/uiux-security-refresh-2026-10-29/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/feature/bundle-versioning-foundation/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -704,6 +704,11 @@ function createAssessment_(payload) {
     questions=sourceVersion.snapshot.questions;
   }
   if(!questions.length||questions.length>200)throw new Error('Versi Bundel Soal harus memiliki 1 sampai 200 soal.');
+  questions.forEach(function(question,index){
+    const type=String(question.type||'multiple_choice'),points=Number(question.points);
+    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(index+1));
+    if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal tidak valid pada soal nomor '+(index+1));
+  });
   const lock=LockService.getScriptLock();lock.waitLock(10000);
   try{
     if(sourceBundleId){
@@ -714,8 +719,6 @@ function createAssessment_(payload) {
     appendRow_('Assessments',{assessmentId:assessmentId,title:title,subject:String(payload.subject||''),className:String(payload.className||''),duration:Math.max(1,Math.min(300,Number(payload.duration)||60)),startAt:String(payload.startAt||''),endAt:String(payload.endAt||''),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),status:'draft',createdBy:String(payload.createdBy||''),createdAt:timestamp,updatedAt:timestamp,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification,archivedAt:'',archivedBy:''});
     questions.forEach(function(question,index){
       const type=String(question.type||'multiple_choice'),points=Number(question.points);
-      if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(index+1));
-      if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal tidak valid pada soal nomor '+(index+1));
       appendRow_('Questions',{questionId:makeId_('Q'),assessmentId:assessmentId,order:index+1,type:type,text:String(question.text||''),points:points,optionsJson:JSON.stringify(question.options||[]),answerJson:JSON.stringify(question.answer===undefined?null:question.answer),rubric:String(question.rubric||''),pairsJson:JSON.stringify(question.pairs||''),imageUrl:String(question.imageUrl||''),optionImagesJson:JSON.stringify(question.optionImages||[]),subquestionsJson:JSON.stringify(question.subquestions||[]),subquestionImagesJson:JSON.stringify(question.subquestionImages||[]),rubricLevelsJson:JSON.stringify(question.rubricLevels||[]),passageText:String(question.passageText||''),passageImageUrl:String(question.passageImageUrl||''),sourceBundleVersionId:sourceVersion?sourceVersion.versionId:'',sourceQuestionKey:sourceVersion?String(question.questionId||question.id||('Q-'+(index+1))):''});
     });
     return {id:assessmentId,title:title,status:'draft',questionCount:questions.length,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification};
