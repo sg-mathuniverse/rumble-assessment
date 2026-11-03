@@ -1070,6 +1070,12 @@ function getAssessment_(payload) {
     throw new Error('Akses ditolak. Asesmen lama tanpa pemilik terverifikasi perlu dimigrasikan oleh administrator.');
   }
 
+  const canIncludeAnswers = payload.includeAnswers === true &&
+    (user.role === 'admin' ||
+      (user.role === 'teacher' &&
+        String(assessment.createdBy || '').trim().toLowerCase() ===
+          String(user.email || '').trim().toLowerCase()));
+
   const questions = listRows_('Questions')
     .filter(function (question) {
       return question.assessmentId === assessmentId;
@@ -1080,7 +1086,7 @@ function getAssessment_(payload) {
     .map(function (question) {
       return {
         id: question.questionId,
-        answer: payload.includeAnswers ? parseJson_(question.answerJson, null) : undefined,
+        answer: canIncludeAnswers ? parseJson_(question.answerJson, null) : undefined,
         order: Number(question.order),
         type: question.type,
         text: question.text,
