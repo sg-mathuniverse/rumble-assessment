@@ -2377,6 +2377,11 @@ function adminReconcileLearningAudit_(payload, user) {
       if (['RECONCILED_APPLIED', 'RECONCILED_NOT_APPLIED', 'RECONCILED_MANUAL'].indexOf(priorAction) < 0) {
         throw new Error('Entri rekonsiliasi sebelumnya tidak valid. Periksa AdminAuditLog secara manual.');
       }
+      // Retry hanya idempoten jika keputusan dan catatan sama; jangan diam-diam
+      // menerima keputusan berbeda untuk audit yang sama.
+      if (!prior || String(prior.resolution || '') !== resolution || String(prior.note || '') !== note) {
+        throw new Error('Audit ini sudah memiliki keputusan rekonsiliasi yang berbeda. Periksa entri RECONCILE_PENDING sebelum mencoba lagi.');
+      }
       updateRowByKey_('AdminAuditLog', 'logId', logId, { action: priorAction });
       return { logId: logId, action: priorAction, reusedDecision: true };
     }
