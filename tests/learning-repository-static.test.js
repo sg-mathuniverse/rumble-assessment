@@ -790,19 +790,20 @@ assert.ok(source.includes('const snapshot=version?version.snapshot:bundleSnapsho
 
 
 function makeAssessmentTestContext(latestVersionSequence) {
+  let bundleReads = 0;
+  const written = [];
   return {
     LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () {} }; } },
     assertBundleVersioningReady_: function () {},
     requiredText_: function (v) { if (!String(v || '').trim()) throw new Error('required'); return String(v).trim(); },
     listRows_: function (table) {
       if (table === 'QuestionBundles') {
-        const index = Math.min(this.bundleReads++, latestVersionSequence.length - 1);
+        const index = Math.min(bundleReads++, latestVersionSequence.length - 1);
         return [{ bundleId: 'BUNDLE-1', status: 'ready', visibility: 'shared',
           createdBy: 'teacher@example.test', latestVersionId: latestVersionSequence[index] }];
       }
       return [];
     },
-    bundleReads: 0,
     getBundleVersion_: function () {
       return { versionId: 'VERSION-7', versionNumber: 7, snapshot: {
         classification: 'REGULER', subject: 'Matematika', passageText: 'Teks historis',
@@ -814,8 +815,8 @@ function makeAssessmentTestContext(latestVersionSequence) {
     },
     makeId_: function (prefix) { return prefix + '-CREATED'; },
     currentTimestamp_: function () { return '2026-11-03T00:00:00Z'; },
-    written: [],
-    appendRow_: function (table, row) { this.written.push({ table: table, row: row }); }
+    written: written,
+    appendRow_: function (table, row) { written.push({ table: table, row: row }); }
   };
 }
 const assessmentSnapshotContext = makeAssessmentTestContext(['VERSION-7', 'VERSION-7']);
