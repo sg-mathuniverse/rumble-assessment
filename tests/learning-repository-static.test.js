@@ -665,6 +665,7 @@ assert.equal(routeAuthContext.routeAction_('listAvailableLearningObjectives', {}
   'Teacher must be allowed to read available objectives');
 assert.equal(routeAuthContext.routeAction_('listAvailableLearningIndicators', { objectiveId: 'TP-1' }).length, 1,
   'Teacher must be allowed to read available indicators');
+routeAuthContext.auth = { authenticated: true, user: { role: 'student', userId: 'student-1', email: 'student@example.test' } };
 assert.throws(function () {
   routeAuthContext.routeAction_('listAvailableLearningObjectives', {});
 }, /Repositori pembelajaran hanya dapat diakses/,
