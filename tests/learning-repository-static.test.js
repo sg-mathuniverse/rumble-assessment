@@ -860,4 +860,51 @@ assert.throws(function () {
 assert.equal(changedPointerContext.written.length, 0,
   'A bundle-version race must not write a partial assessment or questions');
 
+
+const answerAccessContext = {
+  requiredText_: function (v) { if (!String(v || '').trim()) throw new Error('required'); return String(v).trim(); },
+  listRows_: function (table) {
+    if (table === 'Assessments') return [{
+      assessmentId: 'ASM-1', createdBy: 'teacher@example.test',
+      status: 'published', title: 'Uji kunci jawaban'
+    }];
+    if (table === 'Questions') return [{
+      assessmentId: 'ASM-1', questionId: 'Q-1', order: 1,
+      type: 'multiple_choice', text: 'Pertanyaan', points: 1,
+      optionsJson: '["A","B"]', answerJson: '"A"', rubric: '',
+      pairsJson: '""', imageUrl: '', optionImagesJson: '[]',
+      subquestionsJson: '[]', subquestionImagesJson: '[]',
+      rubricLevelsJson: '[]', passageText: '', passageImageUrl: ''
+    }];
+    if (table === 'Attempts') return [];
+    return [];
+  },
+  parseJson_: function (value, fallback) { try { return JSON.parse(value); } catch (e) { return fallback; } },
+  assertStudentAssessmentAccess_: function () {},
+  assertStudentAssessmentIdentity_: function () {}
+};
+vm.createContext(answerAccessContext);
+vm.runInContext(extractFunction('getAssessment_', source), answerAccessContext);
+function detailFor(user, includeAnswers) {
+  return answerAccessContext.getAssessment_({
+    id: 'ASM-1', includeAnswers: includeAnswers,
+    currentUser: user
+  });
+}
+const studentDetail = detailFor({ role: 'student', userId: 'student-1' }, true);
+assert.equal(studentDetail.questions[0].answer, undefined,
+  'Student must not receive answer keys even when includeAnswers is requested');
+const otherTeacherDetail = detailFor({ role: 'teacher', email: 'other@example.test' }, true);
+assert.equal(otherTeacherDetail.questions[0].answer, undefined,
+  'A teacher must not receive answer keys for another teacher assessment');
+const ownerTeacherDetail = detailFor({ role: 'teacher', email: 'teacher@example.test' }, true);
+assert.equal(ownerTeacherDetail.questions[0].answer, 'A',
+  'The assessment owner may request answer keys');
+const adminDetail = detailFor({ role: 'admin', email: 'admin@example.test' }, true);
+assert.equal(adminDetail.questions[0].answer, 'A',
+  'Admin may request answer keys');
+const studentSource = extractFunction('getAssessment_', source);
+assert.ok(studentSource.includes('const canIncludeAnswers = payload.includeAnswers === true'),
+  'Answer inclusion must be decided by server-side authorization, not client input alone');
+
 console.log('PASS: learning repository static guard tests');
