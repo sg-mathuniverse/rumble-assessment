@@ -165,7 +165,7 @@ function routeAction_(action, payload) {
     createdBy: user.email
   });
   const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive'];
-  if (adminOnly.indexOf(action) >= 0 && user.role !== 'admin') {
+  if (['listAvailableLearningObjectives','listAvailableLearningIndicators'].indexOf(action) >= 0 && user.role !== 'admin' && user.role !== 'teacher') {\n    throw new Error('Repositori pembelajaran hanya dapat diakses oleh Admin dan Guru.');\n  }\n  if (adminOnly.indexOf(action) >= 0 && user.role !== 'admin') {
     throw new Error('Fitur ini hanya dapat digunakan oleh administrator sekolah.');
   }
   const teacherOnly = [
