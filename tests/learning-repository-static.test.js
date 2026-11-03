@@ -164,4 +164,37 @@ assert.match(bundleRead, /learningIndicatorId:String\(snapshot\.learningIndicato
 assert.match(source, /if \(classification === 'SOLO_TAX'\) throw new Error/, 'SOLO Tax creation must remain disabled until its editor is ready');
 assert.match(source, /const teacherOnly = \[/, 'Teacher-only actions must be explicitly registered');
 
+const routeAction = bodyOf('routeAction_', 'assertAssessmentOwner_');
+const routeContext = {
+  getCurrentUser_: function () {
+    return { authenticated: true, user: { userId: 'user-1', email: 'user@example.test', role: routeContext.testRole } };
+  },
+  adminListPendingLearningAudits_: function () { return ['admin-only-data']; },
+  adminReconcileLearningAudit_: function () { return { action: 'RECONCILED_APPLIED' }; },
+  listAvailableLearningObjectives_: function () { return ['active-objectives']; },
+  listAvailableLearningIndicators_: function () { return ['active-indicators']; }
+};
+vm.createContext(routeContext);
+vm.runInContext(routeAction, routeContext);
+for (const role of ['teacher', 'student']) {
+  routeContext.testRole = role;
+  assert.throws(function () {
+    routeContext.routeAction_('adminListPendingLearningAudits', { sessionToken: 'valid-session' });
+  }, /administrator/, role + ' must not list pending admin audits');
+  assert.throws(function () {
+    routeContext.routeAction_('adminReconcileLearningAudit', { sessionToken: 'valid-session', logId: 'AUD-1' });
+  }, /administrator/, role + ' must not reconcile admin audits');
+}
+routeContext.testRole = 'student';
+assert.throws(function () {
+  routeContext.routeAction_('listAvailableLearningObjectives', { sessionToken: 'valid-session' });
+}, /Admin dan Guru/, 'Student must not read learning repository references');
+routeContext.testRole = 'teacher';
+assert.deepEqual(Array.from(routeContext.routeAction_('listAvailableLearningObjectives', { sessionToken: 'valid-session' })), ['active-objectives'], 'Teacher may read active learning objectives');
+routeContext.testRole = 'admin';
+assert.deepEqual(Array.from(routeContext.routeAction_('adminListPendingLearningAudits', { sessionToken: 'valid-session' })), ['admin-only-data'], 'Admin may list pending audit records');
+assert.equal(routeContext.routeAction_('adminReconcileLearningAudit', { sessionToken: 'valid-session', logId: 'AUD-1' }).action, 'RECONCILED_APPLIED', 'Admin may reconcile audit records');
+
+
+
 console.log('PASS: learning repository static guard tests');
