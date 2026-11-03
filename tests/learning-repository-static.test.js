@@ -527,6 +527,43 @@ assert.equal(raceContext.assessmentRows.length, 0, 'Version race must be detecte
 assert.equal(raceContext.questionRows.length, 0, 'Version race must be detected before writing question rows');
 
 
+
+const reconcileRetryContext = {
+  rows: [
+    { logId: 'AUD-PENDING-1', action: 'PENDING_UPDATE', entityId: 'TP-9' },
+    { logId: 'AUD-DECISION-1', action: 'RECONCILE_PENDING', entityId: 'AUD-PENDING-1',
+      afterJson: JSON.stringify({ resolution: 'applied', note: 'verified applied', finalAction: 'RECONCILED_APPLIED' }) }
+  ],
+  LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () {} }; } },
+  learningRepositoryAssertReady_: function () {},
+  requiredText_: function (v) { if (!String(v || '').trim()) throw new Error('required'); return String(v).trim(); },
+  listRows_: function () { return reconcileRetryContext.rows; },
+  updateRowByKey_: function (table, key, id, fields) {
+    const row = reconcileRetryContext.rows.find(function (x) { return x[key] === id; });
+    if (!row) throw new Error('missing row');
+    Object.assign(row, fields);
+  },
+  appendRow_: function () { throw new Error('should not append duplicate decision'); },
+  makeId_: function () { return 'AUD-UNEXPECTED'; },
+  currentTimestamp_: function () { return 'now'; }
+};
+vm.createContext(reconcileRetryContext);
+vm.runInContext(extractFunction('adminReconcileLearningAudit_', source), reconcileRetryContext);
+assert.throws(function () {
+  reconcileRetryContext.adminReconcileLearningAudit_({
+    logId: 'AUD-PENDING-1', resolution: 'not_applied', note: 'different decision'
+  }, { userId: 'ADMIN-1', email: 'admin@example.test' });
+}, /keputusan rekonsiliasi yang berbeda/,
+'Conflicting reconciliation retry must be rejected');
+assert.equal(reconcileRetryContext.rows[0].action, 'PENDING_UPDATE',
+'Conflicting retry must not change the pending audit');
+const sameDecisionRetry = reconcileRetryContext.adminReconcileLearningAudit_({
+  logId: 'AUD-PENDING-1', resolution: 'applied', note: 'verified applied'
+}, { userId: 'ADMIN-1', email: 'admin@example.test' });
+assert.equal(sameDecisionRetry.reusedDecision, true, 'Same reconciliation decision must be safely reusable');
+assert.equal(reconcileRetryContext.rows[0].action, 'RECONCILED_APPLIED',
+'Same decision retry must complete the original pending audit');
+
 const auditFailureContext = {
   pending: [],
   learningAuditBegin_: function () {
