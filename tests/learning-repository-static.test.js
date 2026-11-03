@@ -392,4 +392,69 @@ assert.throws(function () {
   referenceContext.getBundleVersion_({ versionId: 'BVER-1' });
 }, /Snapshot harus memiliki/, 'Corrupted bundle snapshot must be rejected when loaded');
 
+
+const assessmentContext = {
+  assessmentRows: [], questionRows: [], bundleReads: 0, latestVersion: 'BVER-1',
+  requiredText_: function (value, label) { const result = String(value || '').trim(); if (!result) throw new Error(label + ' wajib diisi.'); return result; },
+  assertBundleVersioningReady_: function () {},
+  listRows_: function (name) {
+    if (name === 'QuestionBundles') {
+      assessmentContext.bundleReads++;
+      return [{ bundleId: 'BND-1', status: 'active', createdBy: 'owner@example.test', visibility: 'shared', latestVersionId: assessmentContext.latestVersion }];
+    }
+    return [];
+  },
+  getBundleVersion_: function () {
+    return { versionId: 'BVER-1', versionNumber: 1, snapshot: {
+      classification: 'REGULER', subject: 'Matematika', passageText: 'Bacaan versi 1',
+      passageImageUrl: '', questions: [{ questionId: 'Q-SNAPSHOT', type: 'multiple_choice',
+        text: 'Soal dari snapshot', points: 5, options: ['A', 'B'], answer: 'A' }]
+    } };
+  },
+  LockService: { getScriptLock: function () { return {
+    waitLock: function () {},
+    releaseLock: function () {}
+  }; } },
+  makeId_: (function () { let n = 0; return function (prefix) { n++; return prefix + '-TEST-' + n; }; })(),
+  currentTimestamp_: function () { return '2026-11-03T00:00:00.000Z'; },
+  appendRow_: function (name, row) {
+    if (name === 'Assessments') assessmentContext.assessmentRows.push(Object.assign({}, row));
+    if (name === 'Questions') assessmentContext.questionRows.push(Object.assign({}, row));
+  }
+};
+vm.createContext(assessmentContext);
+vm.runInContext(extractFunction('createAssessment_', source), assessmentContext);
+const assessmentUser = { email: 'owner@example.test' };
+const createdFromSnapshot = assessmentContext.createAssessment_({
+  title: 'Asesmen snapshot', sourceBundleId: 'BND-1', currentUser: assessmentUser,
+  questions: [{ type: 'essay', points: 999, text: 'Payload tidak boleh dipakai' }]
+});
+assert.equal(createdFromSnapshot.bundleVersionId, 'BVER-1', 'Assessment must retain the selected bundle version ID');
+assert.equal(createdFromSnapshot.bundleVersionNumber, 1, 'Assessment must retain the selected bundle version number');
+assert.equal(assessmentContext.assessmentRows[0].passageText, 'Bacaan versi 1', 'Assessment passage must come from the immutable version snapshot');
+assert.equal(assessmentContext.questionRows[0].text, 'Soal dari snapshot', 'Assessment questions must come from the immutable version snapshot, not client payload');
+assert.equal(assessmentContext.questionRows[0].sourceBundleVersionId, 'BVER-1', 'Each copied question must retain its source bundle version');
+assert.equal(assessmentContext.questionRows[0].sourceQuestionKey, 'Q-SNAPSHOT', 'Each copied question must retain its source question key');
+
+const raceContext = Object.assign({}, assessmentContext, {
+  assessmentRows: [], questionRows: [], bundleReads: 0, latestVersion: 'BVER-1',
+  listRows_: function (name) {
+    if (name !== 'QuestionBundles') return [];
+    raceContext.bundleReads++;
+    return [{ bundleId: 'BND-1', status: 'active', createdBy: 'owner@example.test',
+      visibility: 'shared', latestVersionId: raceContext.bundleReads === 1 ? 'BVER-1' : 'BVER-2' }];
+  },
+  appendRow_: function (name, row) {
+    if (name === 'Assessments') raceContext.assessmentRows.push(row);
+    if (name === 'Questions') raceContext.questionRows.push(row);
+  }
+});
+vm.createContext(raceContext);
+vm.runInContext(extractFunction('createAssessment_', source), raceContext);
+assert.throws(function () {
+  raceContext.createAssessment_({ title: 'Asesmen race', sourceBundleId: 'BND-1', currentUser: assessmentUser });
+}, /Versi Bundel Soal berubah/, 'Assessment creation must reject a bundle version changed before the locked write');
+assert.equal(raceContext.assessmentRows.length, 0, 'Version race must be detected before writing the assessment row');
+assert.equal(raceContext.questionRows.length, 0, 'Version race must be detected before writing question rows');
+
 console.log('PASS: learning repository static guard tests');
