@@ -3,12 +3,16 @@
  *
  * Setup:
  * 1. Isi ID spreadsheet dan folder Drive pada CONFIG.
- * 2. Jalankan setupDatabase() satu kali.
- * 3. Deploy sebagai Web App untuk mengaktifkan endpoint.
+ * 2. Pada spreadsheet uji, jalankan migrasi yang sesuai secara eksplisit:
+ *    migrateDatabaseV1_() untuk fondasi versioning, lalu
+ *    migrateLearningRepositoryV1_() untuk repositori pembelajaran.
+ * 3. Tinjau hasil migrasi dan uji alur aplikasi sebelum deployment.
  *
  * Catatan keamanan:
- * Backend ini masih fondasi awal. Tambahkan autentikasi terverifikasi dan
- * pemeriksaan izin server sebelum digunakan dengan data siswa sungguhan.
+ * Backend menerapkan autentikasi sesi dan pemeriksaan peran di server untuk
+ * aksi yang telah didaftarkan. Implementasi ini belum dinyatakan siap produksi:
+ * pengujian runtime/integrasi, peninjauan konfigurasi deployment, dan kontrol
+ * operasional sekolah tetap wajib sebelum memakai data siswa sungguhan.
  */
 
 const CONFIG = {
@@ -2108,6 +2112,9 @@ function migrateLearningRepositoryV1_() {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    // Repositori hanya boleh dimigrasikan setelah fondasi versioning selesai.
+    // Pemeriksaan dilakukan sebelum perubahan sheet apa pun.
+    assertBundleVersioningReady_();
     const migrationId = 'LEARNING_REPOSITORY_V1';
     const migrationSheet = getSpreadsheet_().getSheetByName('SchemaMigrations');
     if (!migrationSheet) throw new Error('Sheet SchemaMigrations belum tersedia. Selesaikan migrasi fondasi versioning terlebih dahulu.');
