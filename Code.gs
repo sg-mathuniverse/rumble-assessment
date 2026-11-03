@@ -2163,6 +2163,41 @@ const LEARNING_REPOSITORY_TABLES_ = {
   AdminAuditLog: ['logId','actorUserId','actorEmail','action','entityType','entityId','beforeJson','afterJson','createdAt']
 };
 
+function validateLearningMigrationPreflight_(spreadsheet) {
+  const migrationSheet = spreadsheet.getSheetByName('SchemaMigrations');
+  if (!migrationSheet) {
+    throw new Error('Sheet SchemaMigrations belum tersedia. Selesaikan migrasi fondasi versioning terlebih dahulu.');
+  }
+  validateRepositorySheetHeaders_(migrationSheet, 'SchemaMigrations', ['migrationId', 'status']);
+  Object.keys(LEARNING_REPOSITORY_TABLES_).forEach(function (tableName) {
+    const sheet = spreadsheet.getSheetByName(tableName);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    const lastColumn = sheet.getLastColumn();
+    if (lastRow === 0 && lastColumn === 0) return;
+    if (lastRow < 1 || lastColumn < 1) {
+      throw new Error('Struktur sheet ' + tableName + ' tidak valid: baris data dan header tidak konsisten. Migrasi dihentikan sebelum mengubah sheet apa pun.');
+    }
+    const rawHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+    const seen = {};
+    rawHeaders.forEach(function (value, index) {
+      const raw = String(value == null ? '' : value);
+      const header = raw.trim();
+      if (!header) {
+        throw new Error('Header kosong pada kolom ' + (index + 1) + ' di sheet ' + tableName + '. Migrasi dihentikan sebelum perubahan.');
+      }
+      if (raw !== header) {
+        throw new Error('Header "' + raw + '" pada sheet ' + tableName + ' memiliki spasi di awal/akhir. Rapikan secara manual sebelum migrasi.');
+      }
+      if (seen[header]) {
+        throw new Error('Header duplikat "' + header + '" pada sheet ' + tableName + '. Migrasi dihentikan sebelum perubahan.');
+      }
+      seen[header] = true;
+    });
+  });
+  return true;
+}
+
 function migrateLearningRepositoryV1_() {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -2171,15 +2206,15 @@ function migrateLearningRepositoryV1_() {
     // Pemeriksaan dilakukan sebelum perubahan sheet apa pun.
     assertBundleVersioningReady_();
     const migrationId = 'LEARNING_REPOSITORY_V1';
-    const migrationSheet = getSpreadsheet_().getSheetByName('SchemaMigrations');
-    if (!migrationSheet) throw new Error('Sheet SchemaMigrations belum tersedia. Selesaikan migrasi fondasi versioning terlebih dahulu.');
+    const spreadsheet = getSpreadsheet_();
+    validateLearningMigrationPreflight_(spreadsheet);
+    const migrationSheet = spreadsheet.getSheetByName('SchemaMigrations');
     if (listRows_('SchemaMigrations').some(function (r) {
       return String(r.migrationId) === migrationId && String(r.status) === 'completed';
     })) return { success: true, alreadyApplied: true, migrationId: migrationId };
 
     const changes = {};
     Object.keys(LEARNING_REPOSITORY_TABLES_).forEach(function (tableName) {
-      const spreadsheet = getSpreadsheet_();
       let sheet = spreadsheet.getSheetByName(tableName);
       if (!sheet) {
         sheet = spreadsheet.insertSheet(tableName);
@@ -2189,7 +2224,7 @@ function migrateLearningRepositoryV1_() {
         changes[tableName] = { created: true, addedHeaders: [] };
         return;
       }
-      if (sheet.getLastRow() === 0 || sheet.getLastColumn() === 0) {
+      if (sheet.getLastRow() === 0 && sheet.getLastColumn() === 0) {
         const headers = LEARNING_REPOSITORY_TABLES_[tableName];
         sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
         sheet.setFrozenRows(1);
