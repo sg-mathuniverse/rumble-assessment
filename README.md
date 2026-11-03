@@ -66,3 +66,10 @@ Semua aksi memerlukan sesi terautentikasi. Otorisasi dilakukan di server, bukan 
 ### Batasan dan validasi
 
 Google Sheets tidak menyediakan transaksi multi-sheet. Jika penulisan data berhasil tetapi pencatatan audit gagal, perubahan data mungkin sudah tersimpan tanpa baris audit; periksa log dan lakukan rekonsiliasi manual. Audit log tidak dapat dianggap sebagai tamper-proof terhadap pemilik spreadsheet. Uji integrasi dan runtime Apps Script tetap wajib dilakukan pada salinan spreadsheet sebelum deployment.
+
+
+### Repositori TP dan indikator
+- Administrator mengelola tujuan pembelajaran dan indikator melalui halaman **TP & Indikator**.
+- Guru dapat menghubungkan bundel soal ke TP dan indikator aktif. Referensi disimpan pada snapshot versi bundel.
+- Pemilihan referensi bersifat opsional untuk menjaga kompatibilitas bundel Reguler lama.
+- Rancangan tahap SOLO Tax tersedia pada `docs/solo-tax-integration-design.md`; editor dan rubrik SOLO Tax belum diaktifkan.
