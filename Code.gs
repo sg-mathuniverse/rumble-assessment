@@ -2364,6 +2364,23 @@ function adminReconcileLearningAudit_(payload, user) {
     }
     const finalAction = resolution === 'applied' ? 'RECONCILED_APPLIED' :
       (resolution === 'not_applied' ? 'RECONCILED_NOT_APPLIED' : 'RECONCILED_MANUAL');
+    const auditRows = listRows_('AdminAuditLog');
+    const priorDecision = auditRows.find(function (item) {
+      return String(item.action || '') === 'RECONCILE_PENDING' &&
+        String(item.entityId || '') === logId;
+    });
+    if (priorDecision) {
+      // Retry aman: jika keputusan sudah tercatat tetapi pembaruan baris asal gagal,
+      // gunakan keputusan yang sama dan jangan membuat entri rekonsiliasi duplikat.
+      let prior;
+      try { prior = JSON.parse(String(priorDecision.afterJson || '{}')); } catch (parseError) { prior = null; }
+      const priorAction = prior && String(prior.finalAction || '');
+      if (['RECONCILED_APPLIED', 'RECONCILED_NOT_APPLIED', 'RECONCILED_MANUAL'].indexOf(priorAction) < 0) {
+        throw new Error('Entri rekonsiliasi sebelumnya tidak valid. Periksa AdminAuditLog secara manual.');
+      }
+      updateRowByKey_('AdminAuditLog', 'logId', logId, { action: priorAction });
+      return { logId: logId, action: priorAction, reusedDecision: true };
+    }
     // Simpan keputusan sebagai entri audit baru sebelum menutup status PENDING.
     appendRow_('AdminAuditLog', {
       logId: makeId_('AUD'), actorUserId: String(user.userId || ''),
@@ -2374,7 +2391,7 @@ function adminReconcileLearningAudit_(payload, user) {
       createdAt: currentTimestamp_()
     });
     updateRowByKey_('AdminAuditLog', 'logId', logId, { action: finalAction });
-    return { logId: logId, action: finalAction };
+    return { logId: logId, action: finalAction, reusedDecision: false };
   } finally {
     lock.releaseLock();
   }
