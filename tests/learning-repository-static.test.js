@@ -894,9 +894,10 @@ function detailFor(user, includeAnswers) {
 const studentDetail = detailFor({ role: 'student', userId: 'student-1' }, true);
 assert.equal(studentDetail.questions[0].answer, undefined,
   'Student must not receive answer keys even when includeAnswers is requested');
-const otherTeacherDetail = detailFor({ role: 'teacher', email: 'other@example.test' }, true);
-assert.equal(otherTeacherDetail.questions[0].answer, undefined,
-  'A teacher must not receive answer keys for another teacher assessment');
+assert.throws(function () {
+  detailFor({ role: 'teacher', email: 'other@example.test' }, true);
+}, /Akses ditolak/,
+'A teacher must not access another teacher assessment or its answer keys');
 const ownerTeacherDetail = detailFor({ role: 'teacher', email: 'teacher@example.test' }, true);
 assert.equal(ownerTeacherDetail.questions[0].answer, 'A',
   'The assessment owner may request answer keys');
