@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const source = fs.readFileSync('Code.gs', 'utf8');
+const html = fs.readFileSync('index.html', 'utf8');
 assert.doesNotThrow(() => new vm.Script(source), 'Code.gs must be syntactically valid JavaScript');
 
 function bodyOf(name, nextName) {
@@ -48,5 +49,19 @@ for (const endpoint of [
   const section = source.slice(start, next < 0 ? source.length : next);
   assert.match(section, /learningAuditedWrite_/, endpoint + ' must use audited write wrapper');
 }
+
+
+assert.match(html, /learningRepositoryPage\(\)/, 'Admin learning repository page must be registered');
+assert.match(html, /adminListLearningObjectives/, 'Admin UI must load learning objectives');
+assert.match(html, /adminListLearningIndicators/, 'Admin UI must load learning indicators');
+assert.match(html, /listAvailableLearningObjectives/, 'Teacher UI must load active learning objectives');
+assert.match(html, /listAvailableLearningIndicators/, 'Teacher UI must load active learning indicators');
+assert.match(html, /id="bundleLearningObjective"/, 'Bundle editor must expose the objective selector');
+assert.match(html, /id="bundleLearningIndicator"/, 'Bundle editor must expose the indicator selector');
+assert.match(html, /learningObjectiveId:\(s\.meta\|\|\{\}\)\.learningObjectiveId/, 'Bundle save must submit the objective reference');
+assert.match(html, /learningIndicatorId:\(s\.meta\|\|\{\}\)\.learningIndicatorId/, 'Bundle save must submit the indicator reference');
+assert.match(source, /validateBundleLearningReference_\(snapshot\)/, 'Server must validate bundle learning references');
+assert.match(source, /learningObjectiveId:String\(payload\.learningObjectiveId/, 'Version snapshot must persist objective ID');
+assert.match(source, /learningIndicatorId:String\(payload\.learningIndicatorId/, 'Version snapshot must persist indicator ID');
 
 console.log('PASS: learning repository static guard tests');
