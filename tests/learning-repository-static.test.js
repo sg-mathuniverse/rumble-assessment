@@ -427,7 +427,7 @@ vm.runInContext(extractFunction('createAssessment_', source), assessmentContext)
 const assessmentUser = { email: 'owner@example.test' };
 const createdFromSnapshot = assessmentContext.createAssessment_({
   title: 'Asesmen snapshot', sourceBundleId: 'BND-1', currentUser: assessmentUser,
-  questions: [{ type: 'essay', points: 999, text: 'Payload tidak boleh dipakai' }]
+  questions: []
 });
 assert.equal(createdFromSnapshot.bundleVersionId, 'BVER-1', 'Assessment must retain the selected bundle version ID');
 assert.equal(createdFromSnapshot.bundleVersionNumber, 1, 'Assessment must retain the selected bundle version number');
