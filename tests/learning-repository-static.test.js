@@ -685,4 +685,69 @@ const adminReconcileResult = routeAuthContext.routeAction_('adminReconcileLearni
 assert.equal(adminReconcileResult.actorRole, 'admin', 'Reconciliation must receive the server-authenticated Admin identity');
 assert.equal(adminReconcileResult.actorId, 'admin-1', 'Reconciliation actor ID must come from authenticated server identity');
 
+
+const bundleReferenceContext = {
+  learningRepositoryAssertReady_: function () {},
+  learningActive_: function (value) { return value === true || String(value).toLowerCase() === 'true'; },
+  listRows_: function (table) {
+    if (table === 'LearningObjectives') return bundleReferenceContext.objectives;
+    if (table === 'LearningIndicators') return bundleReferenceContext.indicators;
+    return [];
+  },
+  objectives: [{ objectiveId: 'TP-A', subject: 'Matematika', active: true }],
+  indicators: [{ indicatorId: 'IND-A', objectiveId: 'TP-A', active: true }]
+};
+vm.createContext(bundleReferenceContext);
+vm.runInContext(extractFunction('validateBundleLearningReference_', source), bundleReferenceContext);
+const validBundleReference = {
+  subject: 'Matematika', learningObjectiveId: 'TP-A', learningIndicatorId: 'IND-A'
+};
+assert.equal(bundleReferenceContext.validateBundleLearningReference_(validBundleReference), true,
+  'Active objective and indicator under the objective must validate');
+assert.equal(bundleReferenceContext.validateBundleLearningReference_({
+  subject: 'Matematika', learningObjectiveId: '', learningIndicatorId: ''
+}), true, 'Bundle without learning references remains valid');
+assert.throws(function () {
+  bundleReferenceContext.validateBundleLearningReference_({
+    subject: 'Matematika', learningObjectiveId: '', learningIndicatorId: 'IND-A'
+  });
+}, /Pilih tujuan pembelajaran/,
+'Indicator cannot be referenced without an objective');
+assert.throws(function () {
+  bundleReferenceContext.validateBundleLearningReference_({
+    subject: 'IPA', learningObjectiveId: 'TP-A', learningIndicatorId: 'IND-A'
+  });
+}, /Mata pelajaran bundel harus sama/,
+'Bundle subject must match the objective subject');
+assert.throws(function () {
+  bundleReferenceContext.validateBundleLearningReference_({
+    subject: 'Matematika', learningObjectiveId: 'TP-A', learningIndicatorId: 'IND-OTHER'
+  });
+}, /Indikator tidak aktif atau tidak terhubung/,
+'Indicator must be active and belong to the selected objective');
+bundleReferenceContext.objectives[0].active = false;
+assert.throws(function () {
+  bundleReferenceContext.validateBundleLearningReference_(validBundleReference);
+}, /Tujuan pembelajaran yang dipilih tidak tersedia atau tidak aktif/,
+'Inactive objective cannot be assigned to a new bundle version');
+bundleReferenceContext.objectives[0].active = true;
+bundleReferenceContext.indicators[0].active = false;
+assert.throws(function () {
+  bundleReferenceContext.validateBundleLearningReference_(validBundleReference);
+}, /Indikator tidak aktif atau tidak terhubung/,
+'Inactive indicator cannot be assigned to a new bundle version');
+
+const saveBundleBody = extractFunction('saveQuestionBundle_', source);
+assert.ok(saveBundleBody.indexOf('validateBundleLearningReference_(snapshot)') <
+  saveBundleBody.indexOf('createBundleVersion_('),
+'New bundle version must validate active learning references before snapshot persistence');
+const assessmentBody = extractFunction('createAssessment_', source);
+assert.ok(assessmentBody.indexOf('sourceVersion=getBundleVersion_') <
+  assessmentBody.indexOf('sourceVersion.snapshot.questions'),
+'Assessment must load its immutable source bundle version before copying questions');
+assert.ok(assessmentBody.indexOf('String(current.latestVersionId)!==String(sourceVersion.versionId)') >= 0,
+'Assessment creation must reject if the source bundle version changes during creation');
+assert.ok(assessmentBody.indexOf('bundleVersionId:sourceVersion?sourceVersion.versionId') >= 0,
+'Assessment must persist the exact source bundle version reference');
+
 console.log('PASS: learning repository static guard tests');
