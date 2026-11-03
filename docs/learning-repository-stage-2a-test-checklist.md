@@ -39,3 +39,10 @@ Lakukan hanya pada salinan spreadsheet uji dan akun uji. Jangan gunakan data sis
 - [ ] Dua penulisan bersamaan tidak menghasilkan kode duplikat.
 - [ ] Uji kegagalan audit setelah perubahan dan verifikasi prosedur rekonsiliasi manual.
 - [ ] Jalankan pemeriksaan sintaks dan uji integrasi pada Apps Script test deployment sebelum merge/deploy.
+
+## Pemeriksaan otomatis statis
+- [ ] Dari root repository, jalankan `node tests/learning-repository-static.test.js`.
+- [ ] Pastikan hasil menunjukkan `PASS: learning repository static guard tests`.
+- [ ] Pemeriksaan ini hanya memvalidasi sintaks dan pola pengamanan sumber; bukan pengganti uji runtime Apps Script.
+- [ ] Uji runtime tetap dilakukan pada project/deployment dan spreadsheet salinan yang terisolasi.
+- [ ] Untuk simulasi kegagalan audit, verifikasi entri `PENDING_*` tetap terlihat dan dapat direkonsiliasi; jangan menganggap Google Sheets menyediakan transaksi atomik.
