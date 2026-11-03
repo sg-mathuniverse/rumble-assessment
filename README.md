@@ -3,7 +3,7 @@
 Aplikasi asesmen digital untuk guru dan siswa. Frontend: index.html. Backend: Code.gs (Google Apps Script).
 
 ## Status
-Fondasi awal / preview. Belum siap untuk asesmen resmi atau data siswa nyata. Branch `feature/bundle-versioning-foundation` menambahkan fondasi versioning Bundel Soal dan migrasi eksplisit; perubahan ini belum diuji pada Apps Script runtime dan belum boleh diterapkan ke spreadsheet produksi. Editor SOLO Tax lengkap, penilaian, finalisasi, dan keamanan produksi masih dalam tahap pengembangan.
+Fondasi awal / preview. Belum siap untuk asesmen resmi atau data siswa nyata. Branch `feature/bundle-versioning-foundation` menjadi fondasi versioning Bundel Soal; branch `feature/learning-repository-backend` menambahkan repositori TP/indikator dan integrasinya. Pemeriksaan CI statis tersedia, tetapi runtime Google Apps Script dan migrasi pada spreadsheet salinan belum diverifikasi. Jangan terapkan ke spreadsheet produksi. Editor SOLO Tax lengkap, penilaian, finalisasi, dan hardening keamanan produksi masih dalam tahap pengembangan.
 
 ## Arsitektur
 - Frontend HTML/CSS/JavaScript statis, dapat dipublikasikan melalui GitHub Pages.
@@ -66,7 +66,7 @@ Semua aksi memerlukan sesi terautentikasi. Otorisasi dilakukan di server, bukan 
 
 ### Batasan dan validasi
 
-Google Sheets tidak menyediakan transaksi multi-sheet. Google Sheets tidak menyediakan transaksi multi-sheet. Jika penulisan entitas atau penutupan audit gagal, status `PENDING_*` dapat memerlukan pemeriksaan Admin. UI rekonsiliasi menyimpan keputusan sebagai entri audit terpisah, kemudian menutup status awal; retry setelah keputusan tercatat menggunakan keputusan yang sama untuk menghindari entri rekonsiliasi duplikat. Keputusan `applied`/`not_applied`/`manual` adalah catatan hasil pemeriksaan Admin, bukan verifikasi otomatis terhadap isi sheet. Periksa kondisi entitas secara manual sebelum memilih keputusan. Audit log tidak dapat dianggap sebagai tamper-proof terhadap pemilik spreadsheet. Uji integrasi dan runtime Apps Script tetap wajib dilakukan pada salinan spreadsheet sebelum deployment.
+Google Sheets tidak menyediakan transaksi multi-sheet. Jika penulisan entitas atau penutupan audit gagal, status `PENDING_*` dapat memerlukan pemeriksaan Admin. UI rekonsiliasi menyimpan keputusan sebagai entri audit terpisah, kemudian menutup status awal; retry setelah keputusan tercatat menggunakan keputusan yang sama untuk menghindari entri rekonsiliasi duplikat. Keputusan `applied`/`not_applied`/`manual` adalah catatan hasil pemeriksaan Admin, bukan verifikasi otomatis terhadap isi sheet. Periksa kondisi entitas secara manual sebelum memilih keputusan. Audit log tidak dapat dianggap sebagai tamper-proof terhadap pemilik spreadsheet. Uji integrasi dan runtime Apps Script tetap wajib dilakukan pada salinan spreadsheet sebelum deployment. Pemeriksaan CI yang berstatus berhasil hanya mencakup guard statis dan simulasi terisolasi Node.js; itu bukan bukti bahwa SpreadsheetApp, LockService, sesi, izin, atau UI berjalan benar di Apps Script.
 
 
 ### Repositori TP dan indikator
@@ -74,3 +74,16 @@ Google Sheets tidak menyediakan transaksi multi-sheet. Google Sheets tidak menye
 - Guru dapat menghubungkan bundel soal ke TP dan indikator aktif. Referensi disimpan pada snapshot versi bundel.
 - Pemilihan referensi bersifat opsional untuk menjaga kompatibilitas bundel Reguler lama.
 - Rancangan tahap SOLO Tax tersedia pada `docs/solo-tax-integration-design.md`; editor dan rubrik SOLO Tax belum diaktifkan.
+
+
+## Gerbang kesiapan sebelum disalin atau diterapkan
+
+Status branch ini tetap **belum siap disalin ke sistem aktif**. Sebelum perubahan digunakan:
+1. Jalankan pemeriksaan CI terbaru dan tinjau hasilnya.
+2. Buat salinan spreadsheet tanpa data siswa nyata serta project/deployment Apps Script uji yang terisolasi.
+3. Cadangkan salinan uji, lalu jalankan migrasi fondasi versioning dan migrasi repositori sesuai urutan pada checklist.
+4. Selesaikan seluruh skenario migrasi, Admin/Guru/Siswa, audit tertunda, CRUD, snapshot, pembuatan asesmen, dan regresi.
+5. Tinjau izin spreadsheet/Drive dan konfigurasi deployment bersama administrator sekolah.
+6. Catat hasil uji dan keputusan rilis sebelum PR diubah dari Draft.
+
+Tidak ada migrasi spreadsheet atau deployment produksi yang dilakukan selama pengembangan branch ini.
