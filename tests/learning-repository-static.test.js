@@ -619,7 +619,15 @@ const routeAuthContext = {
   adminListPendingLearningAudits_: function () { return { authorized: true, role: 'admin' }; },
   adminReconcileLearningAudit_: function (payload, user) {
     return { authorized: true, payload: payload, actorRole: user.role, actorId: user.userId };
-  }
+  },
+  adminListLearningObjectives_: function () { return { authorized: true, role: 'admin' }; },
+  adminSaveLearningObjective_: function (payload) { return { authorized: true, actor: payload.currentUser.role }; },
+  adminSetLearningObjectiveActive_: function (payload) { return { authorized: true, actor: payload.currentUser.role }; },
+  adminListLearningIndicators_: function () { return { authorized: true, role: 'admin' }; },
+  adminSaveLearningIndicator_: function (payload) { return { authorized: true, actor: payload.currentUser.role }; },
+  adminSetLearningIndicatorActive_: function (payload) { return { authorized: true, actor: payload.currentUser.role }; },
+  listAvailableLearningObjectives_: function () { return [{ objectiveId: 'TP-1', active: true }]; },
+  listAvailableLearningIndicators_: function () { return [{ indicatorId: 'IND-1', active: true }]; }
 };
 vm.createContext(routeAuthContext);
 vm.runInContext(extractFunction('routeAction_', source), routeAuthContext);
@@ -636,6 +644,37 @@ vm.runInContext(extractFunction('routeAction_', source), routeAuthContext);
   }, /hanya dapat digunakan oleh administrator sekolah/,
   role + ' must not reconcile learning audit records');
 });
+const adminCrudActions = [
+  ['adminListLearningObjectives', {}],
+  ['adminSaveLearningObjective', { tpCode: 'TP-1', title: 'Tujuan', subject: 'Matematika' }],
+  ['adminSetLearningObjectiveActive', { objectiveId: 'TP-1', active: false }],
+  ['adminListLearningIndicators', { objectiveId: 'TP-1' }],
+  ['adminSaveLearningIndicator', { objectiveId: 'TP-1', indicatorCode: 'IND-1', description: 'Indikator' }],
+  ['adminSetLearningIndicatorActive', { indicatorId: 'IND-1', active: false }]
+];
+['teacher', 'student'].forEach(function (role) {
+  routeAuthContext.auth = { authenticated: true, user: { role: role, userId: role + '-2', email: role + '@example.test' } };
+  adminCrudActions.forEach(function (entry) {
+    assert.throws(function () { routeAuthContext.routeAction_(entry[0], entry[1]); },
+      /hanya dapat digunakan oleh administrator sekolah/,
+      role + ' must not invoke ' + entry[0]);
+  });
+});
+routeAuthContext.auth = { authenticated: true, user: { role: 'teacher', userId: 'teacher-1', email: 'teacher@example.test' } };
+assert.equal(routeAuthContext.routeAction_('listAvailableLearningObjectives', {}).length, 1,
+  'Teacher must be allowed to read available objectives');
+assert.equal(routeAuthContext.routeAction_('listAvailableLearningIndicators', { objectiveId: 'TP-1' }).length, 1,
+  'Teacher must be allowed to read available indicators');
+assert.throws(function () {
+  routeAuthContext.routeAction_('listAvailableLearningObjectives', {});
+}, /Repositori pembelajaran hanya dapat diakses/,
+'Student must not read the learning repository');
+routeAuthContext.auth = { authenticated: true, user: { role: 'admin', userId: 'admin-1', email: 'admin@example.test' } };
+adminCrudActions.forEach(function (entry) {
+  assert.equal(routeAuthContext.routeAction_(entry[0], entry[1]).authorized, true,
+    'Admin must be allowed to invoke ' + entry[0]);
+});
+
 routeAuthContext.auth = { authenticated: true, user: { role: 'admin', userId: 'admin-1', email: 'admin@example.test' } };
 assert.equal(routeAuthContext.routeAction_('adminListPendingLearningAudits', {}).authorized, true,
   'Admin must be able to list pending audit records');
