@@ -717,7 +717,7 @@ function createAssessment_(payload) {
       if(!current||String(current.latestVersionId)!==String(sourceVersion.versionId))throw new Error('Versi Bundel Soal berubah saat Asesmen dibuat. Silakan ulangi proses.');
     }
     const assessmentId=makeId_('ASM'),timestamp=currentTimestamp_(),classification=sourceVersion?String(sourceVersion.snapshot.classification||'REGULER'):'REGULER';
-    appendRow_('Assessments',{assessmentId:assessmentId,title:title,subject:String(payload.subject||''),className:String(payload.className||''),duration:Math.max(1,Math.min(300,Number(payload.duration)||60)),startAt:String(payload.startAt||''),endAt:String(payload.endAt||''),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),status:'draft',createdBy:String(payload.createdBy||''),createdAt:timestamp,updatedAt:timestamp,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification,archivedAt:'',archivedBy:''});
+    appendRow_('Assessments',{assessmentId:assessmentId,title:title,subject:String(sourceVersion?sourceVersion.snapshot.subject:(payload.subject||'')),className:String(payload.className||''),duration:Math.max(1,Math.min(300,Number(payload.duration)||60)),startAt:String(payload.startAt||''),endAt:String(payload.endAt||''),passageText:String(sourceVersion?sourceVersion.snapshot.passageText:(payload.passageText||'')),passageImageUrl:String(sourceVersion?sourceVersion.snapshot.passageImageUrl:(payload.passageImageUrl||'')),status:'draft',createdBy:String(payload.createdBy||''),createdAt:timestamp,updatedAt:timestamp,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification,archivedAt:'',archivedBy:''});
     questions.forEach(function(question,index){
       const type=String(question.type||'multiple_choice'),points=Number(question.points);
       appendRow_('Questions',{questionId:makeId_('Q'),assessmentId:assessmentId,order:index+1,type:type,text:String(question.text||''),points:points,optionsJson:JSON.stringify(question.options||[]),answerJson:JSON.stringify(question.answer===undefined?null:question.answer),rubric:String(question.rubric||''),pairsJson:JSON.stringify(question.pairs||''),imageUrl:String(question.imageUrl||''),optionImagesJson:JSON.stringify(question.optionImages||[]),subquestionsJson:JSON.stringify(question.subquestions||[]),subquestionImagesJson:JSON.stringify(question.subquestionImages||[]),rubricLevelsJson:JSON.stringify(question.rubricLevels||[]),passageText:String(question.passageText||''),passageImageUrl:String(question.passageImageUrl||''),sourceBundleVersionId:sourceVersion?sourceVersion.versionId:'',sourceQuestionKey:sourceVersion?String(question.questionId||question.id||('Q-'+(index+1))):''});
@@ -831,6 +831,37 @@ function folderHasNameInsideRoot_(folder, rootId, targetName, depth) {
   return false;
 }
 
+function objectReferencesAssessmentImage_(value, fileId, depth) {
+  if ((depth || 0) > 20 || value === null || value === undefined) return false;
+  if (typeof value === 'string') return assessmentImageFileId_(value) === String(fileId);
+  if (Array.isArray(value)) return value.some(function (item) { return objectReferencesAssessmentImage_(item, fileId, (depth || 0) + 1); });
+  if (typeof value === 'object') return Object.keys(value).some(function (key) { return objectReferencesAssessmentImage_(value[key], fileId, (depth || 0) + 1); });
+  return false;
+}
+
+/** Cegah penghapusan file yang masih dirujuk versi bundel atau Asesmen historis. */
+function isAssessmentImageReferenced_(fileId) {
+  const id = String(fileId);
+  if (listRows_('QuestionBundles').some(function (bundle) {
+    return assessmentImageFileId_(bundle.passageImageUrl) === id ||
+      objectReferencesAssessmentImage_(parseJson_(bundle.passagesJson, []), id, 0) ||
+      objectReferencesAssessmentImage_(parseJson_(bundle.questionsJson, []), id, 0);
+  })) return true;
+  if (listRows_('BundleVersions').some(function (version) {
+    return objectReferencesAssessmentImage_(parseJson_(version.snapshotJson, null), id, 0);
+  })) return true;
+  if (listRows_('Assessments').some(function (assessment) {
+    return assessmentImageFileId_(assessment.passageImageUrl) === id;
+  })) return true;
+  if (listRows_('Questions').some(function (question) {
+    return [question.imageUrl, question.passageImageUrl].some(function (url) { return assessmentImageFileId_(url) === id; }) ||
+      objectReferencesAssessmentImage_(parseJson_(question.optionImagesJson, []), id, 0) ||
+      objectReferencesAssessmentImage_(parseJson_(question.subquestionImagesJson, []), id, 0) ||
+      objectReferencesAssessmentImage_(parseJson_(question.pairsJson, []), id, 0);
+  })) return true;
+  return false;
+}
+
 function deleteAssessmentImage_(payload) {
   const fileId = requiredText_(payload.fileId, 'ID gambar', 200);
   const rootId = CONFIG.DRIVE_FOLDER_ID;
@@ -846,6 +877,9 @@ function deleteAssessmentImage_(payload) {
   }
   if (!found || !inAssessmentImageFolder) {
     throw new Error('Hanya gambar asesmen di folder gambar aplikasi yang dapat dihapus.');
+  }
+  if (isAssessmentImageReferenced_(fileId)) {
+    throw new Error('Gambar masih digunakan oleh Bundel Soal, versi historis, atau Asesmen. Gambar tidak dihapus.');
   }
   const user = payload.currentUser;
   const expectedDescription = 'Rumble Assessment owner: ' + String(user && user.email || '').trim().toLowerCase();
