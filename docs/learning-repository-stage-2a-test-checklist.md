@@ -11,6 +11,15 @@ Lakukan hanya pada salinan spreadsheet uji dan akun uji. Jangan gunakan data sis
 - [ ] Jalankan migrasi sekali lagi; hasil harus menyatakan `alreadyApplied: true`.
 - [ ] Pastikan baris lama pada `LearningObjectives` tidak berubah dan tidak ada sheet/row siswa yang dihapus.
 
+
+## Pemeriksaan preflight migrasi dan keselamatan data
+- [ ] Dengan salinan spreadsheet uji, buat kondisi header kosong pada salah satu sheet target; migrasi harus berhenti sebelum membuat sheet atau menambah kolom apa pun.
+- [ ] Uji header berisi sel kosong di antara header, nama header duplikat, dan header wajib yang hilang; pastikan hasil validasi sesuai desain (header wajib yang memang boleh ditambahkan hanya ditambahkan setelah seluruh preflight lolos).
+- [ ] Pastikan sheet SchemaMigrations juga memiliki struktur header valid sebelum migrasi menyentuh sheet target.
+- [ ] Setelah preflight gagal, bandingkan struktur spreadsheet uji dan pastikan tidak ada mutasi parsial.
+- [ ] Ulangi preflight dengan struktur valid; migrasi harus idempotent dan tidak mengubah baris data lama.
+- [ ] Catat bahwa pengujian statis Node.js tidak menjalankan Google Apps Script runtime; verifikasi SpreadsheetApp, LockService, autentikasi sesi, dan perilaku UI secara manual pada deployment uji.
+
 ## Admin CRUD
 - [ ] Admin membuat TP; periksa ID, kode uppercase, timestamps, dan audit CREATE.
 - [ ] Admin membuat TP kedua dengan kode sama dan mapel sama; harus ditolak.
