@@ -26,7 +26,9 @@ Buka Settings → Pages, pilih branch main dan folder /(root), lalu simpan. Sete
 
 ## Catatan integrasi dan keamanan
 Browser mungkin membatasi permintaan lintas-origin/redirect Apps Script. Gunakan tombol Uji koneksi; bila diblokir CORS, opsi paling stabil adalah menyajikan frontend dari Apps Script atau menambahkan API yang mendukung CORS.
-Operasi CRUD tidak lagi menjalankan `setupDatabase()` secara otomatis. Migrasi versioning dilakukan secara eksplisit melalui `migrateDatabaseV1_()` dan dicatat pada `SchemaMigrations`. Sheet `BundleVersions` menyimpan snapshot versi yang tidak boleh ditimpa; Asesmen baru yang dibuat dari bundel menyimpan `bundleId` dan `bundleVersionId`. Penghapusan Bundel/Asesmen pada backend versi ini diubah menjadi pengarsipan. SOLO Tax belum dapat dibuat melalui editor pada tahap fondasi ini.\n\nBackend ini kerangka awal, bukan sistem autentikasi produksi. Jangan mengandalkan pilihan peran frontend sebagai kontrol akses. Sebelum memakai data siswa nyata, tambahkan autentikasi terverifikasi dan pemeriksaan izin server di setiap aksi. Jangan membuka spreadsheet/foto jawaban untuk publik, jangan mengirim kunci jawaban ke browser siswa, serta tambahkan validasi jadwal, pencegahan percobaan ganda, audit dan pencadangan.
+Operasi CRUD tidak lagi menjalankan `setupDatabase()` secara otomatis. Migrasi versioning dilakukan secara eksplisit melalui `migrateDatabaseV1_()` dan dicatat pada `SchemaMigrations`. Sheet `BundleVersions` menyimpan snapshot versi yang tidak boleh ditimpa; Asesmen baru yang dibuat dari bundel menyimpan `bundleId` dan `bundleVersionId`. Penghapusan Bundel/Asesmen pada backend versi ini diubah menjadi pengarsipan. SOLO Tax belum dapat dibuat melalui editor pada tahap fondasi ini.
+
+Backend menerapkan autentikasi sesi dan pemeriksaan peran di server untuk aksi yang telah didaftarkan. Hal ini belum berarti aplikasi siap produksi. Sebelum memakai data siswa nyata, lakukan pengujian runtime dan integrasi, tinjau konfigurasi deployment serta izin spreadsheet/Drive, dan pastikan validasi jadwal, pencegahan percobaan ganda, audit, pencadangan, serta prosedur pemulihan telah diuji. Jangan membuka spreadsheet/foto jawaban untuk publik atau mengirim kunci jawaban ke browser siswa.
 
 ## API
 POST JSON, contoh: {"action":"health","payload":{}}.
@@ -47,7 +49,7 @@ Branch `feature/learning-repository-backend` menambahkan backend Admin untuk men
 
 ### Migrasi repositori
 
-Setelah meninjau kode dan mencadangkan spreadsheet uji, jalankan fungsi `migrateLearningRepositoryV1_()` secara manual dari editor Apps Script. Fungsi ini terpisah dari `setupDatabase()` dan `migrateDatabaseV1_()`, membuat sheet yang belum ada, menambahkan header yang kurang tanpa menghapus baris, lalu mencatat `LEARNING_REPOSITORY_V1` pada `SchemaMigrations`. Migrasi ini BELUM dijalankan pada spreadsheet mana pun oleh proses pengembangan.
+Setelah meninjau kode dan mencadangkan spreadsheet uji, pastikan migrasi fondasi `BUNDLE_VERSIONING_V1` telah berstatus `completed`. Fungsi `migrateLearningRepositoryV1_()` kini memeriksa prasyarat tersebut sebelum mengubah sheet apa pun. Jika prasyarat belum terpenuhi, migrasi repositori akan dihentikan. Setelah lolos, fungsi membuat sheet yang belum ada, menambahkan header yang kurang tanpa menghapus baris, lalu mencatat `LEARNING_REPOSITORY_V1` pada `SchemaMigrations`. Migrasi ini terpisah dari `setupDatabase()` dan `migrateDatabaseV1_()`; jalankan secara manual hanya pada spreadsheet uji yang telah dicadangkan. Migrasi ini BELUM dijalankan pada spreadsheet mana pun oleh proses pengembangan.
 
 ### API backend Tahap 2A
 
