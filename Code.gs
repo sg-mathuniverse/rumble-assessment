@@ -164,7 +164,7 @@ function routeAction_(action, payload) {
     studentId: user.role === 'student' ? String(user.userId || '') : String(payload.studentId || ''),
     createdBy: user.email
   });
-  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive'];
+  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive'];
   if (adminOnly.indexOf(action) >= 0 && user.role !== 'admin') {
     throw new Error('Fitur ini hanya dapat digunakan oleh administrator sekolah.');
   }
@@ -246,6 +246,14 @@ function routeAction_(action, payload) {
     adminImportStudents: function () { return adminImportStudents_(trusted); },
     adminResetStudentPassword: function () { return adminResetStudentPassword_(trusted); },
     adminSetStudentActive: function () { return adminSetStudentActive_(trusted); },
+    adminListLearningObjectives: function () { return adminListLearningObjectives_(); },
+    adminSaveLearningObjective: function () { return adminSaveLearningObjective_(trusted); },
+    adminSetLearningObjectiveActive: function () { return adminSetLearningObjectiveActive_(trusted); },
+    adminListLearningIndicators: function () { return adminListLearningIndicators_(trusted); },
+    adminSaveLearningIndicator: function () { return adminSaveLearningIndicator_(trusted); },
+    adminSetLearningIndicatorActive: function () { return adminSetLearningIndicatorActive_(trusted); },
+    listAvailableLearningObjectives: function () { return listAvailableLearningObjectives_(); },
+    listAvailableLearningIndicators: function () { return listAvailableLearningIndicators_(trusted); },
     listStudents: function () {
       return listRows_('Users').filter(function (item) {
         return String(item.role).toLowerCase() === 'student' &&
@@ -2081,4 +2089,222 @@ function getBundleVersion_(payload){
 }
 function assertBundleVersioningReady_(){
   if(!listRows_('SchemaMigrations').some(function(r){return String(r.migrationId)==='BUNDLE_VERSIONING_V1'&&String(r.status)==='completed';}))throw new Error('Fondasi versioning belum dimigrasikan. Administrator harus menjalankan migrateDatabaseV1_() terlebih dahulu.');
+}
+
+/* -------------------------------------------------------------------------
+ * Repositori Pembelajaran — CRUD TP dan indikator (LEARNING_REPOSITORY_V1)
+ * Migrasi terpisah dari setupDatabase() agar tidak mengubah tabel lain.
+ * ------------------------------------------------------------------------- */
+const LEARNING_REPOSITORY_TABLES_ = {
+  LearningObjectives: ['objectiveId','tpCode','title','subject','description','createdBy','createdAt','updatedAt','active'],
+  LearningIndicators: ['indicatorId','objectiveId','indicatorCode','description','active','createdAt','updatedAt'],
+  AdminAuditLog: ['logId','actorUserId','actorEmail','action','entityType','entityId','beforeJson','afterJson','createdAt']
+};
+
+function migrateLearningRepositoryV1_() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const migrationId = 'LEARNING_REPOSITORY_V1';
+    const migrationSheet = getSpreadsheet_().getSheetByName('SchemaMigrations');
+    if (!migrationSheet) throw new Error('Sheet SchemaMigrations belum tersedia. Selesaikan migrasi fondasi versioning terlebih dahulu.');
+    if (listRows_('SchemaMigrations').some(function (r) {
+      return String(r.migrationId) === migrationId && String(r.status) === 'completed';
+    })) return { success: true, alreadyApplied: true, migrationId: migrationId };
+
+    const changes = {};
+    Object.keys(LEARNING_REPOSITORY_TABLES_).forEach(function (tableName) {
+      const spreadsheet = getSpreadsheet_();
+      let sheet = spreadsheet.getSheetByName(tableName);
+      if (!sheet) {
+        sheet = spreadsheet.insertSheet(tableName);
+        const headers = LEARNING_REPOSITORY_TABLES_[tableName];
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        sheet.setFrozenRows(1);
+        changes[tableName] = { created: true, addedHeaders: [] };
+        return;
+      }
+      if (sheet.getLastRow() === 0 || sheet.getLastColumn() === 0) {
+        const headers = LEARNING_REPOSITORY_TABLES_[tableName];
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        sheet.setFrozenRows(1);
+        changes[tableName] = { created: false, addedHeaders: headers.slice() };
+        return;
+      }
+      const current = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+      const added = [];
+      LEARNING_REPOSITORY_TABLES_[tableName].forEach(function (header) {
+        if (current.indexOf(header) < 0) {
+          sheet.getRange(1, sheet.getLastColumn() + 1).setValue(header);
+          current.push(header);
+          added.push(header);
+        }
+      });
+      changes[tableName] = { created: false, addedHeaders: added };
+    });
+    appendRow_('SchemaMigrations', {
+      migrationId: migrationId, version: 1, appliedAt: currentTimestamp_(),
+      appliedBy: Session.getActiveUser().getEmail() || 'Apps Script editor',
+      status: 'completed', detailsJson: JSON.stringify(changes)
+    });
+    return { success: true, migrationId: migrationId, changes: changes };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function learningRepositoryAssertReady_() {
+  Object.keys(LEARNING_REPOSITORY_TABLES_).forEach(function (name) {
+    const sheet = getSpreadsheet_().getSheetByName(name);
+    if (!sheet) throw new Error('Repositori Pembelajaran belum dimigrasikan. Jalankan migrateLearningRepositoryV1_() secara eksplisit.');
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+    LEARNING_REPOSITORY_TABLES_[name].forEach(function (h) {
+      if (headers.indexOf(h) < 0) throw new Error('Kolom ' + h + ' belum tersedia pada ' + name + '. Jalankan migrasi repositori.');
+    });
+  });
+}
+function learningActive_(value) {
+  return value === true || String(value).toLowerCase() === 'true' || String(value) === '1';
+}
+function learningAudit_(user, action, entityType, entityId, beforeValue, afterValue) {
+  appendRow_('AdminAuditLog', {
+    logId: makeId_('AUD'), actorUserId: String(user.userId || ''),
+    actorEmail: String(user.email || ''), action: action, entityType: entityType,
+    entityId: String(entityId), beforeJson: beforeValue == null ? '' : JSON.stringify(beforeValue),
+    afterJson: afterValue == null ? '' : JSON.stringify(afterValue), createdAt: currentTimestamp_()
+  });
+}
+function learningObjectivePublic_(row) {
+  return {
+    objectiveId: String(row.objectiveId || ''), tpCode: String(row.tpCode || ''),
+    title: String(row.title || ''), subject: String(row.subject || ''),
+    description: String(row.description || ''), active: learningActive_(row.active),
+    createdAt: String(row.createdAt || ''), updatedAt: String(row.updatedAt || '')
+  };
+}
+function learningIndicatorPublic_(row) {
+  return {
+    indicatorId: String(row.indicatorId || ''), objectiveId: String(row.objectiveId || ''),
+    indicatorCode: String(row.indicatorCode || ''), description: String(row.description || ''),
+    active: learningActive_(row.active), createdAt: String(row.createdAt || ''),
+    updatedAt: String(row.updatedAt || '')
+  };
+}
+function adminListLearningObjectives_() {
+  learningRepositoryAssertReady_();
+  return listRows_('LearningObjectives').map(learningObjectivePublic_);
+}
+function listAvailableLearningObjectives_() {
+  learningRepositoryAssertReady_();
+  return listRows_('LearningObjectives').filter(function (r) { return learningActive_(r.active); }).map(learningObjectivePublic_);
+}
+function adminSaveLearningObjective_(payload) {
+  learningRepositoryAssertReady_();
+  const code = requiredText_(payload.tpCode, 'Kode TP', 60).toUpperCase();
+  const title = requiredText_(payload.title, 'Judul TP', 240);
+  const subject = requiredText_(payload.subject, 'Mata pelajaran', 120);
+  const description = String(payload.description || '').trim();
+  if (description.length > 3000) throw new Error('Deskripsi TP terlalu panjang.');
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const rows = listRows_('LearningObjectives');
+    const id = String(payload.objectiveId || '').trim();
+    const before = id ? rows.find(function (r) { return String(r.objectiveId) === id; }) : null;
+    if (id && !before) throw new Error('TP tidak ditemukan.');
+    const duplicate = rows.some(function (r) {
+      return String(r.objectiveId) !== id &&
+        String(r.tpCode).trim().toUpperCase() === code &&
+        String(r.subject).trim().toLowerCase() === subject.toLowerCase();
+    });
+    if (duplicate) throw new Error('Kode TP sudah digunakan pada mata pelajaran tersebut.');
+    const now = currentTimestamp_();
+    const after = {
+      objectiveId: id || makeId_('TP'), tpCode: code, title: title, subject: subject,
+      description: description, createdBy: before ? String(before.createdBy || '') : String(payload.currentUser.email || ''),
+      createdAt: before ? String(before.createdAt || now) : now, updatedAt: now,
+      active: before ? learningActive_(before.active) : true
+    };
+    if (before) updateRowByKey_('LearningObjectives', 'objectiveId', id, after);
+    else appendRow_('LearningObjectives', after);
+    learningAudit_(payload.currentUser, before ? 'UPDATE' : 'CREATE', 'LearningObjective', after.objectiveId, before || null, after);
+    return learningObjectivePublic_(after);
+  } finally { lock.releaseLock(); }
+}
+function adminSetLearningObjectiveActive_(payload) {
+  learningRepositoryAssertReady_();
+  const id = requiredText_(payload.objectiveId, 'ID TP', 100);
+  if (typeof payload.active !== 'boolean') throw new Error('Status aktif harus berupa boolean.');
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const before = listRows_('LearningObjectives').find(function (r) { return String(r.objectiveId) === id; });
+    if (!before) throw new Error('TP tidak ditemukan.');
+    const after = Object.assign({}, before, { active: payload.active, updatedAt: currentTimestamp_() });
+    updateRowByKey_('LearningObjectives', 'objectiveId', id, after);
+    learningAudit_(payload.currentUser, payload.active ? 'ACTIVATE' : 'DEACTIVATE', 'LearningObjective', id, before, after);
+    return learningObjectivePublic_(after);
+  } finally { lock.releaseLock(); }
+}
+function adminListLearningIndicators_(payload) {
+  learningRepositoryAssertReady_();
+  const objectiveId = String(payload.objectiveId || '').trim();
+  return listRows_('LearningIndicators').filter(function (r) {
+    return !objectiveId || String(r.objectiveId) === objectiveId;
+  }).map(learningIndicatorPublic_);
+}
+function listAvailableLearningIndicators_(payload) {
+  learningRepositoryAssertReady_();
+  const objectiveId = requiredText_(payload.objectiveId, 'ID TP', 100);
+  const objective = listRows_('LearningObjectives').find(function (r) {
+    return String(r.objectiveId) === objectiveId && learningActive_(r.active);
+  });
+  if (!objective) return [];
+  return listRows_('LearningIndicators').filter(function (r) {
+    return String(r.objectiveId) === objectiveId && learningActive_(r.active);
+  }).map(learningIndicatorPublic_);
+}
+function adminSaveLearningIndicator_(payload) {
+  learningRepositoryAssertReady_();
+  const objectiveId = requiredText_(payload.objectiveId, 'TP', 100);
+  const code = requiredText_(payload.indicatorCode, 'Kode indikator', 80).toUpperCase();
+  const description = requiredText_(payload.description, 'Deskripsi indikator', 2000);
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const objective = listRows_('LearningObjectives').find(function (r) {
+      return String(r.objectiveId) === objectiveId && learningActive_(r.active);
+    });
+    if (!objective) throw new Error('Indikator harus terhubung ke TP yang aktif.');
+    const rows = listRows_('LearningIndicators');
+    const id = String(payload.indicatorId || '').trim();
+    const before = id ? rows.find(function (r) { return String(r.indicatorId) === id; }) : null;
+    if (id && !before) throw new Error('Indikator tidak ditemukan.');
+    const duplicate = rows.some(function (r) {
+      return String(r.indicatorId) !== id && String(r.objectiveId) === objectiveId &&
+        String(r.indicatorCode).trim().toUpperCase() === code;
+    });
+    if (duplicate) throw new Error('Kode indikator sudah digunakan pada TP tersebut.');
+    const now = currentTimestamp_();
+    const after = {
+      indicatorId: id || makeId_('IND'), objectiveId: objectiveId, indicatorCode: code,
+      description: description, active: before ? learningActive_(before.active) : true,
+      createdAt: before ? String(before.createdAt || now) : now, updatedAt: now
+    };
+    if (before) updateRowByKey_('LearningIndicators', 'indicatorId', id, after);
+    else appendRow_('LearningIndicators', after);
+    learningAudit_(payload.currentUser, before ? 'UPDATE' : 'CREATE', 'LearningIndicator', after.indicatorId, before || null, after);
+    return learningIndicatorPublic_(after);
+  } finally { lock.releaseLock(); }
+}
+function adminSetLearningIndicatorActive_(payload) {
+  learningRepositoryAssertReady_();
+  const id = requiredText_(payload.indicatorId, 'ID indikator', 100);
+  if (typeof payload.active !== 'boolean') throw new Error('Status aktif harus berupa boolean.');
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const before = listRows_('LearningIndicators').find(function (r) { return String(r.indicatorId) === id; });
+    if (!before) throw new Error('Indikator tidak ditemukan.');
+    const after = Object.assign({}, before, { active: payload.active, updatedAt: currentTimestamp_() });
+    updateRowByKey_('LearningIndicators', 'indicatorId', id, after);
+    learningAudit_(payload.currentUser, payload.active ? 'ACTIVATE' : 'DEACTIVATE', 'LearningIndicator', id, before, after);
+    return learningIndicatorPublic_(after);
+  } finally { lock.releaseLock(); }
 }
