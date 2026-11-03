@@ -195,6 +195,71 @@ routeContext.testRole = 'admin';
 assert.deepEqual(Array.from(routeContext.routeAction_('adminListPendingLearningAudits', { sessionToken: 'valid-session' })), ['admin-only-data'], 'Admin may list pending audit records');
 assert.equal(routeContext.routeAction_('adminReconcileLearningAudit', { sessionToken: 'valid-session', logId: 'AUD-1' }).action, 'RECONCILED_APPLIED', 'Admin may reconcile audit records');
 
+function extractFunction(name, sourceText) {
+  const start = sourceText.indexOf('function ' + name + '(');
+  assert.notEqual(start, -1, 'Missing function for isolated test: ' + name);
+  const next = sourceText.indexOf('\\nfunction ', start + 1);
+  return sourceText.slice(start, next < 0 ? sourceText.length : next);
+}
+const crudContext = {
+  rows: {
+    LearningObjectives: [
+      { objectiveId: 'TP-1', tpCode: 'TP01', title: 'TP awal', subject: 'Matematika', description: '', active: true, createdAt: 'old', updatedAt: 'old', createdBy: 'admin' }
+    ],
+    LearningIndicators: [
+      { indicatorId: 'IND-1', objectiveId: 'TP-1', indicatorCode: 'IND01', description: 'Indikator awal', active: true, createdAt: 'old', updatedAt: 'old' }
+    ]
+  },
+  learningRepositoryAssertReady_: function () {},
+  requiredText_: function (value, label, max) {
+    const result = String(value || '').trim();
+    if (!result) throw new Error(label + ' wajib diisi.');
+    if (result.length > max) throw new Error(label + ' terlalu panjang.');
+    return result;
+  },
+  LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () {} }; } },
+  listRows_: function (name) { return crudContext.rows[name].map(function (row) { return Object.assign({}, row); }); },
+  appendRow_: function (name, row) { crudContext.rows[name].push(Object.assign({}, row)); },
+  updateRowByKey_: function (name, key, id, fields) {
+    const row = crudContext.rows[name].find(function (item) { return String(item[key]) === String(id); });
+    if (!row) throw new Error('not found');
+    Object.assign(row, fields);
+  },
+  learningAuditedWrite_: function (_user, _action, _type, _id, _before, _after, writeFn) { writeFn(); },
+  currentTimestamp_: function () { return '2026-11-03T00:00:00.000Z'; },
+  makeId_: function (prefix) { return prefix + '-NEW'; },
+  learningActive_: function (value) { return value === true || String(value).toLowerCase() === 'true' || String(value) === '1'; },
+  learningObjectivePublic_: function (row) { return Object.assign({}, row); },
+  learningIndicatorPublic_: function (row) { return Object.assign({}, row); }
+};
+vm.createContext(crudContext);
+for (const name of ['adminSaveLearningObjective_', 'adminSetLearningObjectiveActive_', 'adminSaveLearningIndicator_', 'adminSetLearningIndicatorActive_']) {
+  vm.runInContext(extractFunction(name, source), crudContext);
+}
+const currentUser = { userId: 'admin-1', email: 'admin@example.test' };
+assert.throws(function () {
+  crudContext.adminSaveLearningObjective_({ tpCode: 'tp01', title: 'TP duplikat', subject: 'Matematika', currentUser: currentUser });
+}, /Kode TP sudah digunakan/, 'Duplicate objective code in the same subject must be rejected');
+assert.throws(function () {
+  crudContext.adminSaveLearningObjective_({ tpCode: 'TP01', title: 'TP mapel lain', subject: 'IPA', currentUser: currentUser });
+}, /Kode TP sudah digunakan/, 'Case-normalized duplicate objective code is rejected only for matching subject');
+const otherSubject = crudContext.adminSaveLearningObjective_({ tpCode: 'tp01', title: 'TP IPA', subject: 'IPA', currentUser: currentUser });
+assert.equal(otherSubject.tpCode, 'TP01', 'Objective codes must be normalized to uppercase');
+assert.throws(function () {
+  crudContext.adminSaveLearningIndicator_({ objectiveId: 'TP-NONACTIVE', indicatorCode: 'I02', description: 'x', currentUser: currentUser });
+}, /TP yang aktif/, 'Indicator must reference an active objective');
+assert.throws(function () {
+  crudContext.adminSaveLearningIndicator_({ objectiveId: 'TP-1', indicatorCode: 'ind01', description: 'Duplikat', currentUser: currentUser });
+}, /Kode indikator sudah digunakan/, 'Duplicate indicator code within the same objective must be rejected');
+const newIndicator = crudContext.adminSaveLearningIndicator_({ objectiveId: 'TP-1', indicatorCode: 'ind02', description: 'Indikator baru', currentUser: currentUser });
+assert.equal(newIndicator.indicatorCode, 'IND02', 'Indicator code must be normalized to uppercase');
+crudContext.adminSetLearningIndicatorActive_({ indicatorId: newIndicator.indicatorId, active: false, currentUser: currentUser });
+assert.equal(crudContext.rows.LearningIndicators.find(function (row) { return row.indicatorId === newIndicator.indicatorId; }).active, false, 'Indicator deactivation must be persisted');
+crudContext.adminSetLearningObjectiveActive_({ objectiveId: 'TP-1', active: false, currentUser: currentUser });
+assert.equal(crudContext.rows.LearningObjectives.find(function (row) { return row.objectiveId === 'TP-1'; }).active, false, 'Objective deactivation must be persisted');
+
+
+
 
 
 console.log('PASS: learning repository static guard tests');
