@@ -64,4 +64,18 @@ assert.match(source, /validateBundleLearningReference_\(snapshot\)/, 'Server mus
 assert.match(source, /learningObjectiveId:String\(payload\.learningObjectiveId/, 'Version snapshot must persist objective ID');
 assert.match(source, /learningIndicatorId:String\(payload\.learningIndicatorId/, 'Version snapshot must persist indicator ID');
 
+
+const assessmentCreation = bodyOf('createAssessment_', 'getAssessment_');
+assert.match(assessmentCreation, /sourceVersion=getBundleVersion_/, 'Assessment creation must resolve a concrete bundle version');
+assert.match(assessmentCreation, /questions=sourceVersion\.snapshot\.questions/, 'Assessment questions must come from the immutable version snapshot');
+assert.match(assessmentCreation, /current\.latestVersionId\)!==String\(sourceVersion\.versionId\)/, 'Assessment creation must detect a bundle version changed during creation');
+assert.match(assessmentCreation, /bundleVersionId:sourceVersion\?sourceVersion\.versionId:' '/, 'Assessment must retain its source version reference');
+assert.match(assessmentCreation, /sourceBundleVersionId:sourceVersion\?sourceVersion\.versionId:' '/, 'Copied questions must retain their source version reference');
+const bundleRead = bodyOf('getQuestionBundle_', 'createAssessment_');
+assert.match(bundleRead, /getBundleVersion_\(\{versionId:bundle\.latestVersionId\}\)/, 'Opening a bundle must resolve the latest immutable version');
+assert.match(bundleRead, /learningObjectiveId:String\(snapshot\.learningObjectiveId/, 'Bundle read must return the objective from its snapshot');
+assert.match(bundleRead, /learningIndicatorId:String\(snapshot\.learningIndicatorId/, 'Bundle read must return the indicator from its snapshot');
+assert.match(source, /if \(classification === 'SOLO_TAX'\) throw new Error/, 'SOLO Tax creation must remain disabled until its editor is ready');
+assert.match(source, /const teacherOnly = \[/, 'Teacher-only actions must be explicitly registered');
+
 console.log('PASS: learning repository static guard tests');
