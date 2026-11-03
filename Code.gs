@@ -534,7 +534,8 @@ function saveQuestionBundle_(payload) {
     if (['REGULER','SOLO_TAX'].indexOf(classification)<0) throw new Error('Klasifikasi bundel harus REGULER atau SOLO_TAX.');
     if (classification === 'SOLO_TAX') throw new Error('Pembuatan Bundel SOLO Tax belum diaktifkan. Gunakan editor SOLO Tax setelah tahap pengembangan berikutnya selesai.');
     const now=currentTimestamp_();
-    const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
+    const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),learningObjectiveId:String(payload.learningObjectiveId||'').trim(),learningIndicatorId:String(payload.learningIndicatorId||'').trim(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
+    validateBundleLearningReference_(snapshot);
     validateBundleSnapshot_(snapshot);
     const snapshotJson=JSON.stringify(snapshot);
     let latest=null;
@@ -702,7 +703,7 @@ function getQuestionBundle_(payload) {
   if(payload.versionId||payload.versionNumber!==undefined)version=getBundleVersion_({versionId:payload.versionId,bundleId:bundleId,versionNumber:payload.versionNumber});
   else if(bundle.latestVersionId)version=getBundleVersion_({versionId:bundle.latestVersionId});
   const snapshot=version?version.snapshot:bundleSnapshotFromRecord_(bundle,bundle.classification||'REGULER');
-  return {bundle:{bundleId:bundle.bundleId,title:snapshot.title,subject:snapshot.subject,description:snapshot.description,tpCode:String(snapshot.tpCode||''),passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passages:snapshot.passages||[],status:bundle.status,visibility:String(bundle.visibility||'shared').toLowerCase(),isOwner:isOwner,classification:String(snapshot.classification||bundle.classification||'REGULER'),versionId:version?version.versionId:String(bundle.latestVersionId||''),versionNumber:version?version.versionNumber:Number(bundle.latestVersionNumber||0)},questions:snapshot.questions||[]};
+  return {bundle:{bundleId:bundle.bundleId,title:snapshot.title,subject:snapshot.subject,description:snapshot.description,tpCode:String(snapshot.tpCode||''),learningObjectiveId:String(snapshot.learningObjectiveId||''),learningIndicatorId:String(snapshot.learningIndicatorId||''),passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passages:snapshot.passages||[],status:bundle.status,visibility:String(bundle.visibility||'shared').toLowerCase(),isOwner:isOwner,classification:String(snapshot.classification||bundle.classification||'REGULER'),versionId:version?version.versionId:String(bundle.latestVersionId||''),versionNumber:version?version.versionNumber:Number(bundle.latestVersionNumber||0)},questions:snapshot.questions||[]};
 }
 function createAssessment_(payload) {
   const title=requiredText_(payload.title,'Judul',180);
@@ -2102,7 +2103,29 @@ function updateRowByKey_(tableName, keyHeader, keyValue, fields) {
   rowRange.setValues([updatedRow]);
 }
 function bundleSnapshotFromRecord_(bundle,classification){
-  return {schemaVersion:1,bundleId:String(bundle.bundleId),classification:String(classification||'REGULER').toUpperCase(),title:String(bundle.title||''),subject:String(bundle.subject||''),description:String(bundle.description||''),tpCode:String(bundle.tpCode||''),passageText:String(bundle.passageText||''),passageImageUrl:String(bundle.passageImageUrl||''),passages:parseJson_(bundle.passagesJson,[]),questions:parseJson_(bundle.questionsJson,[])};
+  return {schemaVersion:1,bundleId:String(bundle.bundleId),classification:String(classification||'REGULER').toUpperCase(),title:String(bundle.title||''),subject:String(bundle.subject||''),description:String(bundle.description||''),tpCode:String(bundle.tpCode||''),learningObjectiveId:String(bundle.learningObjectiveId||''),learningIndicatorId:String(bundle.learningIndicatorId||''),passageText:String(bundle.passageText||''),passageImageUrl:String(bundle.passageImageUrl||''),passages:parseJson_(bundle.passagesJson,[]),questions:parseJson_(bundle.questionsJson,[])};
+}
+function validateBundleLearningReference_(snapshot) {
+  const objectiveId = String(snapshot.learningObjectiveId || '').trim();
+  const indicatorId = String(snapshot.learningIndicatorId || '').trim();
+  if (!objectiveId && !indicatorId) return true;
+  if (!objectiveId) throw new Error('Pilih tujuan pembelajaran sebelum memilih indikator.');
+  learningRepositoryAssertReady_();
+  const objective = listRows_('LearningObjectives').find(function (row) {
+    return String(row.objectiveId) === objectiveId && learningActive_(row.active);
+  });
+  if (!objective) throw new Error('Tujuan pembelajaran yang dipilih tidak tersedia atau tidak aktif.');
+  if (String(objective.subject || '').trim().toLowerCase() !== String(snapshot.subject || '').trim().toLowerCase()) {
+    throw new Error('Mata pelajaran bundel harus sama dengan mata pelajaran tujuan pembelajaran.');
+  }
+  if (indicatorId) {
+    const indicator = listRows_('LearningIndicators').find(function (row) {
+      return String(row.indicatorId) === indicatorId &&
+        String(row.objectiveId) === objectiveId && learningActive_(row.active);
+    });
+    if (!indicator) throw new Error('Indikator tidak aktif atau tidak terhubung dengan tujuan pembelajaran yang dipilih.');
+  }
+  return true;
 }
 function validateBundleSnapshot_(snapshot){
   if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot))throw new Error('Snapshot bundel tidak valid.');
