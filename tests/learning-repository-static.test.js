@@ -1276,6 +1276,10 @@ const dominantVerificationContext = {
       attemptId: 'ATT-SOLO', eventType: 'SOLO_INDICATOR_VERIFICATION',
       eventAt: '2026-11-04T00:00:00Z',
       detailsJson: JSON.stringify({ results: [{ indicatorId: 'IND-A', percentage: 90, category: 'exceeds', evidence: 'Siswa menghubungkan konsep.' }] })
+    }, {
+      attemptId: 'ATT-SOLO', eventType: 'AI_SOLO_SCORING_RECOMMENDATION',
+      eventAt: '2026-11-03T23:59:00Z',
+      detailsJson: JSON.stringify({ provider: 'TOKENPORTAL', model: 'model-test', promptVersion: 2, dominantRecommendation: { level: 'RELATIONAL', evidenceSummary: 'Jawaban mengintegrasikan dua konsep secara konsisten.', questionEvidence: [{ questionId: 'SQ-1', evidence: 'Siswa menghubungkan konsep A dan B.' }] } })
     }];
     return [];
   },
@@ -1288,11 +1292,6 @@ vm.createContext(dominantVerificationContext);
 vm.runInContext(extractFunction('saveSoloDominantVerification_', source), dominantVerificationContext);
 const dominantResult = dominantVerificationContext.saveSoloDominantVerification_({
   attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
-  aiProvider: 'TokenPortal', aiModel: 'model-test', promptVersion: 'solo-level-v1',
-  aiRecommendation: {
-    level: 'RELATIONAL', evidenceSummary: 'Jawaban mengintegrasikan dua konsep secara konsisten.',
-    questionEvidence: [{ questionId: 'SQ-1', evidence: 'Siswa menghubungkan konsep A dan B.' }]
-  },
   teacherLevel: 'RELATIONAL', teacherReason: ''
 });
 assert.equal(dominantResult.status, 'verified', 'Teacher can verify an AI-supported dominant SOLO level');
@@ -1301,8 +1300,6 @@ assert.equal(dominantVerificationContext.released, true, 'Dominant-level verific
 assert.throws(function () {
   dominantVerificationContext.saveSoloDominantVerification_({
     attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
-    aiProvider: 'TokenPortal', aiModel: 'model-test', promptVersion: 'solo-level-v1',
-    aiRecommendation: { level: 'RELATIONAL', evidenceSummary: 'Ringkasan bukti.', questionEvidence: [{ questionId: 'SQ-1', evidence: 'Bukti.' }] },
     teacherLevel: 'EXTENDED_ABSTRACT'
   });
 }, /Alasan perubahan level/, 'Teacher must explain a different final level from the AI recommendation');
