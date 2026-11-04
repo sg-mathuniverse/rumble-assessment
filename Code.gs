@@ -1918,6 +1918,8 @@ function requestSoloAiAssessment_(payload) {
         if (!input || seen[id]) throw new Error('Hasil AI memuat ID soal yang tidak valid atau berulang.');
         seen[id] = true;
         const enough = item.evidenceSufficient === true;
+        const reason = String(item.reason || '').trim();
+        if (!reason) throw new Error('AI harus menjelaskan alasan rekomendasi pada soal nomor ' + input.order + '.');
         const score = item.recommendedScore === null || item.recommendedScore === undefined ? null : Number(item.recommendedScore);
         if (enough && (!isFinite(score) || score < 1 || score > Number(input.maximumScore))) {
           throw new Error('Rekomendasi nilai AI di luar rentang untuk soal nomor ' + input.order + '.');
@@ -1941,7 +1943,7 @@ function requestSoloAiAssessment_(payload) {
         return {
           questionId: id, order: input.order,
           recommendedScore: enough ? score : null, maximumScore: Number(input.maximumScore),
-          reason: String(item.reason || '').slice(0, 2000),
+          reason: reason.slice(0, 2000),
           evidence: evidence.slice(0, 20),
           evidenceSufficient: enough,
           manualPhotoReviewRequired: input.hasPhotoAttachment,
@@ -1951,7 +1953,8 @@ function requestSoloAiAssessment_(payload) {
     } catch (error) {
       logAiUsage_('AI_SOLO_SCORING_FAILED', {
         provider: 'TOKENPORTAL', model: settings.model, promptId: prompt.promptId,
-        promptVersion: prompt.version, status: 'failed', error: String(error && error.message || error).slice(0, 500)
+        promptVersion: prompt.version, status: 'failed', usage: usage,
+        error: String(error && error.message || error).slice(0, 500)
       });
       throw error;
     }
