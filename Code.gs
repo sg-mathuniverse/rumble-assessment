@@ -1893,12 +1893,31 @@ function adminSaveAiSettings_(payload) {
   properties.setProperty(RUMBLE_AI_SETTINGS_KEY_, JSON.stringify(saved));
   return adminGetAiSettings_();
 }
+
+function aiTokensUsedToday_() {
+  const timezone = Session.getScriptTimeZone();
+  const today = Utilities.formatDate(new Date(), timezone, 'yyyy-MM-dd');
+  return listRows_('Events').filter(function (event) {
+    return String(event.eventType || '').indexOf('AI_') === 0 &&
+      Utilities.formatDate(new Date(event.eventAt), timezone, 'yyyy-MM-dd') === today;
+  }).reduce(function (total, event) {
+    const details = parseJson_(event.detailsJson, {});
+    return total + (Number(details.usage && details.usage.totalTokens) || 0);
+  }, 0);
+}
+
 function tokenPortalChatCompletion_(messages, model, maxTokens) {
   const properties = aiScriptProperties_();
   const apiKey = properties.getProperty(RUMBLE_AI_API_KEY_);
   if (!apiKey) throw new Error('API key TokenPortal belum dikonfigurasi oleh Admin.');
   const settings = aiSettings_();
   const selectedModel = requiredText_(model || settings.model, 'Model AI', 120);
+  let outputLimit = Math.max(128, Math.min(8000, Number(maxTokens) || settings.maxOutputTokens));
+  if (settings.dailyTokenLimit > 0) {
+    const remaining = settings.dailyTokenLimit - aiTokensUsedToday_();
+    if (remaining < 128) throw new Error('Batas token AI harian telah tercapai. Coba lagi setelah periode penggunaan berikutnya.');
+    outputLimit = Math.min(outputLimit, remaining);
+  }
   const response = UrlFetchApp.fetch(RUMBLE_AI_ENDPOINT_ + '/chat/completions', {
     method: 'post',
     contentType: 'application/json',
@@ -1906,7 +1925,7 @@ function tokenPortalChatCompletion_(messages, model, maxTokens) {
     payload: JSON.stringify({
       model: selectedModel,
       messages: messages,
-      max_tokens: Math.max(128, Math.min(8000, Number(maxTokens) || settings.maxOutputTokens)),
+      max_tokens: outputLimit,
       stream: false
     }),
     muteHttpExceptions: true
