@@ -1243,11 +1243,11 @@ assert.throws(function () {
   soloVerificationContext.saveSoloIndicatorVerification_({
     attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
     results: [
-      { indicatorId: 'IND-A', status: 'mastered', evidence: 'Bukti.' },
+      { indicatorId: 'IND-A', percentage: 90, evidence: 'Bukti.' },
       { indicatorId: 'IND-B', percentage: 101, evidence: 'Bukti.' }
     ]
   });
-}, /Persentase ketercapaian/, 'Verification status must be from the supported set');
+}, /Persentase ketercapaian/, 'Percentage above 100 must be rejected');
 
 
 const dominantVerificationContext = {
