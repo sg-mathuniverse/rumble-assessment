@@ -10,6 +10,9 @@ const vm = require('node:vm');
 const source = fs.readFileSync('Code.gs', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 assert.doesNotThrow(() => new vm.Script(source), 'Code.gs must be syntactically valid JavaScript');
+assert.match(source, /raw\.githubusercontent\.com\/sg-mathuniverse\/rumble-assessment\/[0-9a-f]{40}\/index\.html/, 'Apps Script frontend must be pinned to an immutable commit snapshot');
+assert.ok(html.includes('saveSoloDominantVerification'), 'Integration frontend must include the dominant SOLO verification action');
+assert.ok(html.includes('Level SOLO dominan'), 'Integration frontend must include the dominant SOLO verification UI');
 
 const appScriptStart = html.indexOf('<script>', html.indexOf('<body'));
 const appScriptEnd = html.indexOf('</script>', appScriptStart);
@@ -182,7 +185,42 @@ const bundleRead = bodyOf('getQuestionBundle_', 'createAssessment_');
 assert.match(bundleRead, /getBundleVersion_\(\{versionId:bundle\.latestVersionId\}\)/, 'Opening a bundle must resolve the latest immutable version');
 assert.match(bundleRead, /learningObjectiveId:String\(snapshot\.learningObjectiveId/, 'Bundle read must return the objective from its snapshot');
 assert.match(bundleRead, /learningIndicatorId:String\(snapshot\.learningIndicatorId/, 'Bundle read must return the indicator from its snapshot');
-assert.match(source, /if \(classification === 'SOLO_TAX'\) throw new Error/, 'SOLO Tax creation must remain disabled until its editor is ready');
+assert.match(source, /function validateSoloTaxQuestion_\(/, 'SOLO Tax bundles must use dedicated essay validation');
+assert.match(source, /SOLO Tax hanya mendukung tipe soal uraian/, 'SOLO Tax must reject non-essay question types');
+assert.match(source, /SOLO Tax hanya mengizinkan satu foto/, 'SOLO Tax must enforce one answer photo per main question');
+assert.match(source, /hasResponse && value < 1/, 'Submitted SOLO Tax answers must receive at least one point');
+assert.match(source, /!hasResponse && value !== 0/, 'Blank SOLO Tax answers must receive zero');
+assert.match(source, /function saveSoloIndicatorVerification_\(/, 'SOLO Tax indicator verification must be persisted by a dedicated server function');
+assert.match(source, /SOLO_INDICATOR_VERIFICATION_INVALIDATED/, 'Changing a score must invalidate prior indicator verification');
+assert.match(source, /assessment && String\(assessment\.classification \|\| ''\)\.toUpperCase\(\) === 'SOLO_TAX' && !canViewInternal \? \{\}/, 'Students must not receive per-question SOLO Tax scores');
+assert.match(source, /saveSoloIndicatorVerification: function \(\)/, 'Teacher route must expose the indicator verification action');
+assert.match(source, /function saveSoloDominantVerification_\(/, 'Dominant SOLO level must have a dedicated teacher verification endpoint');
+assert.match(source, /function requestSoloAiAssessment_\(/, 'AI scoring must run only through an explicit teacher request');
+assert.match(source, /if \(!settings\.scoringEnabled\)/, 'AI scoring must remain disabled unless enabled by Admin');
+assert.match(source, /hasPhotoAttachment: photos\.length > 0/, 'AI input may indicate a photo exists without sending the photo');
+assert.match(source, /AI_SOLO_SCORING_RECOMMENDATION/, 'AI scoring recommendations must be saved separately from final grades');
+assert.match(source, /AI_SOLO_SCORING_FAILED/, 'Failed AI scoring requests must be logged');
+assert.match(source, /recommendedScore: 0/, 'An entirely blank SOLO response must be assigned zero without relying on AI');
+assert.match(source, /manualPhotoReviewRequired: true/, 'Photo-only answers must be reserved for manual teacher review');
+assert.match(bodyOf('requestSoloAiAssessment_'), /if \(!deterministic\.length\) \{\s*const dominant = parsed\.dominantLevel;/, 'Dominant-level recommendation must be withheld when any question requires deterministic or manual review');
+assert.match(html, /function soloAiPanel\(/, 'Teacher reports must display AI scoring recommendations and evidence');
+assert.match(html, /requestSoloAiAssessment\(/, 'Teacher UI must provide an explicit action to request AI scoring');
+
+assert.match(source, /PropertiesService\.getScriptProperties\(\)/, 'AI credentials must be stored in server-side Script Properties');
+assert.match(source, /RUMBLE_AI_PROMPT_CONTENT_/, 'Prompt text must be stored separately from the prompt index to respect Script Properties value limits');
+assert.match(source, /requiredText_\(payload\.content, 'Isi prompt', 1200\)/, 'Each prompt version must stay within the bounded server property size');
+
+assert.match(source, /settings\.hasApiKey = !!aiScriptProperties_\(\)\.getProperty/, 'Admin settings may expose only whether an API key exists, never the key itself');
+assert.match(source, /Aktifkan prompt AI Penilaian yang sudah lulus uji simulasi/, 'AI scoring cannot be enabled without a tested active prompt');
+assert.match(source, /Aktifkan prompt AI Refleksi yang sudah lulus uji simulasi/, 'AI reflection cannot be enabled without a tested active prompt');
+assert.match(source, /prompt harus berhasil diuji menggunakan data simulasi/i, 'A prompt must pass simulation testing before activation');
+assert.match(source, /UJI COBA DENGAN DATA SIMULASI, BUKAN DATA SISWA NYATA/, 'Prompt testing must use simulated data only');
+
+assert.match(source, /aiEvidenceSummary: aiEvidence/, 'Dominant level audit must preserve the qualitative AI evidence summary');
+assert.match(source, /teacherReason: teacherReason/, 'Teacher overrides of the AI level must retain a reason');
+assert.match(source, /latestAnswer\.photos\.length >= 1/, 'Concurrent SOLO Tax photo uploads must recheck the saved photo list under lock');
+assert.match(source, /points: String\(assessment\.classification \|\| ''\)\.toUpperCase\(\) === 'SOLO_TAX' && !canIncludeAnswers \? undefined/, 'Students must not receive per-question SOLO Tax points in assessment details');
+assert.match(source, /rubricLevels: canViewInternal \? parseJson_\(question\.rubricLevelsJson, \[\]\) : \[\]/, 'Students must not receive internal SOLO rubrics from submitted attempt details');
 assert.match(source, /const teacherOnly = \[/, 'Teacher-only actions must be explicitly registered');
 
 const routeAction = bodyOf('routeAction_', 'assertAssessmentOwner_');
@@ -446,6 +484,48 @@ assert.equal(referenceContext.validateBundleLearningReference_({
   bundleId: 'BND-LEGACY', classification: 'REGULER', subject: 'Matematika',
   learningObjectiveId: '', learningIndicatorId: '', questions: [{ type: 'essay', points: 10 }]
 }), true, 'Legacy bundle without learning references must remain valid');
+
+const soloContext = {
+  soloTaxLevelPoints_: null,
+  requiredText_: function(value,label){const v=String(value||'').trim();if(!v)throw new Error(label+' wajib diisi.');return v;}
+};
+vm.createContext(soloContext);
+vm.runInContext(extractFunction('soloTaxLevelPoints_', source), soloContext);
+vm.runInContext(extractFunction('validateSoloTaxQuestion_', source), soloContext);
+vm.runInContext(extractFunction('validateBundleSnapshot_', source), soloContext);
+const validSoloQuestion = {
+  type: 'essay', text: 'Jelaskan hubungan konsep.',
+  soloLevel: 'RELATIONAL', points: 4,
+  subquestions: ['Jelaskan bagian pertama.', 'Hubungkan hasilnya.'],
+  answerGuide: 'Guru memeriksa hubungan antarkonsep.',
+  rubric: '0 = Tidak menjawab.\\n1 = Jawaban belum tepat.\\n4 = Mengintegrasikan konsep.',
+  rubricLevels: ['0 = Tidak menjawab.', '1 = Jawaban belum tepat.', '4 = Mengintegrasikan konsep.'],
+  learningIndicatorIds: ['IND-MATH']
+};
+assert.equal(soloContext.soloTaxLevelPoints_('MULTISTRUKTURAL'), 3, 'Multistruktural must map to 3 points');
+assert.equal(soloContext.soloTaxLevelPoints_('RELATIONAL'), 4, 'Relational must map to 4 points');
+assert.equal(soloContext.soloTaxLevelPoints_('EXTENDED_ABSTRACT'), 5, 'Extended Abstract must map to 5 points');
+assert.equal(soloContext.validateSoloTaxQuestion_(validSoloQuestion, 0), true, 'Complete SOLO essay question must validate');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { type: 'multiple_choice' }), 0); }, /hanya mendukung tipe soal uraian/, 'SOLO Tax must reject multiple choice');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { points: 5 }), 0); }, /Nilai maksimal/, 'SOLO points must match selected level');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { subquestions: [] }), 0); }, /minimal satu subpertanyaan/, 'SOLO question must have at least one subquestion');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { learningIndicatorIds: [] }), 0); }, /minimal satu indikator/, 'SOLO question must map at least one TP indicator');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { answerGuide: '' }), 0); }, /Panduan jawaban wajib/, 'SOLO question must include an answer guide');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { rubricLevels: [] }), 0); }, /Rubrik SOLO Tax harus memiliki/, 'SOLO question must include editable rubric criteria');
+assert.equal(referenceContext.validateBundleLearningReference_({
+  bundleId: 'BND-SOLO', classification: 'SOLO_TAX', subject: 'Matematika',
+  learningObjectiveId: 'TP-MATH', questions: [Object.assign({}, validSoloQuestion, { learningIndicatorIds: ['IND-MATH'] })]
+}), true, 'SOLO question indicators must be validated against its TP');
+assert.throws(function () {
+  referenceContext.validateBundleLearningReference_({
+    bundleId: 'BND-SOLO', classification: 'SOLO_TAX', subject: 'Matematika',
+    learningObjectiveId: 'TP-MATH', questions: [Object.assign({}, validSoloQuestion, { learningIndicatorIds: ['IND-OTHER'] })]
+  });
+}, /tidak aktif atau tidak terhubung/, 'SOLO indicators from a different TP must be rejected');
+const soloSnapshot = { bundleId: 'BND-SOLO', classification: 'SOLO_TAX', questions: [validSoloQuestion] };
+assert.equal(soloContext.validateSoloTaxQuestion_(soloSnapshot.questions[0], 0), true, 'SOLO snapshot question remains valid');
+assert.equal(soloContext.validateBundleSnapshot_(soloSnapshot), true, 'SOLO bundle snapshots must validate the essay-only question structure');
+assert.throws(function(){soloContext.validateBundleSnapshot_(Object.assign({},soloSnapshot,{questions:[Object.assign({},validSoloQuestion,{type:'matching'})]}));},/hanya mendukung tipe soal uraian/,'SOLO bundle snapshots must reject non-essay questions');
 
 const frozenSnapshot = {
   bundleId: 'BND-1', classification: 'REGULER', subject: 'Matematika',
@@ -991,7 +1071,6 @@ assert.ok(submitSource.includes('if (allowedQuestionIds[questionId]) answers[que
 assert.ok(submitSource.includes("if (!questions.length) throw new Error('Asesmen tidak memiliki soal.')"),
   'Submission must reject assessments without questions');
 
-
 const saveAttemptSource = extractFunction('saveAttempt_', source);
 assert.ok(saveAttemptSource.indexOf("const currentAssessment = listRows_('Assessments')") > saveAttemptSource.indexOf('lock.waitLock'),
   'Draft save must reload assessment state after acquiring the lock');
@@ -1000,10 +1079,271 @@ assert.ok(saveAttemptSource.includes('const allowed = {}') &&
   'Draft save must discard answers for questions outside the assessment');
 assert.ok(saveAttemptSource.includes("if (!questions.length) throw new Error('Asesmen tidak memiliki soal.')"),
   'Draft save must reject an assessment with no questions');
-const submitAttemptSource = extractFunction('submitAttempt_', source);
-assert.ok(submitAttemptSource.includes('assertStudentAssessmentIdentity_(assessment, user)'),
+assert.ok(submitSource.includes('assertStudentAssessmentIdentity_(assessment, user)'),
   'Initial submission access check must use the assessment loaded before the lock');
-assert.ok(submitAttemptSource.indexOf("const currentAssessment = listRows_('Assessments')") > submitAttemptSource.indexOf('lock.waitLock'),
+assert.ok(submitSource.indexOf("const currentAssessment = listRows_('Assessments')") > submitSource.indexOf('lock.waitLock'),
   'Submission must reload assessment state after acquiring the lock');
+
+
+const gradingSource = extractFunction('gradeAttempt_', source);
+assert.ok(gradingSource.includes("status !== 'needs_review' && status !== 'graded'"),
+  'Manual grading must reject attempts that are not submitted for review or already graded');
+assert.ok(gradingSource.includes('lock.waitLock(30000)') && gradingSource.includes('lock.releaseLock()'),
+  'Manual grading must be protected by a Script Lock and release it in finally');
+assert.ok(gradingSource.includes('Skor setiap soal wajib diisi'),
+  'Manual grading must not accept a client-supplied total without per-question scores');
+assert.ok(gradingSource.includes('scoreKeys.length !== questions.length'),
+  'Manual grading must require scores for every question and reject extra score keys');
+assert.ok(gradingSource.includes('JSON.stringify(savedScores)'),
+  'Manual grading must persist only the validated server-side score map');
+assert.ok(html.includes("if(raw.trim()===''){toast('Skor soal '"),
+  'The grading UI must require an explicit score for each question; zero must be entered explicitly');
+
+function makeGradeContext(status, questionScores) {
+  const ctx = {
+    locked: false, released: false, writes: [],
+    LockService: { getScriptLock: function () { return {
+      waitLock: function () { ctx.locked = true; },
+      releaseLock: function () { ctx.released = true; ctx.locked = false; }
+    }; } },
+    requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('ID wajib'); return String(value).trim(); },
+    parseJson_: function (value, fallback) { try { return JSON.parse(value); } catch (e) { return fallback; } },
+    appendRow_: function (table, row) { (ctx.appended || (ctx.appended = [])).push({ table: table, row: row }); },
+    makeId_: function (prefix) { return prefix + '-TEST'; },
+    currentTimestamp_: function () { return '2026-11-04T00:00:00Z'; },
+    listRows_: function (table) {
+      if (table === 'Attempts') return [{ attemptId: 'ATT-1', assessmentId: 'ASM-1', status: status }];
+      if (table === 'Questions') return [
+        { questionId: 'Q-1', assessmentId: 'ASM-1', order: 1, points: 2 },
+        { questionId: 'Q-2', assessmentId: 'ASM-1', order: 2, points: 3 }
+      ];
+      return [];
+    },
+    getSheet_: function () { return {
+      getDataRange: function () { return { getValues: function () {
+        return [
+          ['attemptId', 'score', 'maxScore', 'status', 'teacherFeedback', 'questionScoresJson'],
+          ['ATT-1', 0, 5, status, '', '']
+        ];
+      } }; },
+      getRange: function (row, col) { return { setValue: function (value) {
+        ctx.writes.push({ row: row, col: col, value: value });
+      } }; }
+    }; }
+  };
+  vm.createContext(ctx);
+  vm.runInContext(gradingSource, ctx);
+  return ctx;
+}
+const gradeContext = makeGradeContext('needs_review');
+const gradeResult = gradeContext.gradeAttempt_({
+  attemptId: 'ATT-1', questionScores: { 'Q-1': 1, 'Q-2': 2 }, feedback: 'Baik'
+});
+assert.equal(gradeResult.score, 3, 'Server must calculate total score from individual question scores');
+assert.equal(gradeResult.maxScore, 5, 'Server must calculate maximum score from assessment questions');
+assert.equal(gradeResult.status, 'graded', 'Submitted attempt must transition to graded');
+assert.equal(gradeContext.writes.find(x => x.col === 2).value, 3, 'Persisted score must use server calculation');
+assert.equal(gradeContext.writes.find(x => x.col === 3).value, 5, 'Persisted maximum must use assessment questions');
+assert.equal(JSON.parse(gradeContext.writes.find(x => x.col === 6).value)['Q-2'], 2,
+  'Only validated per-question scores must be persisted');
+assert.equal(gradeContext.released, true, 'Grading lock must always be released');
+
+const zeroGradeContext = makeGradeContext('needs_review');
+const zeroGrade = zeroGradeContext.gradeAttempt_({
+  attemptId: 'ATT-1', questionScores: { 'Q-1': 0, 'Q-2': 0 }
+});
+assert.equal(zeroGrade.score, 0, 'An explicitly entered zero score must remain valid');
+
+const alreadyGradedContext = makeGradeContext('graded');
+assert.equal(alreadyGradedContext.gradeAttempt_({
+  attemptId: 'ATT-1', questionScores: { 'Q-1': 2, 'Q-2': 3 }
+}).score, 5, 'An already graded attempt may be corrected by its authorized teacher');
+
+const inProgressContext = makeGradeContext('in_progress');
+assert.throws(function () {
+  inProgressContext.gradeAttempt_({ attemptId: 'ATT-1', questionScores: { 'Q-1': 1, 'Q-2': 2 } });
+}, /masih berlangsung atau belum dikirim/,
+'An in-progress attempt must not be manually graded');
+assert.equal(inProgressContext.writes.length, 0, 'Rejected in-progress grading must not write scores');
+assert.equal(inProgressContext.released, true, 'Lock must be released after a rejected grading attempt');
+
+const missingScoresContext = makeGradeContext('needs_review');
+assert.throws(function () {
+  missingScoresContext.gradeAttempt_({ attemptId: 'ATT-1', score: 5, maxScore: 5 });
+}, /Skor setiap soal wajib diisi/,
+'Client-supplied total score must not be accepted without per-question scores');
+assert.equal(missingScoresContext.writes.length, 0, 'Missing per-question scores must not write a grade');
+
+const blankScoreContext = makeGradeContext('needs_review');
+assert.throws(function () {
+  blankScoreContext.gradeAttempt_({ attemptId: 'ATT-1', questionScores: { 'Q-1': '', 'Q-2': 2 } });
+}, /tidak valid/,
+'Blank score must not be silently converted to zero');
+assert.equal(blankScoreContext.writes.length, 0, 'Blank per-question score must not write a grade');
+
+const extraScoreContext = makeGradeContext('needs_review');
+assert.throws(function () {
+  extraScoreContext.gradeAttempt_({ attemptId: 'ATT-1', questionScores: { 'Q-1': 1, 'Q-2': 2, 'Q-EXTRA': 1 } });
+}, /tepat untuk seluruh soal/,
+'Extra question score keys must be rejected');
+assert.equal(extraScoreContext.writes.length, 0, 'Extra question score keys must not write a grade');
+
+
+
+const snapshotReferenceContext = {
+  listRows_: function (table) {
+    if (table === 'LearningObjectives') return [{
+      objectiveId: 'TP-1', tpCode: 'TP-MAT-01', title: 'Memahami relasi', subject: 'Matematika', description: 'Tujuan pembelajaran'
+    }];
+    if (table === 'LearningIndicators') return [{
+      indicatorId: 'IND-1', objectiveId: 'TP-1', indicatorCode: 'IND-MAT-01', description: 'Menghubungkan dua konsep'
+    }];
+    return [];
+  }
+};
+vm.createContext(snapshotReferenceContext);
+vm.runInContext(extractFunction('snapshotBundleLearningReferences_', source), snapshotReferenceContext);
+const enrichedSoloSnapshot = snapshotReferenceContext.snapshotBundleLearningReferences_({
+  classification: 'SOLO_TAX', learningObjectiveId: 'TP-1', tpCode: 'TP-MAT-01', subject: 'Matematika',
+  questions: [{ learningIndicatorIds: ['IND-1'] }]
+});
+assert.equal(enrichedSoloSnapshot.learningObjectiveSnapshot.title, 'Memahami relasi',
+  'SOLO bundle snapshot must preserve the selected TP definition');
+assert.equal(enrichedSoloSnapshot.questions[0].learningIndicators[0].description, 'Menghubungkan dua konsep',
+  'SOLO bundle snapshot must preserve each mapped indicator definition');
+
+const soloVerificationContext = {
+  LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () { soloVerificationContext.released = true; } }; } },
+  requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('ID wajib'); return String(value).trim(); },
+  parseJson_: function (value, fallback) { try { return JSON.parse(value); } catch (e) { return fallback; } },
+  listRows_: function (table) {
+    if (table === 'Attempts') return [{ attemptId: 'ATT-SOLO', assessmentId: 'ASM-SOLO', studentId: 'ST-1', status: 'graded' }];
+    if (table === 'Assessments') return [{ assessmentId: 'ASM-SOLO', classification: 'SOLO_TAX' }];
+    if (table === 'Questions') return [
+      { questionId: 'SQ-1', assessmentId: 'ASM-SOLO', answerJson: JSON.stringify({ __soloTaxMeta: { learningIndicatorIds: ['IND-A', 'IND-B'] } }) },
+      { questionId: 'SQ-2', assessmentId: 'ASM-SOLO', answerJson: JSON.stringify({ __soloTaxMeta: { learningIndicatorIds: ['IND-B'] } }) }
+    ];
+    return [];
+  },
+  appendRow_: function (table, row) { soloVerificationContext.appended.push({ table: table, row: row }); },
+  makeId_: function (prefix) { return prefix + '-TEST'; },
+  currentTimestamp_: function () { return '2026-11-04T00:00:00Z'; },
+  appended: [], released: false
+};
+vm.createContext(soloVerificationContext);
+vm.runInContext(extractFunction('soloAchievementCategory_', source), soloVerificationContext);
+vm.runInContext(extractFunction('saveSoloIndicatorVerification_', source), soloVerificationContext);
+const soloVerificationResult = soloVerificationContext.saveSoloIndicatorVerification_({
+  attemptId: 'ATT-SOLO', currentUser: { role: 'teacher', email: 'teacher@example.test' },
+  results: [
+    { indicatorId: 'IND-A', percentage: 90, evidence: 'Siswa menghubungkan konsep pada jawaban soal pertama.' },
+    { indicatorId: 'IND-B', percentage: 80, evidence: 'Siswa menunjukkan hubungan parsial pada dua soal.' }
+  ]
+});
+assert.equal(soloVerificationResult.status, 'verified', 'Teacher can verify all mapped indicators');
+assert.equal(soloVerificationResult.indicatorCount, 2, 'Verification covers each distinct mapped indicator');
+assert.equal(soloVerificationResult.tpAchievement.averagePercentage, 85, 'TP achievement is the equal-weighted mean of indicator percentages');
+assert.equal(soloVerificationResult.tpAchievement.category, 'achieved', 'An average of exactly 85 percent is achieved, not exceeds');
+assert.equal(soloVerificationContext.appended[0].row.detailsJson.includes('"percentage":90'), true, 'Indicator percentage must be audit logged');
+assert.equal(soloVerificationContext.soloAchievementCategory_(85), 'achieved', '85 percent belongs to achieved');
+assert.equal(soloVerificationContext.soloAchievementCategory_(85.01), 'exceeds', 'Only values above 85 percent exceed');
+assert.equal(soloVerificationContext.soloAchievementCategory_(69.99), 'not_achieved', 'Values below 70 percent are not achieved');
+assert.equal(soloVerificationContext.appended[0].table, 'Events', 'Verification must be appended to the audit event log');
+assert.equal(soloVerificationContext.released, true, 'Verification lock must always be released');
+assert.throws(function () {
+  soloVerificationContext.saveSoloIndicatorVerification_({
+    attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
+    results: [{ indicatorId: 'IND-A', percentage: 90, evidence: 'Bukti.' }]
+  });
+}, /setiap indikator/, 'Verification must cover every mapped indicator exactly once');
+assert.throws(function () {
+  soloVerificationContext.saveSoloIndicatorVerification_({
+    attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
+    results: [
+      { indicatorId: 'IND-A', percentage: 90, evidence: 'Bukti.' },
+      { indicatorId: 'IND-B', percentage: 101, evidence: 'Bukti.' }
+    ]
+  });
+}, /Persentase ketercapaian/, 'Percentage above 100 must be rejected');
+
+
+const dominantVerificationContext = {
+  soloAchievementCategory_: function (percentage) { return percentage > 85 ? 'exceeds' : percentage >= 70 ? 'achieved' : 'not_achieved'; },
+  LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () { dominantVerificationContext.released = true; } }; } },
+  requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('ID wajib'); return String(value).trim(); },
+  parseJson_: function (value, fallback) { try { return JSON.parse(value); } catch (e) { return fallback; } },
+  listRows_: function (table) {
+    if (table === 'Attempts') return [{ attemptId: 'ATT-SOLO', assessmentId: 'ASM-SOLO', studentId: 'ST-1', status: 'graded' }];
+    if (table === 'Assessments') return [{ assessmentId: 'ASM-SOLO', classification: 'SOLO_TAX' }];
+    if (table === 'Questions') return [{ questionId: 'SQ-1', assessmentId: 'ASM-SOLO' }];
+    if (table === 'Events') return [{
+      attemptId: 'ATT-SOLO', eventType: 'SOLO_INDICATOR_VERIFICATION',
+      eventAt: '2026-11-04T00:00:00Z',
+      detailsJson: JSON.stringify({ results: [{ indicatorId: 'IND-A', percentage: 90, category: 'exceeds', evidence: 'Siswa menghubungkan konsep.' }] })
+    }, {
+      attemptId: 'ATT-SOLO', eventType: 'AI_SOLO_SCORING_RECOMMENDATION',
+      eventAt: '2026-11-03T23:59:00Z',
+      detailsJson: JSON.stringify({ provider: 'TOKENPORTAL', model: 'model-test', promptVersion: 2, analyzedQuestionIds: ['SQ-1'], dominantRecommendation: { level: 'RELATIONAL', evidenceSummary: 'Jawaban mengintegrasikan dua konsep secara konsisten.', questionEvidence: [{ questionId: 'SQ-1', evidence: 'Siswa menghubungkan konsep A dan B.' }] } })
+    }];
+    return [];
+  },
+  appendRow_: function (table, row) { dominantVerificationContext.appended.push({ table: table, row: row }); },
+  makeId_: function (prefix) { return prefix + '-TEST'; },
+  currentTimestamp_: function () { return '2026-11-04T00:01:00Z'; },
+  appended: [], released: false
+};
+vm.createContext(dominantVerificationContext);
+vm.runInContext(extractFunction('saveSoloDominantVerification_', source), dominantVerificationContext);
+const dominantResult = dominantVerificationContext.saveSoloDominantVerification_({
+  attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
+  teacherLevel: 'RELATIONAL', teacherReason: ''
+});
+assert.equal(dominantResult.status, 'verified', 'Teacher can verify an AI-supported dominant SOLO level');
+assert.equal(dominantVerificationContext.appended[0].row.detailsJson.includes('teacher@example.test'), true, 'Dominant-level audit must record the verifying teacher identity');
+assert.equal(dominantVerificationContext.appended[0].table, 'Events', 'Dominant-level verification must be audit logged');
+assert.equal(dominantVerificationContext.released, true, 'Dominant-level verification lock must be released');
+assert.throws(function () {
+  dominantVerificationContext.saveSoloDominantVerification_({
+    attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
+    teacherLevel: 'EXTENDED_ABSTRACT'
+  });
+}, /Alasan perubahan level/, 'Teacher must explain a different final level from the AI recommendation');
+assert.throws(function () {
+  const original = dominantVerificationContext.listRows_;
+  dominantVerificationContext.listRows_ = function (table) {
+    if (table === 'Events') return original(table).map(function (event) {
+      if (event.eventType === 'AI_SOLO_SCORING_RECOMMENDATION') {
+        const detail = JSON.parse(event.detailsJson);
+        detail.analyzedQuestionIds = ['SQ-1', 'SQ-2'];
+        event = Object.assign({}, event, { detailsJson: JSON.stringify(detail) });
+      }
+      return event;
+    });
+    return original(table);
+  };
+  try {
+    dominantVerificationContext.saveSoloDominantVerification_({
+      attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
+      teacherLevel: 'RELATIONAL', teacherReason: ''
+    });
+  } finally { dominantVerificationContext.listRows_ = original; }
+}, /tepat satu bukti untuk setiap soal/, 'Dominant-level verification must reject incomplete AI evidence coverage');
+
+const dominantSaveSource = extractFunction('saveSoloDominantVerification_', source);
+assert.ok(dominantSaveSource.includes("String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION'"),
+  'Dominant-level verification must source AI recommendations from server-side audit events');
+assert.ok(!dominantSaveSource.includes('payload.aiRecommendation'),
+  'Dominant-level verification must not trust a browser-supplied AI recommendation');
+assert.ok(dominantSaveSource.includes('item.category !== soloAchievementCategory_(percentage)'),
+  'Dominant-level verification must require percentage-based indicator review');
+const routeSource = extractFunction('routeAction_', source);
+assert.ok(routeSource.includes("'saveSoloDominantVerification'") &&
+  routeSource.includes('assertAssessmentOwner_(attempt.assessmentId, user)'),
+  'Dominant-level verification must be restricted to the teacher who owns the assessment');
+const aiScoringSource = extractFunction('requestSoloAiAssessment_', source);
+assert.ok(aiScoringSource.includes('dominantRecommendation = {') &&
+  aiScoringSource.includes('questionEvidence') &&
+  aiScoringSource.includes('dominantLevel'),
+  'AI scoring must provide a qualitative dominant-level recommendation with per-question evidence');
 
 console.log('PASS: learning repository static guard tests');

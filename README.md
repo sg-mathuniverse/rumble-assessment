@@ -87,3 +87,29 @@ Status branch ini tetap **belum siap disalin ke sistem aktif**. Sebelum perubaha
 6. Catat hasil uji dan keputusan rilis sebelum PR diubah dari Draft.
 
 Tidak ada migrasi spreadsheet atau deployment produksi yang dilakukan selama pengembangan branch ini.
+
+## Runbook lingkungan uji terisolasi SOLO Tax
+
+**Jangan gunakan spreadsheet produksi, salinan yang masih berisi data siswa, atau folder Drive produksi.** Buat sumber daya kosong yang benar-benar terpisah.
+
+1. Buat spreadsheet kosong khusus uji dan folder Drive kosong khusus uji. Jangan menyalin baris data pengguna dari sistem aktif.
+2. Buat project Google Apps Script baru khusus uji. Salin `Code.gs` dari branch integrasi ini.
+3. Sebelum menjalankan fungsi apa pun atau membuat deployment, ganti `CONFIG.SPREADSHEET_ID` dan `CONFIG.DRIVE_FOLDER_ID` pada project uji dengan ID sumber daya uji yang baru dibuat. Verifikasi kedua ID tersebut secara manual dari URL Google. Jangan mengubah ID produksi pada repository.
+4. Jalankan `migrateDatabaseV1_()` satu kali. Fungsi ini memanggil `setupDatabase()`, membuat sheet dasar yang belum ada/menambah header yang kurang, lalu mencatat `BUNDLE_VERSIONING_V1`. Periksa hasil eksekusi dan baris migrasi pada `SchemaMigrations`.
+5. Setelah fondasi versioning berstatus `completed`, jalankan `migrateLearningRepositoryV1_()`. Pastikan `LEARNING_REPOSITORY_V1` tercatat `completed` dan sheet `LearningObjectives`, `LearningIndicators`, serta `AdminAuditLog` tersedia.
+6. Buat akun pengujian saja: satu Admin dan satu Guru dengan email sekolah penguji, serta satu akun Siswa sintetis. Jangan memakai NIS, kata sandi, nama, atau jawaban siswa sungguhan.
+7. Deploy hanya sebagai Web App uji. Batasi akses ke akun penguji. Pastikan URL deployment uji tidak dibagikan sebagai aplikasi resmi.
+8. AI Penilaian harus tetap nonaktif pada awal pengujian. Uji alur manual terlebih dahulu. Pengujian AI hanya memakai jawaban sintetis, prompt yang sudah ditinjau, API key khusus uji di Script Properties, dan batas token rendah. Jangan mengirim foto jawaban ke AI.
+
+### Skenario uji minimum
+
+- **Migrasi:** kedua migrasi berhasil pada spreadsheet kosong; jalankan ulang untuk memeriksa idempotensi; pastikan tidak ada sheet atau header yang hilang/duplikat.
+- **Admin:** buat, ubah, nonaktifkan TP dan indikator; periksa audit tertunda dan rekonsiliasi; pastikan akun Guru tidak dapat menjalankan aksi Admin.
+- **Guru:** buat asesmen SOLO Tax berbentuk uraian saja, dengan subsoal, rubrik, panduan jawaban, dan indikator TP; pastikan soal Reguler lama tetap dapat dibuat dan dibaca.
+- **Siswa:** login memakai akun sintetis, mengirim jawaban teks, menyimpan jawaban, dan mengirim lampiran foto uji; pastikan foto tidak dikirim ke AI.
+- **Penilaian:** uji skor dan alasan per soal, jawaban kosong, jawaban foto saja, serta pemeriksaan manual Guru. Dominant level AI harus tidak tersedia jika ada soal yang memerlukan pemeriksaan deterministik/manual.
+- **Verifikasi indikator:** uji persentase 0, 69, 70, 85, 86, dan 100; kategori harus mengikuti aturan `<70%` Belum Tercapai, `70–85%` Tercapai, dan `>85%` Melampaui. Periksa rata-rata TP dengan bobot indikator sama.
+- **Level dominan:** verifikasi rekomendasi AI oleh Guru; perubahan level harus meminta alasan; verifikasi lama harus ditolak setelah analisis AI baru atau perubahan bukti yang membuatnya kedaluwarsa.
+- **Otorisasi dan regresi:** uji kepemilikan asesmen, pembatasan peran, login NIS/kata sandi, asesmen Reguler, penilaian Reguler, dan snapshot bundel.
+
+Catat hasil, bukti, dan versi commit yang diuji. CI statis yang lulus bukan pengganti pengujian runtime Apps Script, Spreadsheet, Drive, autentikasi, dan UI. Jangan ubah PR dari Draft, merge, atau deploy produksi sampai seluruh skenario yang relevan lulus dan ditinjau.
