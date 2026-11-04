@@ -2115,6 +2115,25 @@ function uploadAnswerImage_(payload) {
   lock.waitLock(10000);
   let file = null;
   try {
+    const latestValues = attemptSheet.getDataRange().getValues();
+    let latestRowIndex = -1, latestAttemptRow = null;
+    for (let i = 1; i < latestValues.length; i++) {
+      if (String(latestValues[i][col('attemptId')]) === attemptId &&
+          String(latestValues[i][col('studentId')]) === studentId &&
+          String(latestValues[i][col('assessmentId')]) === assessmentId) {
+        latestRowIndex = i; latestAttemptRow = latestValues[i]; break;
+      }
+    }
+    if (latestRowIndex < 0 || !latestAttemptRow || String(latestAttemptRow[col('status')]) !== 'in_progress') {
+      throw new Error('Sesi pengerjaan tidak ditemukan atau sudah berakhir.');
+    }
+    const latestAnswers = parseJson_(latestAttemptRow[col('answersJson')], {});
+    const latestAnswer = latestAnswers[questionId] && typeof latestAnswers[questionId] === 'object' && !Array.isArray(latestAnswers[questionId])
+      ? latestAnswers[questionId] : { text: typeof latestAnswers[questionId] === 'string' ? latestAnswers[questionId] : '' };
+    latestAnswer.photos = Array.isArray(latestAnswer.photos) ? latestAnswer.photos : [];
+    if (String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && latestAnswer.photos.length >= 1) {
+      throw new Error('SOLO Tax hanya mengizinkan satu foto untuk setiap soal utama.');
+    }
     const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
     const answerRoot = getOrCreateChildFolder_(root, '02 - Jawaban Siswa');
     const assessmentFolder = getOrCreateChildFolder_(answerRoot, assessmentId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100));
@@ -2141,14 +2160,11 @@ function uploadAnswerImage_(payload) {
     const imageUrl = 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.getId()) + '&sz=w1200';
     appendRow_('Files', { fileId: fileId, attemptId: attemptId, studentId: studentId, questionId: questionId, driveFileId: file.getId(), fileUrl: file.getUrl(), createdAt: currentTimestamp_() });
     const answersCol = col('answersJson');
-    const answers = parseJson_(attemptRow[answersCol], {});
-    const answer = answers[questionId] && typeof answers[questionId] === 'object' && !Array.isArray(answers[questionId])
-      ? answers[questionId] : { text: typeof answers[questionId] === 'string' ? answers[questionId] : '' };
-    answer.photos = Array.isArray(answer.photos) ? answer.photos : [];
-    if (String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && answer.photos.length >= 1) throw new Error('SOLO Tax hanya mengizinkan satu foto untuk setiap soal utama.');
+    const answers = latestAnswers;
+    const answer = latestAnswer;
     answer.photos.push({ fileId: fileId, url: file.getUrl(), imageUrl: imageUrl, name: file.getName() });
     answers[questionId] = answer;
-    attemptSheet.getRange(rowIndex + 1, answersCol + 1).setValue(JSON.stringify(answers));
+    attemptSheet.getRange(latestRowIndex + 1, answersCol + 1).setValue(JSON.stringify(answers));
     SpreadsheetApp.flush();
     return { fileId: fileId, name: file.getName(), url: file.getUrl(), imageUrl: imageUrl, folder: '02 - Jawaban Siswa/' + assessmentId + '/' + attemptId };
   } catch (error) {
