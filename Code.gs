@@ -1471,6 +1471,10 @@ function listAttempts_(payload) {
       return matchesAssessment && matchesStudent && String(attempt.status) !== 'in_progress';
     })
     .map(function (attempt) {
+      const assessment = assessments.find(function (item) { return item.assessmentId === attempt.assessmentId; });
+      const viewer = payload.currentUser;
+      const canViewInternal = !!(viewer && viewer.role === 'teacher' && assessment &&
+        String(assessment.createdBy || '').trim().toLowerCase() === String(viewer.email || '').trim().toLowerCase());
       const details = allQuestions
         .filter(function (question) { return question.assessmentId === attempt.assessmentId; })
         .sort(function (a, b) { return Number(a.order) - Number(b.order); })
@@ -1481,9 +1485,9 @@ function listAttempts_(payload) {
             type: question.type,
             text: question.text,
             points: Number(question.points) || 0,
-            rubric: question.rubric,
-            rubricLevels: parseJson_(question.rubricLevelsJson, []),
-            soloMeta: (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta:null;})(),
+            rubric: canViewInternal ? question.rubric : '',
+            rubricLevels: canViewInternal ? parseJson_(question.rubricLevelsJson, []) : [],
+            soloMeta: canViewInternal ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta:null;})() : undefined,
             subquestions: parseJson_(question.subquestionsJson, []),
             options: parseJson_(question.optionsJson, []),
             pairs: parseJson_(question.pairsJson, []),
@@ -1492,9 +1496,7 @@ function listAttempts_(payload) {
             optionImages: parseJson_(question.optionImagesJson, [])
           };
         });
-      const assessment = assessments.find(function (item) { return item.assessmentId === attempt.assessmentId; });
-      const viewer = payload.currentUser;
-      if (viewer && viewer.role === 'teacher' && assessment && String(assessment.createdBy || '').trim().toLowerCase() === String(viewer.email || '').trim().toLowerCase()) {
+      if (canViewInternal) {
         uploadedFiles.filter(function (file) { return String(file.attemptId) === String(attempt.attemptId) && file.driveFileId; }).forEach(function (file) {
           try {
             const answerFile = DriveApp.getFileById(String(file.driveFileId));
