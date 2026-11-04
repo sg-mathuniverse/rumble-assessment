@@ -177,7 +177,7 @@ function routeAction_(action, payload) {
     throw new Error('Fitur ini hanya dapat digunakan oleh administrator sekolah.');
   }
   const teacherOnly = [
-    'createAssessment','deleteAssessment','saveQuestionBundle','listQuestionBundles',
+    'createAssessment','deleteAssessment','requestSoloAiAssessment','saveQuestionBundle','listQuestionBundles',
     'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
     'publishAssessment','gradeAttempt','saveSoloIndicatorVerification','listStudents','listMonitoring','getTeacherSummary'
   ];
@@ -240,6 +240,13 @@ function routeAction_(action, payload) {
         return assessment && assessment.createdBy &&
           String(assessment.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
       });
+    },
+    requestSoloAiAssessment: function () {
+      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
+      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+      if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
+      assertAssessmentOwner_(attempt.assessmentId, user);
+      return requestSoloAiAssessment_(trusted);
     },
     gradeAttempt: function () {
       const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
@@ -1775,6 +1782,175 @@ function gradeAttempt_(payload) {
  * Menyimpan verifikasi guru untuk seluruh indikator SOLO Tax pada satu pengerjaan.
  * Riwayat disimpan sebagai event append-only agar struktur spreadsheet tetap.
  */
+
+function requestSoloAiAssessment_(payload) {
+  const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
+  const settings = aiSettings_();
+  if (!settings.scoringEnabled) throw new Error('AI Penilaian belum diaktifkan oleh Admin.');
+  const prompt = aiPrompts_().filter(function (item) {
+    return item.service === 'SCORING' && item.active === true;
+  }).sort(function (a, b) { return Number(b.version) - Number(a.version); })[0];
+  if (!prompt) throw new Error('Belum ada prompt AI Penilaian aktif.');
+  const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+  if (!attempt || String(attempt.status || '').toLowerCase() !== 'needs_review') {
+    throw new Error('AI Penilaian hanya dapat diminta untuk jawaban yang sudah dikirim dan belum dinilai.');
+  }
+  const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+  if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') {
+    throw new Error('AI Penilaian SOLO hanya berlaku untuk Asesmen SOLO Tax.');
+  }
+  const questions = listRows_('Questions').filter(function (item) {
+    return String(item.assessmentId) === String(attempt.assessmentId);
+  }).sort(function (a, b) { return Number(a.order) - Number(b.order); });
+  if (!questions.length || questions.some(function (q) { return String(q.type) !== 'essay'; })) {
+    throw new Error('Struktur soal asesmen SOLO Tax tidak valid.');
+  }
+  const answers = parseJson_(attempt.answersJson, {});
+  const questionInputs = [], deterministic = [];
+  questions.forEach(function (question) {
+    const answer = answers[String(question.questionId)] || {};
+    const photos = answer && Array.isArray(answer.photos) ? answer.photos : [];
+    const subquestions = parseJson_(question.subquestionsJson, []);
+    const textResponses = [];
+    if (answer && typeof answer === 'object' && !Array.isArray(answer)) {
+      Object.keys(answer).forEach(function (key) {
+        if (key === 'photos' || key === 'text') return;
+        const value = String(answer[key] == null ? '' : answer[key]).trim();
+        if (value && /^\d+$/.test(key)) {
+          textResponses.push({ subquestionIndex: Number(key) + 1, prompt: String(subquestions[Number(key)] || ''), answer: value });
+        }
+      });
+      if (String(answer.text || '').trim()) textResponses.push({ subquestionIndex: 1, prompt: '', answer: String(answer.text).trim() });
+    } else if (typeof answer === 'string' && answer.trim()) {
+      textResponses.push({ subquestionIndex: 1, prompt: '', answer: answer.trim() });
+    }
+    const meta = parseJson_(question.answerJson, {}) || {};
+    const soloMeta = meta.__soloTaxMeta || {};
+    const indicators = Array.isArray(soloMeta.learningIndicators) ? soloMeta.learningIndicators : [];
+    if (!textResponses.length && !photos.length) {
+      deterministic.push({
+        questionId: String(question.questionId), order: Number(question.order),
+        recommendedScore: 0, maximumScore: Number(question.points),
+        reason: 'Tidak ada jawaban teks maupun foto yang dikumpulkan.',
+        evidence: [], evidenceSufficient: true, manualPhotoReviewRequired: false,
+        indicatorAnalysis: indicators.map(function (indicator) {
+          return { indicatorId: String(indicator.indicatorId), status: 'insufficient_evidence', evidence: 'Tidak ada jawaban yang dapat dijadikan bukti.' };
+        })
+      });
+      return;
+    }
+    if (!textResponses.length && photos.length) {
+      deterministic.push({
+        questionId: String(question.questionId), order: Number(question.order),
+        recommendedScore: null, maximumScore: Number(question.points),
+        reason: 'Jawaban hanya berupa foto. Foto tidak dikirim ke AI dan wajib diperiksa manual oleh guru.',
+        evidence: [], evidenceSufficient: false, manualPhotoReviewRequired: true,
+        indicatorAnalysis: indicators.map(function (indicator) {
+          return { indicatorId: String(indicator.indicatorId), status: 'insufficient_evidence', evidence: 'Bukti berupa foto harus diperiksa langsung oleh guru.' };
+        })
+      });
+      return;
+    }
+    questionInputs.push({
+      questionId: String(question.questionId),
+      order: Number(question.order),
+      mainQuestion: String(question.text || ''),
+      soloLevel: String(soloMeta.soloLevel || ''),
+      maximumScore: Number(question.points),
+      subquestions: subquestions,
+      textResponses: textResponses,
+      hasPhotoAttachment: photos.length > 0,
+      answerGuide: String(soloMeta.answerGuide || ''),
+      rubric: String(question.rubric || ''),
+      rubricLevels: parseJson_(question.rubricLevelsJson, []),
+      indicators: indicators.map(function (indicator) {
+        return { indicatorId: String(indicator.indicatorId), indicatorCode: String(indicator.indicatorCode || ''), description: String(indicator.description || '') };
+      })
+    });
+  });
+  let aiResults = [], usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, model = '';
+  if (questionInputs.length) {
+    const systemPrompt = prompt.content + '\n\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown dengan bentuk {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["kutipan/parafrasa bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","evidence":"alasan berbasis jawaban"}]}]}. Nilai rekomendasi harus berada pada rentang 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup. Jika bukti tidak cukup, recommendedScore harus null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban yang berisi teks. Jangan mengarang bukti. Analisis setiap indikator yang tercantum. Foto tidak disertakan dalam data; jika hasPhotoAttachment true, tandai bahwa guru harus memeriksa foto secara manual. Jangan membuat nilai persentase indikator atau TP.';
+    try {
+      const response = tokenPortalChatCompletion_([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: 'Nilai data jawaban anonim berikut. Tidak ada identitas siswa. Data: ' + JSON.stringify({ questions: questionInputs }) }
+      ], settings.model, settings.maxOutputTokens);
+      model = response.model;
+      usage = response.usage;
+      let parsed;
+      try {
+        const clean = response.content.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim();
+        parsed = JSON.parse(clean);
+      } catch (error) {
+        throw new Error('AI tidak mengembalikan JSON valid sesuai format penilaian.');
+      }
+      if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length !== questionInputs.length) {
+        throw new Error('Hasil AI tidak mencakup seluruh soal uraian yang dapat dianalisis.');
+      }
+      const byQuestion = {};
+      questionInputs.forEach(function (item) { byQuestion[item.questionId] = item; });
+      const seen = {};
+      aiResults = parsed.questions.map(function (item) {
+        const id = String(item.questionId || '');
+        const input = byQuestion[id];
+        if (!input || seen[id]) throw new Error('Hasil AI memuat ID soal yang tidak valid atau berulang.');
+        seen[id] = true;
+        const enough = item.evidenceSufficient === true;
+        const score = item.recommendedScore === null || item.recommendedScore === undefined ? null : Number(item.recommendedScore);
+        if (enough && (!isFinite(score) || score < 1 || score > Number(input.maximumScore))) {
+          throw new Error('Rekomendasi nilai AI di luar rentang untuk soal nomor ' + input.order + '.');
+        }
+        if (!enough && score !== null) throw new Error('AI harus mengosongkan rekomendasi nilai jika bukti tidak mencukupi.');
+        const evidence = Array.isArray(item.evidence) ? item.evidence.map(function (value) { return String(value || '').trim(); }).filter(Boolean) : [];
+        if (enough && !evidence.length) throw new Error('AI harus menyertakan bukti jawaban untuk setiap rekomendasi nilai.');
+        const expectedIndicators = input.indicators.map(function (indicator) { return indicator.indicatorId; }).sort();
+        const indicatorResults = Array.isArray(item.indicatorAnalysis) ? item.indicatorAnalysis : [];
+        const receivedIndicators = indicatorResults.map(function (indicator) { return String(indicator.indicatorId || ''); }).sort();
+        if (expectedIndicators.length !== receivedIndicators.length || expectedIndicators.some(function (id, index) { return id !== receivedIndicators[index]; })) {
+          throw new Error('Analisis AI harus mencakup setiap indikator pada soal nomor ' + input.order + '.');
+        }
+        const statuses = ['mastered', 'developing', 'needs_improvement', 'insufficient_evidence'];
+        const normalizedIndicators = indicatorResults.map(function (indicator) {
+          const status = String(indicator.status || '');
+          const indicatorEvidence = String(indicator.evidence || '').trim();
+          if (statuses.indexOf(status) < 0 || !indicatorEvidence) throw new Error('Analisis indikator AI tidak valid atau tanpa bukti.');
+          return { indicatorId: String(indicator.indicatorId), status: status, evidence: indicatorEvidence };
+        });
+        return {
+          questionId: id, order: input.order,
+          recommendedScore: enough ? score : null, maximumScore: Number(input.maximumScore),
+          reason: String(item.reason || '').slice(0, 2000),
+          evidence: evidence.slice(0, 20),
+          evidenceSufficient: enough,
+          manualPhotoReviewRequired: input.hasPhotoAttachment,
+          indicatorAnalysis: normalizedIndicators
+        };
+      });
+    } catch (error) {
+      logAiUsage_('AI_SOLO_SCORING_FAILED', {
+        provider: 'TOKENPORTAL', model: settings.model, promptId: prompt.promptId,
+        promptVersion: prompt.version, status: 'failed', error: String(error && error.message || error).slice(0, 500)
+      });
+      throw error;
+    }
+  }
+  const results = deterministic.concat(aiResults).sort(function (a, b) { return a.order - b.order; });
+  const now = currentTimestamp_();
+  const record = {
+    version: 1, assessmentId: String(attempt.assessmentId), promptId: prompt.promptId,
+    promptVersion: Number(prompt.version), provider: 'TOKENPORTAL', model: model || settings.model,
+    usage: usage, requestedBy: String(payload.currentUser && payload.currentUser.email || ''),
+    results: results
+  };
+  appendRow_('Events', {
+    eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+    eventType: 'AI_SOLO_SCORING_RECOMMENDATION', eventAt: now,
+    detailsJson: JSON.stringify(record)
+  });
+  return { attemptId: attemptId, status: 'completed', promptId: prompt.promptId, promptVersion: prompt.version, provider: 'TOKENPORTAL', model: record.model, usage: usage, results: results };
+}
+
 function saveSoloIndicatorVerification_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const submitted = payload.results;
