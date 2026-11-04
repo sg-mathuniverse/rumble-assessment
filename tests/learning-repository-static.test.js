@@ -192,6 +192,13 @@ assert.match(source, /SOLO_INDICATOR_VERIFICATION_INVALIDATED/, 'Changing a scor
 assert.match(source, /assessment && String\(assessment\.classification \|\| ''\)\.toUpperCase\(\) === 'SOLO_TAX' && !canViewInternal \? \{\}/, 'Students must not receive per-question SOLO Tax scores');
 assert.match(source, /saveSoloIndicatorVerification: function \(\)/, 'Teacher route must expose the indicator verification action');
 assert.match(source, /function saveSoloDominantVerification_\(/, 'Dominant SOLO level must have a dedicated teacher verification endpoint');
+assert.match(source, /PropertiesService\.getScriptProperties\(\)/, 'AI credentials must be stored in server-side Script Properties');
+assert.match(source, /settings\.hasApiKey = !!aiScriptProperties_\(\)\.getProperty/, 'Admin settings may expose only whether an API key exists, never the key itself');
+assert.match(source, /Aktifkan prompt AI Penilaian yang sudah lulus uji simulasi/, 'AI scoring cannot be enabled without a tested active prompt');
+assert.match(source, /Aktifkan prompt AI Refleksi yang sudah lulus uji simulasi/, 'AI reflection cannot be enabled without a tested active prompt');
+assert.match(source, /prompt harus berhasil diuji menggunakan data simulasi/i, 'A prompt must pass simulation testing before activation');
+assert.match(source, /UJI COBA DENGAN DATA SIMULASI, BUKAN DATA SISWA NYATA/, 'Prompt testing must use simulated data only');
+
 assert.match(source, /aiEvidenceSummary: aiEvidence/, 'Dominant level audit must preserve the qualitative AI evidence summary');
 assert.match(source, /teacherReason: teacherReason/, 'Teacher overrides of the AI level must retain a reason');
 assert.match(source, /latestAnswer\.photos\.length >= 1/, 'Concurrent SOLO Tax photo uploads must recheck the saved photo list under lock');
