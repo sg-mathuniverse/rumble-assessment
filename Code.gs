@@ -1610,7 +1610,32 @@ function listAttempts_(payload) {
                 history: history.map(function (event) {
                   const detail = parseJson_(event.detailsJson, {});
                   return { eventType: String(event.eventType), eventAt: String(event.eventAt || ''), verifiedBy: String(detail.verifiedBy || ''), reason: String(detail.reason || '') };
-                })
+                }),
+                dominant: (function () {
+                  const dominantEvents = listRows_('Events').filter(function (event) {
+                    return String(event.attemptId) === String(attempt.attemptId) &&
+                      String(event.eventType).indexOf('SOLO_DOMINANT_LEVEL_') === 0;
+                  }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+                  const latestDominant = dominantEvents.length ? dominantEvents[dominantEvents.length - 1] : null;
+                  const detail = latestDominant ? parseJson_(latestDominant.detailsJson, {}) : {};
+                  const currentIndicator = history.length ? history[history.length - 1] : null;
+                  const isCurrent = latestDominant && latestDominant.eventType === 'SOLO_DOMINANT_LEVEL_VERIFICATION' &&
+                    currentIndicator && currentIndicator.eventType === 'SOLO_INDICATOR_VERIFICATION' &&
+                    String(latestDominant.eventAt) >= String(currentIndicator.eventAt);
+                  return {
+                    status: isCurrent ? 'verified' : 'pending',
+                    aiLevel: isCurrent ? String(detail.aiLevel || '') : '',
+                    teacherLevel: isCurrent ? String(detail.teacherLevel || '') : '',
+                    aiEvidenceSummary: isCurrent ? String(detail.aiEvidenceSummary || '') : '',
+                    teacherReason: isCurrent ? String(detail.teacherReason || '') : '',
+                    verifiedAt: isCurrent ? String(latestDominant.eventAt || '') : '',
+                    verifiedBy: isCurrent ? String(detail.verifiedBy || '') : '',
+                    aiProvider: isCurrent ? String(detail.aiProvider || '') : '',
+                    aiModel: isCurrent ? String(detail.aiModel || '') : '',
+                    promptVersion: isCurrent ? String(detail.promptVersion || '') : '',
+                    questionEvidence: isCurrent && Array.isArray(detail.questionEvidence) ? detail.questionEvidence : []
+                  };
+                })()
               };
             })()
           : undefined
@@ -1723,6 +1748,11 @@ function gradeAttempt_(payload) {
             eventType: 'SOLO_INDICATOR_VERIFICATION_INVALIDATED', eventAt: currentTimestamp_(),
             detailsJson: JSON.stringify({ reason: 'Nilai soal berubah; verifikasi indikator perlu diperiksa ulang.' })
           });
+          appendRow_('Events', {
+            eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+            eventType: 'SOLO_DOMINANT_LEVEL_INVALIDATED', eventAt: currentTimestamp_(),
+            detailsJson: JSON.stringify({ reason: 'Nilai soal berubah; level SOLO dominan perlu ditinjau ulang.' })
+          });
         }
 
         return {
@@ -1793,6 +1823,11 @@ function saveSoloIndicatorVerification_(payload) {
       eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
       eventType: 'SOLO_INDICATOR_VERIFICATION', eventAt: now,
       detailsJson: JSON.stringify({ version: 1, assessmentId: String(attempt.assessmentId), verifiedBy: String(user.email || ''), results: results })
+    });
+    appendRow_('Events', {
+      eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+      eventType: 'SOLO_DOMINANT_LEVEL_INVALIDATED', eventAt: now,
+      detailsJson: JSON.stringify({ reason: 'Verifikasi indikator berubah; rekomendasi level dominan perlu ditinjau ulang.' })
     });
     return { attemptId: attemptId, status: 'verified', verifiedAt: now, indicatorCount: results.length };
   } finally {
