@@ -179,7 +179,7 @@ function routeAction_(action, payload) {
   const teacherOnly = [
     'createAssessment','deleteAssessment','saveQuestionBundle','listQuestionBundles',
     'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
-    'publishAssessment','gradeAttempt','saveSoloIndicatorVerification','listStudents','listMonitoring','getTeacherSummary'
+    'publishAssessment','gradeAttempt','saveSoloIndicatorVerification','saveSoloDominantVerification','listStudents','listMonitoring','getTeacherSummary'
   ];
   const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt','saveAttempt'];
   const shared = ['listAssessments','getAssessment','getAssessmentImage','listAttempts'];
@@ -254,6 +254,13 @@ function routeAction_(action, payload) {
       if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
       assertAssessmentOwner_(attempt.assessmentId, user);
       return saveSoloIndicatorVerification_(trusted);
+    },
+    saveSoloDominantVerification: function () {
+      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
+      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+      if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
+      assertAssessmentOwner_(attempt.assessmentId, user);
+      return saveSoloDominantVerification_(trusted);
     },
     logEvent: function () {
       const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
@@ -1788,6 +1795,80 @@ function saveSoloIndicatorVerification_(payload) {
       detailsJson: JSON.stringify({ version: 1, assessmentId: String(attempt.assessmentId), verifiedBy: String(user.email || ''), results: results })
     });
     return { attemptId: attemptId, status: 'verified', verifiedAt: now, indicatorCount: results.length };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function saveSoloDominantVerification_(payload) {
+  const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
+  const allowedLevels = ['PRESTRUCTURAL', 'UNISTRUCTURAL', 'MULTISTRUKTURAL', 'RELATIONAL', 'EXTENDED_ABSTRACT'];
+  const recommendation = payload.aiRecommendation;
+  if (!recommendation || typeof recommendation !== 'object' || Array.isArray(recommendation)) {
+    throw new Error('Rekomendasi AI untuk level SOLO dominan belum tersedia.');
+  }
+  const aiLevel = String(recommendation.level || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+  const teacherLevel = String(payload.teacherLevel || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+  if (allowedLevels.indexOf(aiLevel) < 0 || allowedLevels.indexOf(teacherLevel) < 0) {
+    throw new Error('Level SOLO dominan AI dan hasil verifikasi guru harus menggunakan salah satu dari lima level SOLO.');
+  }
+  const aiEvidence = String(recommendation.evidenceSummary || '').trim();
+  const teacherReason = String(payload.teacherReason || '').trim();
+  const provider = requiredText_(payload.aiProvider, 'Provider AI', 80);
+  const model = requiredText_(payload.aiModel, 'Model AI', 120);
+  const promptVersion = requiredText_(payload.promptVersion, 'Versi prompt', 80);
+  if (!aiEvidence || aiEvidence.length > 5000) throw new Error('Ringkasan bukti kualitatif dari AI wajib disimpan.');
+  if (teacherLevel !== aiLevel && !teacherReason) throw new Error('Alasan perubahan level dari rekomendasi AI wajib diisi.');
+  const questionEvidence = Array.isArray(recommendation.questionEvidence) ? recommendation.questionEvidence : [];
+  if (!questionEvidence.length) throw new Error('AI harus menyertakan bukti jawaban yang mendukung rekomendasi level.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+    if (!attempt || String(attempt.status || '').toLowerCase() !== 'graded') {
+      throw new Error('Seluruh soal harus selesai dinilai sebelum level SOLO dominan diverifikasi.');
+    }
+    const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+    if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') {
+      throw new Error('Verifikasi level dominan hanya berlaku untuk Asesmen SOLO Tax.');
+    }
+    const events = listRows_('Events').filter(function (event) { return String(event.attemptId) === attemptId; });
+    const latestIndicatorReview = events.filter(function (event) {
+      return String(event.eventType).indexOf('SOLO_INDICATOR_VERIFICATION') === 0;
+    }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); }).pop();
+    if (!latestIndicatorReview || latestIndicatorReview.eventType !== 'SOLO_INDICATOR_VERIFICATION') {
+      throw new Error('Seluruh indikator TP harus diverifikasi ulang setelah penilaian terakhir.');
+    }
+    const reviewDetails = parseJson_(latestIndicatorReview.detailsJson, {});
+    const results = Array.isArray(reviewDetails.results) ? reviewDetails.results : [];
+    if (!results.length || results.some(function (item) { return !item.evidence || !item.status; })) {
+      throw new Error('Bukti verifikasi indikator belum lengkap.');
+    }
+    const questionIds = {};
+    listRows_('Questions').filter(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); }).forEach(function (item) {
+      questionIds[String(item.questionId)] = true;
+    });
+    const checkedEvidence = questionEvidence.map(function (item) {
+      const id = String(item && item.questionId || '');
+      const evidence = String(item && item.evidence || '').trim();
+      if (!questionIds[id] || !evidence || evidence.length > 3000) {
+        throw new Error('Bukti level SOLO harus merujuk pada soal asesmen dan menyertakan penjelasan yang valid.');
+      }
+      return { questionId: id, evidence: evidence };
+    });
+    const now = currentTimestamp_(), user = payload.currentUser || {};
+    appendRow_('Events', {
+      eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+      eventType: 'SOLO_DOMINANT_LEVEL_VERIFICATION', eventAt: now,
+      detailsJson: JSON.stringify({
+        version: 1, assessmentId: String(attempt.assessmentId),
+        verifiedBy: String(user.email || ''), aiLevel: aiLevel, teacherLevel: teacherLevel,
+        aiEvidenceSummary: aiEvidence, questionEvidence: checkedEvidence,
+        teacherReason: teacherReason, aiProvider: provider, aiModel: model, promptVersion: promptVersion
+      })
+    });
+    return { attemptId: attemptId, status: 'verified', aiLevel: aiLevel, teacherLevel: teacherLevel, verifiedAt: now };
   } finally {
     lock.releaseLock();
   }
