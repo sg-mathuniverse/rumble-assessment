@@ -177,7 +177,7 @@ function routeAction_(action, payload) {
     throw new Error('Fitur ini hanya dapat digunakan oleh administrator sekolah.');
   }
   const teacherOnly = [
-    'createAssessment','deleteAssessment','requestSoloAiAssessment','saveQuestionBundle','listQuestionBundles',
+    'createAssessment','deleteAssessment','requestSoloAiAssessment','saveSoloDominantVerification','saveQuestionBundle','listQuestionBundles',
     'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
     'publishAssessment','gradeAttempt','saveSoloIndicatorVerification','listStudents','listMonitoring','getTeacherSummary'
   ];
@@ -261,6 +261,13 @@ function routeAction_(action, payload) {
       if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
       assertAssessmentOwner_(attempt.assessmentId, user);
       return saveSoloIndicatorVerification_(trusted);
+    },
+    saveSoloDominantVerification: function () {
+      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
+      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+      if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
+      assertAssessmentOwner_(attempt.assessmentId, user);
+      return saveSoloDominantVerification_(trusted);
     },
 
     logEvent: function () {
@@ -1612,9 +1619,18 @@ function listAttempts_(payload) {
               }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
               const latest = history.length ? history[history.length - 1] : null;
               const details = latest ? parseJson_(latest.detailsJson, {}) : {};
+              const aiHistory = listRows_('Events').filter(function (event) {
+                return String(event.attemptId) === String(attempt.attemptId) && String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION';
+              }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+              const latestAi = aiHistory.length ? aiHistory[aiHistory.length - 1] : null;
+              const aiDetails = latestAi ? parseJson_(latestAi.detailsJson, {}) : {};
               return {
                 status: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? 'verified' : 'pending',
                 results: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' && Array.isArray(details.results) ? details.results : [],
+                recommendation: latestAi && aiDetails.dominantRecommendation ? aiDetails.dominantRecommendation : null,
+                recommendationProvider: latestAi ? String(aiDetails.provider || '') : '',
+                recommendationModel: latestAi ? String(aiDetails.model || '') : '',
+                recommendationPromptVersion: latestAi ? String(aiDetails.promptVersion || '') : '',
                 tpAchievement: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' && details.tpAchievement ? details.tpAchievement : null,
                 verifiedAt: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? String(latest.eventAt || '') : '',
                 verifiedBy: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? String(details.verifiedBy || '') : '',
@@ -1663,6 +1679,7 @@ function listAttempts_(payload) {
                 promptId: String(detail.promptId || ''),
                 promptVersion: Number(detail.promptVersion) || 0,
                 provider: String(detail.provider || ''),
+                dominantRecommendation: detail.dominantRecommendation && typeof detail.dominantRecommendation === 'object' ? detail.dominantRecommendation : null,
                 model: String(detail.model || ''),
                 requestedBy: String(detail.requestedBy || ''),
                 eventAt: String(latest.eventAt || ''),
@@ -1890,9 +1907,9 @@ function requestSoloAiAssessment_(payload) {
       })
     });
   });
-  let aiResults = [], usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, model = '';
+  let aiResults = [], dominantRecommendation = null, usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, model = '';
   if (questionInputs.length) {
-    const systemPrompt = prompt.content + '\n\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown dengan bentuk {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["kutipan/parafrasa bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","evidence":"alasan berbasis jawaban"}]}]}. Nilai rekomendasi harus berada pada rentang 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup. Jika bukti tidak cukup, recommendedScore harus null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban yang berisi teks. Jangan mengarang bukti. Analisis setiap indikator yang tercantum. Foto tidak disertakan dalam data; jika hasPhotoAttachment true, tandai bahwa guru harus memeriksa foto secara manual. Jangan membuat nilai persentase indikator atau TP.';
+    const systemPrompt = prompt.content + '\n\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown dengan bentuk {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["kutipan/parafrasa bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","evidence":"alasan berbasis jawaban"}]}],"dominantLevel":{"level":"PRESTRUCTURAL|UNISTRUCTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT","evidenceSummary":"ringkasan bukti kualitatif lintas jawaban","questionEvidence":[{"questionId":"...","evidence":"bukti spesifik dari jawaban pada soal ini"}]}}. Nilai rekomendasi per soal harus berada pada rentang 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup. Jika bukti tidak cukup, recommendedScore harus null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban yang berisi teks. Jangan mengarang bukti. Analisis setiap indikator yang tercantum. Foto tidak disertakan dalam data; jika hasPhotoAttachment true, tandai bahwa guru harus memeriksa foto secara manual. Rekomendasi level dominan harus berdasarkan pola kualitas berpikir secara holistik dari bukti kualitatif seluruh soal yang diberikan, bukan dari skor, persentase, atau perhitungan ambang. questionEvidence harus mencakup setiap questionId yang dianalisis tepat satu kali. Jika bukti kualitatif tidak cukup, dominantLevel harus null. Jangan membuat nilai persentase indikator atau TP.';
     try {
       const response = tokenPortalChatCompletion_([
         { role: 'system', content: systemPrompt },
@@ -1951,6 +1968,34 @@ function requestSoloAiAssessment_(payload) {
           indicatorAnalysis: normalizedIndicators
         };
       });
+      if (!deterministic.length) {
+        const dominant = parsed.dominantLevel;
+        if (dominant !== null) {
+          if (!dominant || typeof dominant !== 'object' || Array.isArray(dominant)) {
+            throw new Error('Rekomendasi level SOLO dominan AI tidak valid.');
+          }
+          const allowedLevels = ['PRESTRUCTURAL', 'UNISTRUCTURAL', 'MULTISTRUKTURAL', 'RELATIONAL', 'EXTENDED_ABSTRACT'];
+          const level = String(dominant.level || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+          const evidenceSummary = String(dominant.evidenceSummary || '').trim();
+          const questionEvidence = Array.isArray(dominant.questionEvidence) ? dominant.questionEvidence : [];
+          const expectedIds = questionInputs.map(function (item) { return item.questionId; }).sort();
+          const receivedIds = questionEvidence.map(function (item) { return String(item && item.questionId || ''); }).sort();
+          if (allowedLevels.indexOf(level) < 0 || !evidenceSummary || evidenceSummary.length > 5000 ||
+              questionEvidence.length !== expectedIds.length ||
+              expectedIds.some(function (id, index) { return id !== receivedIds[index]; })) {
+            throw new Error('Rekomendasi level dominan harus memuat level dan bukti dari setiap soal yang dianalisis.');
+          }
+          dominantRecommendation = {
+            level: level,
+            evidenceSummary: evidenceSummary,
+            questionEvidence: questionEvidence.map(function (item) {
+              const evidence = String(item.evidence || '').trim();
+              if (!evidence || evidence.length > 3000) throw new Error('Bukti level dominan pada setiap soal wajib diisi.');
+              return { questionId: String(item.questionId), evidence: evidence };
+            })
+          };
+        }
+      }
     } catch (error) {
       logAiUsage_('AI_SOLO_SCORING_FAILED', {
         provider: 'TOKENPORTAL', model: settings.model, promptId: prompt.promptId,
@@ -1966,6 +2011,7 @@ function requestSoloAiAssessment_(payload) {
     version: 1, assessmentId: String(attempt.assessmentId), promptId: prompt.promptId,
     promptVersion: Number(prompt.version), provider: 'TOKENPORTAL', model: model || settings.model,
     usage: usage, requestedBy: String(payload.currentUser && payload.currentUser.email || ''),
+    dominantRecommendation: dominantRecommendation,
     results: results
   };
   appendRow_('Events', {
@@ -1973,7 +2019,7 @@ function requestSoloAiAssessment_(payload) {
     eventType: 'AI_SOLO_SCORING_RECOMMENDATION', eventAt: now,
     detailsJson: JSON.stringify(record)
   });
-  return { attemptId: attemptId, status: 'completed', promptId: prompt.promptId, promptVersion: prompt.version, provider: 'TOKENPORTAL', model: record.model, usage: usage, results: results };
+  return { attemptId: attemptId, status: 'completed', promptId: prompt.promptId, promptVersion: prompt.version, provider: 'TOKENPORTAL', model: record.model, usage: usage, dominantRecommendation: dominantRecommendation, results: results };
 }
 
 function soloAchievementCategory_(percentage) {
@@ -2356,25 +2402,13 @@ function adminListAiUsage_() {
 
 function saveSoloDominantVerification_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
-  const allowedLevels = ['PRESTRUCTURAL', 'UNISTRUCTURAL', 'MULTISTRUKTURAL', 'RELATIONAL', 'EXTENDED_ABSTRACT'];
-  const recommendation = payload.aiRecommendation;
-  if (!recommendation || typeof recommendation !== 'object' || Array.isArray(recommendation)) {
-    throw new Error('Rekomendasi AI untuk level SOLO dominan belum tersedia.');
-  }
-  const aiLevel = String(recommendation.level || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+  const allowedLevels = ['PRESTRUCTURAL', 'UNISTRUKTURAL', 'MULTISTRUKTURAL', 'RELATIONAL', 'EXTENDED_ABSTRACT'];
   const teacherLevel = String(payload.teacherLevel || '').trim().toUpperCase().replace(/[ -]+/g, '_');
-  if (allowedLevels.indexOf(aiLevel) < 0 || allowedLevels.indexOf(teacherLevel) < 0) {
-    throw new Error('Level SOLO dominan AI dan hasil verifikasi guru harus menggunakan salah satu dari lima level SOLO.');
-  }
-  const aiEvidence = String(recommendation.evidenceSummary || '').trim();
   const teacherReason = String(payload.teacherReason || '').trim();
-  const provider = requiredText_(payload.aiProvider, 'Provider AI', 80);
-  const model = requiredText_(payload.aiModel, 'Model AI', 120);
-  const promptVersion = requiredText_(payload.promptVersion, 'Versi prompt', 80);
-  if (!aiEvidence || aiEvidence.length > 5000) throw new Error('Ringkasan bukti kualitatif dari AI wajib disimpan.');
-  if (teacherLevel !== aiLevel && !teacherReason) throw new Error('Alasan perubahan level dari rekomendasi AI wajib diisi.');
-  const questionEvidence = Array.isArray(recommendation.questionEvidence) ? recommendation.questionEvidence : [];
-  if (!questionEvidence.length) throw new Error('AI harus menyertakan bukti jawaban yang mendukung rekomendasi level.');
+  if (allowedLevels.indexOf(teacherLevel) < 0) {
+    throw new Error('Hasil verifikasi guru harus menggunakan salah satu dari lima level SOLO.');
+  }
+  if (teacherReason.length > 3000) throw new Error('Catatan guru maksimal 3.000 karakter.');
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -2402,6 +2436,22 @@ function saveSoloDominantVerification_(payload) {
     })) {
       throw new Error('Bukti dan persentase verifikasi indikator belum lengkap atau tidak valid.');
     }
+    const latestAiEvent = events.filter(function (event) {
+      return String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION';
+    }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); }).pop();
+    if (!latestAiEvent) throw new Error('Rekomendasi level dominan AI belum tersedia. Jalankan analisis AI terlebih dahulu.');
+    const aiDetails = parseJson_(latestAiEvent.detailsJson, {});
+    const recommendation = aiDetails.dominantRecommendation;
+    if (!recommendation || typeof recommendation !== 'object' || Array.isArray(recommendation)) {
+      throw new Error('AI belum menghasilkan rekomendasi level dominan berbasis bukti yang cukup.');
+    }
+    const aiLevel = String(recommendation.level || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+    if (allowedLevels.indexOf(aiLevel) < 0) throw new Error('Level rekomendasi AI tidak valid.');
+    const aiEvidence = String(recommendation.evidenceSummary || '').trim();
+    if (!aiEvidence || aiEvidence.length > 5000) throw new Error('Ringkasan bukti kualitatif dari AI tidak valid.');
+    if (teacherLevel !== aiLevel && !teacherReason) throw new Error('Alasan perubahan level dari rekomendasi AI wajib diisi.');
+    const questionEvidence = Array.isArray(recommendation.questionEvidence) ? recommendation.questionEvidence : [];
+    if (!questionEvidence.length) throw new Error('AI harus menyertakan bukti jawaban yang mendukung rekomendasi level.');
     const questionIds = {};
     listRows_('Questions').filter(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); }).forEach(function (item) {
       questionIds[String(item.questionId)] = true;
@@ -2419,10 +2469,11 @@ function saveSoloDominantVerification_(payload) {
       eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
       eventType: 'SOLO_DOMINANT_LEVEL_VERIFICATION', eventAt: now,
       detailsJson: JSON.stringify({
-        version: 1, assessmentId: String(attempt.assessmentId),
+        version: 2, assessmentId: String(attempt.assessmentId),
         verifiedBy: String(user.email || ''), aiLevel: aiLevel, teacherLevel: teacherLevel,
         aiEvidenceSummary: aiEvidence, questionEvidence: checkedEvidence,
-        teacherReason: teacherReason, aiProvider: provider, aiModel: model, promptVersion: promptVersion
+        teacherReason: teacherReason, aiProvider: String(aiDetails.provider || ''),
+        aiModel: String(aiDetails.model || ''), promptVersion: String(aiDetails.promptVersion || '')
       })
     });
     return { attemptId: attemptId, status: 'verified', aiLevel: aiLevel, teacherLevel: teacherLevel, verifiedAt: now };
