@@ -199,7 +199,7 @@ assert.match(source, /AI_SOLO_SCORING_RECOMMENDATION/, 'AI scoring recommendatio
 assert.match(source, /AI_SOLO_SCORING_FAILED/, 'Failed AI scoring requests must be logged');
 assert.match(source, /recommendedScore: 0/, 'An entirely blank SOLO response must be assigned zero without relying on AI');
 assert.match(source, /manualPhotoReviewRequired: true/, 'Photo-only answers must be reserved for manual teacher review');
-assert.match(source, /function soloAiPanel\(/, 'Teacher reports must display AI scoring recommendations and evidence');
+assert.match(html, /function soloAiPanel\(/, 'Teacher reports must display AI scoring recommendations and evidence');
 assert.match(source, /requestSoloAiAssessment\(/, 'Teacher UI must provide an explicit action to request AI scoring');
 
 assert.match(source, /PropertiesService\.getScriptProperties\(\)/, 'AI credentials must be stored in server-side Script Properties');
