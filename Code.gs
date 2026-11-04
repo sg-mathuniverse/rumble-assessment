@@ -169,7 +169,7 @@ function routeAction_(action, payload) {
     studentId: user.role === 'student' ? String(user.userId || '') : String(payload.studentId || ''),
     createdBy: user.email
   });
-  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit','adminGetAiSettings','adminSaveAiSettings','adminTestAiConnection','adminListAiModels','adminListAiUsage'];
+  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit','adminGetAiSettings','adminSaveAiSettings','adminTestAiConnection','adminListAiModels','adminListAiUsage','adminListAiPrompts','adminSaveAiPrompt','adminTestAiPrompt','adminActivateAiPrompt'];
   if (['listAvailableLearningObjectives','listAvailableLearningIndicators'].indexOf(action) >= 0 && user.role !== 'admin' && user.role !== 'teacher') {
     throw new Error('Repositori pembelajaran hanya dapat diakses oleh Admin dan Guru.');
   }
@@ -279,6 +279,10 @@ function routeAction_(action, payload) {
     adminTestAiConnection: function () { return adminTestAiConnection_(trusted); },
     adminListAiModels: function () { return adminListAiModels_(); },
     adminListAiUsage: function () { return adminListAiUsage_(); },
+    adminListAiPrompts: function () { return adminListAiPrompts_(); },
+    adminSaveAiPrompt: function () { return adminSaveAiPrompt_(trusted); },
+    adminTestAiPrompt: function () { return adminTestAiPrompt_(trusted); },
+    adminActivateAiPrompt: function () { return adminActivateAiPrompt_(trusted); },
     adminListLearningObjectives: function () { return adminListLearningObjectives_(); },
     adminSaveLearningObjective: function () { return adminSaveLearningObjective_(trusted); },
     adminSetLearningObjectiveActive: function () { return adminSetLearningObjectiveActive_(trusted); },
@@ -1993,6 +1997,91 @@ function adminListAiModels_() {
   return models.map(function (item) { return { id: String(item.id || ''), name: String(item.name || item.id || '') }; })
     .filter(function (item) { return !!item.id; });
 }
+
+const RUMBLE_AI_PROMPTS_KEY_ = 'RUMBLE_AI_PROMPTS_V1';
+function aiPrompts_() {
+  const raw = aiScriptProperties_().getProperty(RUMBLE_AI_PROMPTS_KEY_);
+  try { const value = raw ? JSON.parse(raw) : []; return Array.isArray(value) ? value : []; }
+  catch (error) { return []; }
+}
+function saveAiPrompts_(items) {
+  aiScriptProperties_().setProperty(RUMBLE_AI_PROMPTS_KEY_, JSON.stringify(items));
+}
+function adminListAiPrompts_() {
+  return aiPrompts_().slice().sort(function (a, b) {
+    return String(a.service).localeCompare(String(b.service)) || Number(b.version) - Number(a.version);
+  });
+}
+function adminSaveAiPrompt_(payload) {
+  const service = String(payload.service || '').trim().toUpperCase();
+  if (['SCORING', 'REFLECTION'].indexOf(service) < 0) throw new Error('Jenis prompt AI tidak valid.');
+  const content = requiredText_(payload.content, 'Isi prompt', 12000);
+  const items = aiPrompts_();
+  const version = items.filter(function (item) { return item.service === service; })
+    .reduce(function (max, item) { return Math.max(max, Number(item.version) || 0); }, 0) + 1;
+  const prompt = {
+    promptId: 'PROMPT_' + service + '_' + version,
+    service: service,
+    version: version,
+    content: content,
+    changeNote: String(payload.changeNote || '').slice(0, 500),
+    active: false,
+    testedAt: '',
+    testSummary: '',
+    createdAt: currentTimestamp_(),
+    createdBy: String(payload.currentUser && payload.currentUser.email || '')
+  };
+  items.push(prompt);
+  saveAiPrompts_(items);
+  return prompt;
+}
+function adminTestAiPrompt_(payload) {
+  const promptId = requiredText_(payload.promptId, 'ID prompt', 120);
+  const items = aiPrompts_();
+  const prompt = items.find(function (item) { return item.promptId === promptId; });
+  if (!prompt) throw new Error('Versi prompt tidak ditemukan.');
+  const simulation = prompt.service === 'SCORING'
+    ? {
+        task: 'simulasi penilaian jawaban uraian',
+        question: 'Jelaskan mengapa 2x + 3 = 7 menghasilkan x = 2.',
+        studentAnswer: 'Kurangi kedua ruas dengan 3 sehingga 2x = 4, lalu bagi 2 sehingga x = 2.',
+        answerGuide: 'Jawaban menjelaskan operasi yang sama pada kedua ruas.',
+        rubric: 'Nilai proses penalaran dan ketepatan kesimpulan.'
+      }
+    : {
+        task: 'simulasi refleksi pembelajaran kelas',
+        classStatistics: { participantCount: 20, completedCount: 18, objectiveAchievementPercent: 76, indicatorMastered: 9, indicatorDeveloping: 6, indicatorNeedsImprovement: 3 },
+        levelDistribution: { PRESTRUCTURAL: 1, UNISTRUCTURAL: 3, MULTISTRUKTURAL: 7, RELATIONAL: 6, EXTENDED_ABSTRACT: 1 }
+      };
+  const result = tokenPortalChatCompletion_([
+    { role: 'system', content: prompt.content },
+    { role: 'user', content: 'UJI COBA DENGAN DATA SIMULASI, BUKAN DATA SISWA NYATA. Berikan hasil sesuai prompt. Data simulasi: ' + JSON.stringify(simulation) }
+  ], aiSettings_().model, aiSettings_().maxOutputTokens);
+  const testedAt = currentTimestamp_();
+  prompt.testedAt = testedAt;
+  prompt.testSummary = result.content.slice(0, 1500);
+  prompt.testUsage = result.usage;
+  prompt.testedBy = String(payload.currentUser && payload.currentUser.email || '');
+  saveAiPrompts_(items);
+  logAiUsage_('AI_PROMPT_TEST_SUCCESS', {
+    provider: 'TOKENPORTAL', model: result.model, promptId: promptId,
+    service: prompt.service, status: 'success', usage: result.usage, testedAt: testedAt
+  });
+  return { promptId: promptId, testedAt: testedAt, model: result.model, response: result.content.slice(0, 3000), usage: result.usage };
+}
+function adminActivateAiPrompt_(payload) {
+  const promptId = requiredText_(payload.promptId, 'ID prompt', 120);
+  const items = aiPrompts_();
+  const selected = items.find(function (item) { return item.promptId === promptId; });
+  if (!selected) throw new Error('Versi prompt tidak ditemukan.');
+  if (!selected.testedAt) throw new Error('Prompt harus berhasil diuji menggunakan data simulasi sebelum diaktifkan.');
+  items.forEach(function (item) {
+    if (item.service === selected.service) item.active = item.promptId === promptId;
+  });
+  saveAiPrompts_(items);
+  return { promptId: promptId, service: selected.service, version: selected.version, active: true };
+}
+
 function adminListAiUsage_() {
   return listRows_('Events').filter(function (event) {
     return String(event.eventType || '').indexOf('AI_') === 0;
