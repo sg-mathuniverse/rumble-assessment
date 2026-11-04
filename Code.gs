@@ -519,38 +519,59 @@ function saveQuestionBundle_(payload) {
   const title = requiredText_(payload.title, 'Judul bundel', 180);
   const questions = Array.isArray(payload.questions) ? payload.questions : [];
   if (!questions.length || questions.length > 200) throw new Error('Jumlah soal bundel harus antara 1 dan 200.');
-  questions.forEach(function (q, i) {
-    const type = String(q.type || 'multiple_choice'), points = Number(q.points);
-    if (['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type) < 0) throw new Error('Tipe soal tidak valid pada soal nomor ' + (i + 1));
-    if (!isFinite(points) || points < 0 || points > 1000) throw new Error('Bobot nilai tidak valid pada soal nomor ' + (i + 1));
+  const bundleId = String(payload.bundleId || payload.id || makeId_('BND'));
+  const sheet = getSheet_('QuestionBundles'), values = sheet.getDataRange().getValues(), headers = values[0].map(String);
+  const idCol = headers.indexOf('bundleId');
+  let rowNumber = -1, existing = null;
+  for (let i=1;i<values.length;i++) if (String(values[i][idCol])===bundleId) { rowNumber=i+1; existing=listRows_('QuestionBundles').find(function(b){return String(b.bundleId)===bundleId;}); break; }
+  if (existing && String(existing.status).toLowerCase()==='archived') throw new Error('Bundel yang sudah diarsipkan tidak dapat diubah.');
+  const classification=String(payload.classification || (existing && existing.classification) || 'REGULER').trim().toUpperCase();
+  if (['REGULER','SOLO_TAX'].indexOf(classification)<0) throw new Error('Klasifikasi bundel harus REGULER atau SOLO_TAX.');
+  if (classification === 'SOLO_TAX') questions.forEach(function(q,i){ validateSoloTaxQuestion_(q,i); });
+  else questions.forEach(function(q,i){
+    const type=String(q.type||'multiple_choice'),points=Number(q.points);
+    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(i+1));
+    if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot nilai tidak valid pada soal nomor '+(i+1));
   });
-  const lock = LockService.getScriptLock(); lock.waitLock(10000);
-  try {
-    const bundleId = String(payload.bundleId || payload.id || makeId_('BND'));
-    const sheet = getSheet_('QuestionBundles'), values = sheet.getDataRange().getValues(), headers = values[0].map(String);
-    const idCol = headers.indexOf('bundleId');
-    let rowNumber = -1, existing = null;
-    for (let i=1;i<values.length;i++) if (String(values[i][idCol])===bundleId) { rowNumber=i+1; existing=listRows_('QuestionBundles').find(function(b){return String(b.bundleId)===bundleId;}); break; }
-    if (existing && String(existing.status).toLowerCase()==='archived') throw new Error('Bundel yang sudah diarsipkan tidak dapat diubah.');
-    const classification=String(payload.classification || (existing && existing.classification) || 'REGULER').trim().toUpperCase();
-    if (['REGULER','SOLO_TAX'].indexOf(classification)<0) throw new Error('Klasifikasi bundel harus REGULER atau SOLO_TAX.');
-    if (classification === 'SOLO_TAX') throw new Error('Pembuatan Bundel SOLO Tax belum diaktifkan. Gunakan editor SOLO Tax setelah tahap pengembangan berikutnya selesai.');
-    const now=currentTimestamp_();
-    const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),learningObjectiveId:String(payload.learningObjectiveId||'').trim(),learningIndicatorId:String(payload.learningIndicatorId||'').trim(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
-    validateBundleLearningReference_(snapshot);
-    validateBundleSnapshot_(snapshot);
-    const snapshotJson=JSON.stringify(snapshot);
-    let latest=null;
-    if(existing && existing.latestVersionId){
-      const prior=listRows_('BundleVersions').find(function(v){return String(v.versionId)===String(existing.latestVersionId);});
-      if(prior && String(prior.snapshotJson)===snapshotJson) latest={versionId:prior.versionId,versionNumber:Number(prior.versionNumber)};
-    }
-    if(!latest) latest=createBundleVersion_(bundleId,snapshot,String(payload.changeNote||(existing?'Perubahan isi bundel':'Versi awal')),String(payload.createdBy||(existing&&existing.createdBy)||''));
+  const now=currentTimestamp_();
+  const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),learningObjectiveId:String(payload.learningObjectiveId||'').trim(),learningIndicatorId:String(payload.learningIndicatorId||'').trim(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
+  validateBundleLearningReference_(snapshot);
+  validateBundleSnapshot_(snapshot);
+  const snapshotJson=JSON.stringify(snapshot);
+  let latest=null;
+  if(existing && existing.latestVersionId){
+    const prior=listRows_('BundleVersions').find(function(v){return String(v.versionId)===String(existing.latestVersionId);});
+    if(prior && String(prior.snapshotJson)===snapshotJson) latest={versionId:prior.versionId,versionNumber:Number(prior.versionNumber)};
+  }
+  const lock=LockService.getScriptLock();lock.waitLock(10000);
+  try{
+    if(!latest)latest=createBundleVersion_(bundleId,snapshot,String(payload.changeNote||(existing?'Perubahan isi bundel':'Versi awal')),String(payload.createdBy||(existing&&existing.createdBy)||''));
     const record={bundleId:bundleId,title:title,subject:snapshot.subject,description:snapshot.description,tpCode:snapshot.tpCode,passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passagesJson:JSON.stringify(snapshot.passages),questionsJson:JSON.stringify(questions),status:'ready',classification:classification,latestVersionId:String(latest.versionId),latestVersionNumber:Number(latest.versionNumber),visibility:String(payload.visibility||(existing&&existing.visibility)||'shared')==='private'?'private':'shared',createdBy:String(payload.createdBy||(existing&&existing.createdBy)||''),createdAt:existing?String(existing.createdAt||now):now,updatedAt:now,archivedAt:'',archivedBy:''};
-    if(rowNumber>0) headers.forEach(function(h,col){if(Object.prototype.hasOwnProperty.call(record,h))sheet.getRange(rowNumber,col+1).setValue(record[h]);});
+    if(rowNumber>0)headers.forEach(function(h,col){if(Object.prototype.hasOwnProperty.call(record,h))sheet.getRange(rowNumber,col+1).setValue(record[h]);});
     else appendRow_('QuestionBundles',record);
     return {bundleId:bundleId,title:title,questionCount:questions.length,status:'ready',classification:classification,versionId:String(latest.versionId),versionNumber:Number(latest.versionNumber)};
-  } finally {lock.releaseLock();}
+  }finally{lock.releaseLock();}
+}
+function soloTaxLevelPoints_(level){
+  const key=String(level||'').trim().toUpperCase().replace(/[ -]+/g,'_');
+  const levels={MULTISTRUKTURAL:3,RELATIONAL:4,EXTENDED_ABSTRACT:5};
+  return Object.prototype.hasOwnProperty.call(levels,key)?levels[key]:0;
+}
+function validateSoloTaxQuestion_(question,index){
+  const q=question||{},number=index+1;
+  if(String(q.type||'').toLowerCase()!=='essay')throw new Error('SOLO Tax hanya mendukung tipe soal uraian (soal nomor '+number+').');
+  if(!String(q.text||'').trim())throw new Error('Pertanyaan utama wajib diisi pada soal SOLO Tax nomor '+number+'.');
+  const maximum=soloTaxLevelPoints_(q.soloLevel);
+  if(!maximum)throw new Error('Level SOLO soal nomor '+number+' harus Multistruktural, Relational, atau Extended Abstract.');
+  if(Number(q.points)!==maximum)throw new Error('Nilai maksimal soal nomor '+number+' harus '+maximum+' sesuai level SOLO.');
+  if(!Array.isArray(q.subquestions)||!q.subquestions.length||q.subquestions.some(function(x){return !String(x||'').trim();}))throw new Error('Setiap soal SOLO Tax harus memiliki minimal satu subpertanyaan yang terisi (soal nomor '+number+').');
+  if(!String(q.answerGuide||'').trim())throw new Error('Panduan jawaban wajib diisi pada soal SOLO Tax nomor '+number+'.');
+  if(!String(q.rubric||'').trim())throw new Error('Rubrik penilaian wajib diisi pada soal SOLO Tax nomor '+number+'.');
+  if(!Array.isArray(q.learningIndicatorIds)||!q.learningIndicatorIds.length)throw new Error('Pilih minimal satu indikator TP untuk soal SOLO Tax nomor '+number+'.');
+  const ids=q.learningIndicatorIds.map(function(id){return String(id||'').trim();});
+  if(ids.some(function(id){return !id;})||ids.some(function(id,i){return ids.indexOf(id)!==i;}))throw new Error('Daftar indikator TP pada soal nomor '+number+' tidak valid.');
+  if(!Array.isArray(q.rubricLevels)||!q.rubricLevels.length||q.rubricLevels.some(function(x){return !String(x||'').trim();}))throw new Error('Rubrik SOLO Tax harus memiliki deskripsi kriteria yang terisi pada soal nomor '+number+'.');
+  return true;
 }
 
 function listQuestionBundles_(payload) {
@@ -738,7 +759,7 @@ function createAssessment_(payload) {
     appendRow_('Assessments',{assessmentId:assessmentId,title:title,subject:String(sourceVersion?sourceVersion.snapshot.subject:(payload.subject||'')),className:String(payload.className||''),duration:Math.max(1,Math.min(300,Number(payload.duration)||60)),startAt:String(payload.startAt||''),endAt:String(payload.endAt||''),passageText:String(sourceVersion?sourceVersion.snapshot.passageText:(payload.passageText||'')),passageImageUrl:String(sourceVersion?sourceVersion.snapshot.passageImageUrl:(payload.passageImageUrl||'')),status:'draft',createdBy:String(payload.createdBy||''),createdAt:timestamp,updatedAt:timestamp,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification,archivedAt:'',archivedBy:''});
     questions.forEach(function(question,index){
       const type=String(question.type||'multiple_choice'),points=Number(question.points);
-      appendRow_('Questions',{questionId:makeId_('Q'),assessmentId:assessmentId,order:index+1,type:type,text:String(question.text||''),points:points,optionsJson:JSON.stringify(question.options||[]),answerJson:JSON.stringify(question.answer===undefined?null:question.answer),rubric:String(question.rubric||''),pairsJson:JSON.stringify(question.pairs||''),imageUrl:String(question.imageUrl||''),optionImagesJson:JSON.stringify(question.optionImages||[]),subquestionsJson:JSON.stringify(question.subquestions||[]),subquestionImagesJson:JSON.stringify(question.subquestionImages||[]),rubricLevelsJson:JSON.stringify(question.rubricLevels||[]),passageText:String(question.passageText||''),passageImageUrl:String(question.passageImageUrl||''),sourceBundleVersionId:sourceVersion?sourceVersion.versionId:'',sourceQuestionKey:sourceVersion?String(question.questionId||question.id||('Q-'+(index+1))):''});
+      appendRow_('Questions',{questionId:makeId_('Q'),assessmentId:assessmentId,order:index+1,type:type,text:String(question.text||''),points:points,optionsJson:JSON.stringify(question.options||[]),answerJson:JSON.stringify(classification==='SOLO_TAX'?{__soloTaxMeta:{soloLevel:String(question.soloLevel||''),learningIndicatorIds:question.learningIndicatorIds||[],answerGuide:String(question.answerGuide||'')}}:(question.answer===undefined?null:question.answer)),rubric:String(question.rubric||''),pairsJson:JSON.stringify(question.pairs||''),imageUrl:String(question.imageUrl||''),optionImagesJson:JSON.stringify(question.optionImages||[]),subquestionsJson:JSON.stringify(question.subquestions||[]),subquestionImagesJson:JSON.stringify(question.subquestionImages||[]),rubricLevelsJson:JSON.stringify(question.rubricLevels||[]),passageText:String(question.passageText||''),passageImageUrl:String(question.passageImageUrl||''),sourceBundleVersionId:sourceVersion?sourceVersion.versionId:'',sourceQuestionKey:sourceVersion?String(question.questionId||question.id||('Q-'+(index+1))):''});
     });
     return {id:assessmentId,title:title,status:'draft',questionCount:questions.length,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification};
   }finally{lock.releaseLock();}
@@ -1087,18 +1108,22 @@ function getAssessment_(payload) {
       return {
         id: question.questionId,
         answer: canIncludeAnswers ? parseJson_(question.answerJson, null) : undefined,
+        soloMeta: canIncludeAnswers ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta:null;})() : undefined,
+        soloLevel: canIncludeAnswers ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta.soloLevel:'';})() : undefined,
+        learningIndicatorIds: canIncludeAnswers ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta.learningIndicatorIds||[]:[];})() : undefined,
+        answerGuide: canIncludeAnswers ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta.answerGuide||'':'';})() : undefined,
         order: Number(question.order),
         type: question.type,
         text: question.text,
         points: Number(question.points),
         options: parseJson_(question.optionsJson, []),
-        rubric: question.rubric,
+        rubric: canIncludeAnswers ? question.rubric : '',
         pairs: parseJson_(question.pairsJson, ''),
         imageUrl: question.imageUrl,
         optionImages: parseJson_(question.optionImagesJson, []),
         subquestions: parseJson_(question.subquestionsJson, []),
         subquestionImages: parseJson_(question.subquestionImagesJson, []),
-        rubricLevels: parseJson_(question.rubricLevelsJson, []),
+        rubricLevels: canIncludeAnswers ? parseJson_(question.rubricLevelsJson, []) : [],
         passageText: String(question.passageText || ''),
         passageImageUrl: String(question.passageImageUrl || '')
       };
@@ -2100,6 +2125,7 @@ function uploadAnswerImage_(payload) {
     const answer = answers[questionId] && typeof answers[questionId] === 'object' && !Array.isArray(answers[questionId])
       ? answers[questionId] : { text: typeof answers[questionId] === 'string' ? answers[questionId] : '' };
     answer.photos = Array.isArray(answer.photos) ? answer.photos : [];
+    if (String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && answer.photos.length >= 1) throw new Error('SOLO Tax hanya mengizinkan satu foto untuk setiap soal utama.');
     answer.photos.push({ fileId: fileId, url: file.getUrl(), imageUrl: imageUrl, name: file.getName() });
     answers[questionId] = answer;
     attemptSheet.getRange(rowIndex + 1, answersCol + 1).setValue(JSON.stringify(answers));
@@ -2175,34 +2201,34 @@ function updateRowByKey_(tableName, keyHeader, keyValue, fields) {
 function bundleSnapshotFromRecord_(bundle,classification){
   return {schemaVersion:1,bundleId:String(bundle.bundleId),classification:String(classification||'REGULER').toUpperCase(),title:String(bundle.title||''),subject:String(bundle.subject||''),description:String(bundle.description||''),tpCode:String(bundle.tpCode||''),learningObjectiveId:String(bundle.learningObjectiveId||''),learningIndicatorId:String(bundle.learningIndicatorId||''),passageText:String(bundle.passageText||''),passageImageUrl:String(bundle.passageImageUrl||''),passages:parseJson_(bundle.passagesJson,[]),questions:parseJson_(bundle.questionsJson,[])};
 }
-function validateBundleLearningReference_(snapshot) {
-  const objectiveId = String(snapshot.learningObjectiveId || '').trim();
-  const indicatorId = String(snapshot.learningIndicatorId || '').trim();
-  if (!objectiveId && !indicatorId) return true;
-  if (!objectiveId) throw new Error('Pilih tujuan pembelajaran sebelum memilih indikator.');
+function validateBundleLearningReference_(snapshot){
+  const objectiveId=String(snapshot.learningObjectiveId||'').trim(),legacyId=String(snapshot.learningIndicatorId||'').trim(),ids=[];
+  (snapshot.questions||[]).forEach(function(q){(Array.isArray(q.learningIndicatorIds)?q.learningIndicatorIds:[]).forEach(function(id){ids.push(String(id||'').trim());});});
+  const indicatorIds=Array.from(new Set([legacyId].concat(ids).filter(Boolean)));
+  if(!objectiveId&&!indicatorIds.length){if(String(snapshot.classification||'').toUpperCase()==='SOLO_TAX')throw new Error('Pilih tujuan pembelajaran dan indikator TP untuk bundel SOLO Tax.');return true;}
+  if(!objectiveId)throw new Error('Pilih tujuan pembelajaran sebelum memilih indikator.');
   learningRepositoryAssertReady_();
-  const objective = listRows_('LearningObjectives').find(function (row) {
-    return String(row.objectiveId) === objectiveId && learningActive_(row.active);
+  const objective=listRows_('LearningObjectives').find(function(row){return String(row.objectiveId)===objectiveId&&learningActive_(row.active);});
+  if(!objective)throw new Error('Tujuan pembelajaran yang dipilih tidak tersedia atau tidak aktif.');
+  if(String(objective.subject||'').trim().toLowerCase()!==String(snapshot.subject||'').trim().toLowerCase())throw new Error('Mata pelajaran bundel harus sama dengan mata pelajaran tujuan pembelajaran.');
+  indicatorIds.forEach(function(indicatorId){
+    const indicator=listRows_('LearningIndicators').find(function(row){return String(row.indicatorId)===indicatorId&&String(row.objectiveId)===objectiveId&&learningActive_(row.active);});
+    if(!indicator)throw new Error('Indikator tidak aktif atau tidak terhubung dengan tujuan pembelajaran yang dipilih.');
   });
-  if (!objective) throw new Error('Tujuan pembelajaran yang dipilih tidak tersedia atau tidak aktif.');
-  if (String(objective.subject || '').trim().toLowerCase() !== String(snapshot.subject || '').trim().toLowerCase()) {
-    throw new Error('Mata pelajaran bundel harus sama dengan mata pelajaran tujuan pembelajaran.');
-  }
-  if (indicatorId) {
-    const indicator = listRows_('LearningIndicators').find(function (row) {
-      return String(row.indicatorId) === indicatorId &&
-        String(row.objectiveId) === objectiveId && learningActive_(row.active);
-    });
-    if (!indicator) throw new Error('Indikator tidak aktif atau tidak terhubung dengan tujuan pembelajaran yang dipilih.');
-  }
   return true;
 }
 function validateBundleSnapshot_(snapshot){
   if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot))throw new Error('Snapshot bundel tidak valid.');
   requiredText_(snapshot.bundleId,'ID bundel',100);
-  if(['REGULER','SOLO_TAX'].indexOf(String(snapshot.classification||'').toUpperCase())<0)throw new Error('Klasifikasi bundel tidak valid.');
+  const classification=String(snapshot.classification||'').toUpperCase();
+  if(['REGULER','SOLO_TAX'].indexOf(classification)<0)throw new Error('Klasifikasi bundel tidak valid.');
   if(!Array.isArray(snapshot.questions)||snapshot.questions.length<1||snapshot.questions.length>200)throw new Error('Snapshot harus memiliki 1 sampai 200 soal.');
-  snapshot.questions.forEach(function(q,i){const type=String(q&&q.type||'multiple_choice'),points=Number(q&&q.points);if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal snapshot tidak valid pada nomor '+(i+1));if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal snapshot tidak valid pada nomor '+(i+1));});
+  snapshot.questions.forEach(function(q,i){
+    if(classification==='SOLO_TAX'){validateSoloTaxQuestion_(q,i);return;}
+    const type=String(q&&q.type||'multiple_choice'),points=Number(q&&q.points);
+    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal snapshot tidak valid pada nomor '+(i+1));
+    if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal snapshot tidak valid pada nomor '+(i+1));
+  });
   return true;
 }
 /** Caller must hold ScriptLock while updating the parent bundle's latest-version pointer. */
