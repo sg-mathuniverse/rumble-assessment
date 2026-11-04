@@ -1149,6 +1149,29 @@ assert.throws(function () {
 assert.equal(extraScoreContext.writes.length, 0, 'Extra question score keys must not write a grade');
 
 
+
+const snapshotReferenceContext = {
+  listRows_: function (table) {
+    if (table === 'LearningObjectives') return [{
+      objectiveId: 'TP-1', tpCode: 'TP-MAT-01', title: 'Memahami relasi', subject: 'Matematika', description: 'Tujuan pembelajaran'
+    }];
+    if (table === 'LearningIndicators') return [{
+      indicatorId: 'IND-1', objectiveId: 'TP-1', indicatorCode: 'IND-MAT-01', description: 'Menghubungkan dua konsep'
+    }];
+    return [];
+  }
+};
+vm.createContext(snapshotReferenceContext);
+vm.runInContext(extractFunction('snapshotBundleLearningReferences_', source), snapshotReferenceContext);
+const enrichedSoloSnapshot = snapshotReferenceContext.snapshotBundleLearningReferences_({
+  classification: 'SOLO_TAX', learningObjectiveId: 'TP-1', tpCode: 'TP-MAT-01', subject: 'Matematika',
+  questions: [{ learningIndicatorIds: ['IND-1'] }]
+});
+assert.equal(enrichedSoloSnapshot.learningObjectiveSnapshot.title, 'Memahami relasi',
+  'SOLO bundle snapshot must preserve the selected TP definition');
+assert.equal(enrichedSoloSnapshot.questions[0].learningIndicators[0].description, 'Menghubungkan dua konsep',
+  'SOLO bundle snapshot must preserve each mapped indicator definition');
+
 const soloVerificationContext = {
   LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () { soloVerificationContext.released = true; } }; } },
   requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('ID wajib'); return String(value).trim(); },
