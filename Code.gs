@@ -1243,7 +1243,9 @@ function saveAttempt_(payload) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const attemptsSheet = getSheet_('Attempts'), values = attemptsSheet.getDataRange().getValues();
+    const currentAssessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
+  assertStudentAssessmentIdentity_(currentAssessment, user);
+  const attemptsSheet = getSheet_('Attempts'), values = attemptsSheet.getDataRange().getValues();
     if (values.length < 2) throw new Error('Sesi pengerjaan tidak ditemukan.');
     const headers = values[0].map(String), idCol = headers.indexOf('attemptId'), assessmentCol = headers.indexOf('assessmentId'), studentCol = headers.indexOf('studentId');
     let rowNumber = -1, row = null;
@@ -1256,7 +1258,13 @@ function saveAttempt_(payload) {
     const started = new Date(row[col('startedAt')]).getTime(), durationMs = Number(assessment.duration) * 60000;
     if (!isFinite(started) || !isFinite(durationMs) || durationMs <= 0 || Date.now() > started + durationMs + 30000) throw new Error('Waktu pengerjaan sudah habis.');
     const incomingAnswers = payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers) ? payload.answers : {};
-    const answers = mergeUploadedAnswerPhotos_(attemptId, incomingAnswers, parseJson_(row[col('answersJson')], {}));
+    const questions = listRows_('Questions').filter(function (question) { return String(question.assessmentId) === assessmentId; });
+    if (!questions.length) throw new Error('Asesmen tidak memiliki soal.');
+    const allowed = {};
+    questions.forEach(function (question) { allowed[String(question.questionId)] = true; });
+    const filteredAnswers = {};
+    Object.keys(incomingAnswers).forEach(function (questionId) { if (allowed[questionId]) filteredAnswers[questionId] = incomingAnswers[questionId]; });
+    const answers = mergeUploadedAnswerPhotos_(attemptId, filteredAnswers, parseJson_(row[col('answersJson')], {}));
     attemptsSheet.getRange(rowNumber, col('answersJson') + 1).setValue(JSON.stringify(answers));
     return { saved: true, savedAt: currentTimestamp_() };
   } finally { lock.releaseLock(); }
@@ -1275,9 +1283,9 @@ function submitAttempt_(payload) {
     return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
   });
   if (existingAttempt && String(existingAttempt.status) === 'in_progress') {
-    assertStudentAssessmentIdentity_(currentAssessment, user);
+    assertStudentAssessmentIdentity_(assessment, user);
   } else {
-    assertStudentAssessmentAccess_(currentAssessment, user);
+    assertStudentAssessmentAccess_(assessment, user);
   }
 
   const lock = LockService.getScriptLock();
