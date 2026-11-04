@@ -1214,22 +1214,29 @@ const soloVerificationContext = {
   appended: [], released: false
 };
 vm.createContext(soloVerificationContext);
+vm.runInContext(extractFunction('soloAchievementCategory_', source), soloVerificationContext);
 vm.runInContext(extractFunction('saveSoloIndicatorVerification_', source), soloVerificationContext);
 const soloVerificationResult = soloVerificationContext.saveSoloIndicatorVerification_({
   attemptId: 'ATT-SOLO', currentUser: { role: 'teacher', email: 'teacher@example.test' },
   results: [
-    { indicatorId: 'IND-A', status: 'mastered', evidence: 'Siswa menghubungkan konsep pada jawaban soal pertama.' },
-    { indicatorId: 'IND-B', status: 'developing', evidence: 'Siswa menunjukkan hubungan parsial pada dua soal.' }
+    { indicatorId: 'IND-A', percentage: 90, evidence: 'Siswa menghubungkan konsep pada jawaban soal pertama.' },
+    { indicatorId: 'IND-B', percentage: 80, evidence: 'Siswa menunjukkan hubungan parsial pada dua soal.' }
   ]
 });
 assert.equal(soloVerificationResult.status, 'verified', 'Teacher can verify all mapped indicators');
 assert.equal(soloVerificationResult.indicatorCount, 2, 'Verification covers each distinct mapped indicator');
+assert.equal(soloVerificationResult.tpAchievement.averagePercentage, 85, 'TP achievement is the equal-weighted mean of indicator percentages');
+assert.equal(soloVerificationResult.tpAchievement.category, 'achieved', 'An average of exactly 85 percent is achieved, not exceeds');
+assert.equal(soloVerificationContext.appended[0].row.detailsJson.includes('"percentage":90'), true, 'Indicator percentage must be audit logged');
+assert.equal(soloVerificationContext.soloAchievementCategory_(85), 'achieved', '85 percent belongs to achieved');
+assert.equal(soloVerificationContext.soloAchievementCategory_(85.01), 'exceeds', 'Only values above 85 percent exceed');
+assert.equal(soloVerificationContext.soloAchievementCategory_(69.99), 'not_achieved', 'Values below 70 percent are not achieved');
 assert.equal(soloVerificationContext.appended[0].table, 'Events', 'Verification must be appended to the audit event log');
 assert.equal(soloVerificationContext.released, true, 'Verification lock must always be released');
 assert.throws(function () {
   soloVerificationContext.saveSoloIndicatorVerification_({
     attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
-    results: [{ indicatorId: 'IND-A', status: 'mastered', evidence: 'Bukti.' }]
+    results: [{ indicatorId: 'IND-A', percentage: 90, evidence: 'Bukti.' }]
   });
 }, /setiap indikator/, 'Verification must cover every mapped indicator exactly once');
 assert.throws(function () {
@@ -1237,10 +1244,10 @@ assert.throws(function () {
     attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
     results: [
       { indicatorId: 'IND-A', status: 'mastered', evidence: 'Bukti.' },
-      { indicatorId: 'IND-B', status: 'unknown', evidence: 'Bukti.' }
+      { indicatorId: 'IND-B', percentage: 101, evidence: 'Bukti.' }
     ]
   });
-}, /Status verifikasi/, 'Verification status must be from the supported set');
+}, /Persentase ketercapaian/, 'Verification status must be from the supported set');
 
 
 const dominantVerificationContext = {
