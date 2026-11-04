@@ -58,43 +58,9 @@ const TABLES = {
  * Cache singkat mengurangi permintaan berulang ke raw.githubusercontent.com.
  */
 function doGet() {
-  const html = getFrontendHtml_();
-  return HtmlService.createHtmlOutput(html)
+  return HtmlService.createHtmlOutputFromFile('index')
     .setTitle(CONFIG.APP_NAME)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-}
-
-/**
- * Mengambil HTML terkini dari repositori GitHub.
- * Perubahan GitHub dapat memerlukan hingga 5 menit untuk melewati cache.
- */
-function getFrontendHtml_() {
-  const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v7';
-  const cached = cache.get(cacheKey);
-
-  if (cached) {
-    return cached;
-  }
-
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/fe848cc5637f49afa1d5fc39635abb2ebd71a9e2/index.html';
-  const response = UrlFetchApp.fetch(url, {
-    muteHttpExceptions: true,
-    followRedirects: true
-  });
-  const status = response.getResponseCode();
-
-  if (status !== 200) {
-    throw new Error('Gagal mengambil index.html dari GitHub (HTTP ' + status + ').');
-  }
-
-  const html = response.getContentText();
-  if (!html || html.indexOf('id="app"') === -1) {
-    throw new Error('File index.html dari GitHub kosong atau formatnya tidak sesuai.');
-  }
-
-  // index.html melebihi batas ukuran satu item CacheService, jadi jangan simpan HTML utuh di cache.
-  return html;
 }
 
 /**
