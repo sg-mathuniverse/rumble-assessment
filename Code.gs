@@ -1545,7 +1545,7 @@ function listAttempts_(payload) {
           });
           return answers;
         })(),
-        questionScores: parseJson_(attempt.questionScoresJson, {}),
+        questionScores: assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && !canViewInternal ? {} : parseJson_(attempt.questionScoresJson, {}),
         questionDetails: details,
         assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
         soloIndicators: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
@@ -1699,6 +1699,13 @@ function gradeAttempt_(payload) {
           .setValue(String(payload.feedback || ''));
         sheet.getRange(rowIndex + 1, columnIndex('questionScoresJson') + 1)
           .setValue(JSON.stringify(savedScores));
+        if (isSoloTax) {
+          appendRow_('Events', {
+            eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+            eventType: 'SOLO_INDICATOR_VERIFICATION_INVALIDATED', eventAt: currentTimestamp_(),
+            detailsJson: JSON.stringify({ reason: 'Nilai soal berubah; verifikasi indikator perlu diperiksa ulang.' })
+          });
+        }
 
         return {
           attemptId: attemptId,
