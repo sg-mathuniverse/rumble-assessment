@@ -631,10 +631,17 @@ async function loadAttempts(){
 }
 async function saveGrade(id){
  const attempt=(s.attempts||[]).find(a=>String(a.attemptId)===String(id));if(!attempt){toast('Data pengerjaan tidak ditemukan.');return}
- const qs=attempt.questionDetails||[],questionScores={};let score=0,maxScore=0;
- for(const q of qs){const el=document.getElementById('qscore_'+id+'_'+q.id);const raw=el?el.value:'';const value=raw===''?0:Number(raw),maximum=Number(q.points)||0;if(!isFinite(value)||value<0||value>maximum){toast('Skor soal '+q.order+' harus antara 0 dan '+maximum+'.');return}questionScores[q.id]=value;score+=value;maxScore+=maximum}
+ const qs=attempt.questionDetails||[];if(!qs.length){toast('Daftar soal tidak tersedia. Nilai tidak dapat disimpan.');return}
+ const questionScores={};
+ for(const q of qs){
+  const el=document.getElementById('qscore_'+id+'_'+q.id),raw=el?String(el.value):'';
+  if(raw.trim()===''){toast('Skor soal '+q.order+' wajib diisi. Masukkan 0 jika tidak memperoleh poin.');return}
+  const value=Number(raw),maximum=Number(q.points);
+  if(!isFinite(value)||!isFinite(maximum)||maximum<0||value<0||value>maximum){toast('Skor soal '+q.order+' harus antara 0 dan '+maximum+'.');return}
+  questionScores[q.id]=value;
+ }
  const feedbackEl=document.getElementById('gradeFeedback_'+id);
- try{const r=await api('gradeAttempt',{attemptId:id,score,maxScore,questionScores,feedback:feedbackEl?feedbackEl.value:''});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Nilai gagal disimpan');toast('Skor per butir berhasil disimpan.');await loadAttempts();}
+ try{const r=await api('gradeAttempt',{attemptId:id,questionScores,feedback:feedbackEl?feedbackEl.value:''});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Nilai gagal disimpan');toast('Skor per butir berhasil disimpan.');await loadAttempts();}
  catch(e){toast('Gagal menyimpan nilai: '+e.message)}
 }
 
