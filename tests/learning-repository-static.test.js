@@ -187,6 +187,9 @@ assert.match(source, /SOLO Tax hanya mendukung tipe soal uraian/, 'SOLO Tax must
 assert.match(source, /SOLO Tax hanya mengizinkan satu foto/, 'SOLO Tax must enforce one answer photo per main question');
 assert.match(source, /hasResponse && value < 1/, 'Submitted SOLO Tax answers must receive at least one point');
 assert.match(source, /!hasResponse && value !== 0/, 'Blank SOLO Tax answers must receive zero');
+assert.match(source, /latestAnswer\.photos\.length >= 1/, 'Concurrent SOLO Tax photo uploads must recheck the saved photo list under lock');
+assert.match(source, /points: String\(assessment\.classification \|\| ''\)\.toUpperCase\(\) === 'SOLO_TAX' && !canIncludeAnswers \? undefined/, 'Students must not receive per-question SOLO Tax points in assessment details');
+assert.match(source, /rubricLevels: canViewInternal \? parseJson_\(question\.rubricLevelsJson, \[\]\) : \[\]/, 'Students must not receive internal SOLO rubrics from submitted attempt details');
 assert.match(source, /const teacherOnly = \[/, 'Teacher-only actions must be explicitly registered');
 
 const routeAction = bodyOf('routeAction_', 'assertAssessmentOwner_');
@@ -451,10 +454,14 @@ assert.equal(referenceContext.validateBundleLearningReference_({
   learningObjectiveId: '', learningIndicatorId: '', questions: [{ type: 'essay', points: 10 }]
 }), true, 'Legacy bundle without learning references must remain valid');
 
-const soloContext = { soloTaxLevelPoints_: null };
+const soloContext = {
+  soloTaxLevelPoints_: null,
+  requiredText_: function(value,label){const v=String(value||'').trim();if(!v)throw new Error(label+' wajib diisi.');return v;}
+};
 vm.createContext(soloContext);
 vm.runInContext(extractFunction('soloTaxLevelPoints_', source), soloContext);
 vm.runInContext(extractFunction('validateSoloTaxQuestion_', source), soloContext);
+vm.runInContext(extractFunction('validateBundleSnapshot_', source), soloContext);
 const validSoloQuestion = {
   type: 'essay', text: 'Jelaskan hubungan konsep.',
   soloLevel: 'RELATIONAL', points: 4,
@@ -486,6 +493,8 @@ assert.throws(function () {
 }, /tidak aktif atau tidak terhubung/, 'SOLO indicators from a different TP must be rejected');
 const soloSnapshot = { bundleId: 'BND-SOLO', classification: 'SOLO_TAX', questions: [validSoloQuestion] };
 assert.equal(soloContext.validateSoloTaxQuestion_(soloSnapshot.questions[0], 0), true, 'SOLO snapshot question remains valid');
+assert.equal(soloContext.validateBundleSnapshot_(soloSnapshot), true, 'SOLO bundle snapshots must validate the essay-only question structure');
+assert.throws(function(){soloContext.validateBundleSnapshot_(Object.assign({},soloSnapshot,{questions:[Object.assign({},validSoloQuestion,{type:'matching'})]}));},/hanya mendukung tipe soal uraian/,'SOLO bundle snapshots must reject non-essay questions');
 
 const frozenSnapshot = {
   bundleId: 'BND-1', classification: 'REGULER', subject: 'Matematika',
