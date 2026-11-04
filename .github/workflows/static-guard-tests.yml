@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - feature/learning-repository-backend
+      - feature/solo-tax-foundation-2026-11-04
   pull_request:
     branches:
       - feature/learning-repository-backend
+      - feature/solo-tax-foundation-2026-11-04
 
 permissions:
   contents: read
