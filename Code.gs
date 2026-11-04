@@ -1648,7 +1648,8 @@ function listAttempts_(payload) {
                   const currentIndicator = history.length ? history[history.length - 1] : null;
                   const isCurrent = latestDominant && latestDominant.eventType === 'SOLO_DOMINANT_LEVEL_VERIFICATION' &&
                     currentIndicator && currentIndicator.eventType === 'SOLO_INDICATOR_VERIFICATION' &&
-                    String(latestDominant.eventAt) >= String(currentIndicator.eventAt);
+                    String(latestDominant.eventAt) >= String(currentIndicator.eventAt) &&
+                    (!latestAi || String(latestDominant.eventAt) >= String(latestAi.eventAt));
                   return {
                     status: isCurrent ? 'verified' : 'pending',
                     aiLevel: isCurrent ? String(detail.aiLevel || '') : '',
