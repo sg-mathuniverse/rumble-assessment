@@ -2060,10 +2060,19 @@ function adminTestAiPrompt_(payload) {
         classStatistics: { participantCount: 20, completedCount: 18, objectiveAchievementPercent: 76, indicatorMastered: 9, indicatorDeveloping: 6, indicatorNeedsImprovement: 3 },
         levelDistribution: { PRESTRUCTURAL: 1, UNISTRUCTURAL: 3, MULTISTRUKTURAL: 7, RELATIONAL: 6, EXTENDED_ABSTRACT: 1 }
       };
-  const result = tokenPortalChatCompletion_([
-    { role: 'system', content: prompt.content },
-    { role: 'user', content: 'UJI COBA DENGAN DATA SIMULASI, BUKAN DATA SISWA NYATA. Berikan hasil sesuai prompt. Data simulasi: ' + JSON.stringify(simulation) }
-  ], aiSettings_().model, aiSettings_().maxOutputTokens);
+  let result;
+  try {
+    result = tokenPortalChatCompletion_([
+      { role: 'system', content: prompt.content },
+      { role: 'user', content: 'UJI COBA DENGAN DATA SIMULASI, BUKAN DATA SISWA NYATA. Berikan hasil sesuai prompt. Data simulasi: ' + JSON.stringify(simulation) }
+    ], aiSettings_().model, aiSettings_().maxOutputTokens);
+  } catch (error) {
+    logAiUsage_('AI_PROMPT_TEST_FAILED', {
+      provider: 'TOKENPORTAL', model: aiSettings_().model, promptId: promptId,
+      service: prompt.service, status: 'failed', error: String(error && error.message || error).slice(0, 500)
+    });
+    throw error;
+  }
   const testedAt = currentTimestamp_();
   prompt.testedAt = testedAt;
   prompt.testSummary = result.content.slice(0, 1500);
