@@ -169,7 +169,7 @@ function routeAction_(action, payload) {
     studentId: user.role === 'student' ? String(user.userId || '') : String(payload.studentId || ''),
     createdBy: user.email
   });
-  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit'];
+  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit','adminGetAiSettings','adminSaveAiSettings','adminTestAiConnection','adminListAiModels','adminListAiUsage'];
   if (['listAvailableLearningObjectives','listAvailableLearningIndicators'].indexOf(action) >= 0 && user.role !== 'admin' && user.role !== 'teacher') {
     throw new Error('Repositori pembelajaran hanya dapat diakses oleh Admin dan Guru.');
   }
@@ -274,6 +274,11 @@ function routeAction_(action, payload) {
     adminSetStudentActive: function () { return adminSetStudentActive_(trusted); },
     adminListPendingLearningAudits: function () { return adminListPendingLearningAudits_(); },
     adminReconcileLearningAudit: function () { return adminReconcileLearningAudit_(payload, user); },
+    adminGetAiSettings: function () { return adminGetAiSettings_(); },
+    adminSaveAiSettings: function () { return adminSaveAiSettings_(trusted); },
+    adminTestAiConnection: function () { return adminTestAiConnection_(trusted); },
+    adminListAiModels: function () { return adminListAiModels_(); },
+    adminListAiUsage: function () { return adminListAiUsage_(); },
     adminListLearningObjectives: function () { return adminListLearningObjectives_(); },
     adminSaveLearningObjective: function () { return adminSaveLearningObjective_(trusted); },
     adminSetLearningObjectiveActive: function () { return adminSetLearningObjectiveActive_(trusted); },
@@ -1829,6 +1834,163 @@ function saveSoloIndicatorVerification_(payload) {
   }
 }
 
+
+
+const RUMBLE_AI_SETTINGS_KEY_ = 'RUMBLE_AI_SETTINGS_V1';
+const RUMBLE_AI_API_KEY_ = 'RUMBLE_AI_TOKENPORTAL_KEY_V1';
+const RUMBLE_AI_ENDPOINT_ = 'https://api.tokenportal.id/v1';
+
+function aiScriptProperties_() {
+  return PropertiesService.getScriptProperties();
+}
+function aiSettings_() {
+  const raw = aiScriptProperties_().getProperty(RUMBLE_AI_SETTINGS_KEY_);
+  let saved = {};
+  try { saved = raw ? JSON.parse(raw) : {}; } catch (error) { saved = {}; }
+  return {
+    provider: 'TOKENPORTAL',
+    model: String(saved.model || ''),
+    scoringEnabled: saved.scoringEnabled === true,
+    reflectionEnabled: saved.reflectionEnabled === true,
+    dailyTokenLimit: Math.max(0, Number(saved.dailyTokenLimit) || 0),
+    maxOutputTokens: Math.max(128, Math.min(8000, Number(saved.maxOutputTokens) || 1600)),
+    updatedAt: String(saved.updatedAt || ''),
+    updatedBy: String(saved.updatedBy || '')
+  };
+}
+function adminGetAiSettings_() {
+  const settings = aiSettings_();
+  settings.hasApiKey = !!aiScriptProperties_().getProperty(RUMBLE_AI_API_KEY_);
+  return settings;
+}
+function adminSaveAiSettings_(payload) {
+  const model = requiredText_(payload.model, 'Model AI', 120);
+  const dailyTokenLimit = Number(payload.dailyTokenLimit);
+  const maxOutputTokens = Number(payload.maxOutputTokens);
+  if (!isFinite(dailyTokenLimit) || dailyTokenLimit < 0 || dailyTokenLimit > 100000000) {
+    throw new Error('Batas token harian harus berupa angka 0 sampai 100.000.000. Isi 0 jika tidak dibatasi.');
+  }
+  if (!isFinite(maxOutputTokens) || maxOutputTokens < 128 || maxOutputTokens > 8000) {
+    throw new Error('Batas token keluaran per permintaan harus 128 sampai 8.000.');
+  }
+  const properties = aiScriptProperties_();
+  const key = String(payload.apiKey || '').trim();
+  if (key) {
+    if (!/^tp-[A-Za-z0-9_-]{12,}$/.test(key)) throw new Error('Format API key TokenPortal tidak sesuai.');
+    properties.setProperty(RUMBLE_AI_API_KEY_, key);
+  }
+  if (payload.clearApiKey === true) properties.deleteProperty(RUMBLE_AI_API_KEY_);
+  const current = aiSettings_();
+  const saved = {
+    model: model,
+    scoringEnabled: payload.scoringEnabled === true,
+    reflectionEnabled: payload.reflectionEnabled === true,
+    dailyTokenLimit: Math.floor(dailyTokenLimit),
+    maxOutputTokens: Math.floor(maxOutputTokens),
+    updatedAt: currentTimestamp_(),
+    updatedBy: String(payload.currentUser && payload.currentUser.email || '')
+  };
+  properties.setProperty(RUMBLE_AI_SETTINGS_KEY_, JSON.stringify(saved));
+  return adminGetAiSettings_();
+}
+function tokenPortalChatCompletion_(messages, model, maxTokens) {
+  const properties = aiScriptProperties_();
+  const apiKey = properties.getProperty(RUMBLE_AI_API_KEY_);
+  if (!apiKey) throw new Error('API key TokenPortal belum dikonfigurasi oleh Admin.');
+  const settings = aiSettings_();
+  const selectedModel = requiredText_(model || settings.model, 'Model AI', 120);
+  const response = UrlFetchApp.fetch(RUMBLE_AI_ENDPOINT_ + '/chat/completions', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + apiKey },
+    payload: JSON.stringify({
+      model: selectedModel,
+      messages: messages,
+      max_tokens: Math.max(128, Math.min(8000, Number(maxTokens) || settings.maxOutputTokens)),
+      stream: false
+    }),
+    muteHttpExceptions: true
+  });
+  const status = response.getResponseCode();
+  const body = response.getContentText() || '';
+  let data = {};
+  try { data = JSON.parse(body); } catch (error) {}
+  if (status < 200 || status >= 300) {
+    const providerMessage = data && data.error && data.error.message ? String(data.error.message) : '';
+    throw new Error('TokenPortal gagal merespons (HTTP ' + status + ')' + (providerMessage ? ': ' + providerMessage.slice(0, 240) : '. Periksa API key, model, dan saldo.'));
+  }
+  const content = data && data.choices && data.choices[0] && data.choices[0].message
+    ? String(data.choices[0].message.content || '') : '';
+  if (!content) throw new Error('Respons TokenPortal tidak berisi teks jawaban yang dapat dibaca.');
+  const usage = data.usage || {};
+  return {
+    content: content,
+    model: String(data.model || selectedModel),
+    requestId: String(data.id || ''),
+    usage: {
+      promptTokens: Number(usage.prompt_tokens) || 0,
+      completionTokens: Number(usage.completion_tokens) || 0,
+      totalTokens: Number(usage.total_tokens) || 0
+    }
+  };
+}
+function logAiUsage_(eventType, details) {
+  appendRow_('Events', {
+    eventId: makeId_('EVT'), attemptId: '', studentId: '',
+    eventType: eventType, eventAt: currentTimestamp_(),
+    detailsJson: JSON.stringify(details || {})
+  });
+}
+function adminTestAiConnection_(payload) {
+  const settings = aiSettings_();
+  const model = requiredText_(payload.model || settings.model, 'Model AI', 120);
+  const started = new Date().getTime();
+  try {
+    const result = tokenPortalChatCompletion_([
+      { role: 'system', content: 'Balas hanya dengan JSON valid: {"status":"ok","message":"connected"}.' },
+      { role: 'user', content: 'Ini uji koneksi simulasi Rumble Assessment. Jangan gunakan data siswa.' }
+    ], model, 128);
+    const details = {
+      provider: 'TOKENPORTAL', model: result.model, requestId: result.requestId,
+      durationMs: new Date().getTime() - started, usage: result.usage, status: 'success'
+    };
+    logAiUsage_('AI_PROVIDER_TEST_SUCCESS', details);
+    return { status: 'success', provider: 'TOKENPORTAL', model: result.model, response: result.content.slice(0, 500), usage: result.usage, durationMs: details.durationMs };
+  } catch (error) {
+    const details = {
+      provider: 'TOKENPORTAL', model: model, durationMs: new Date().getTime() - started,
+      status: 'failed', error: String(error && error.message || error).slice(0, 500)
+    };
+    logAiUsage_('AI_PROVIDER_TEST_FAILED', details);
+    throw error;
+  }
+}
+function adminListAiModels_() {
+  const response = UrlFetchApp.fetch(RUMBLE_AI_ENDPOINT_ + '/models', { method: 'get', muteHttpExceptions: true });
+  const status = response.getResponseCode();
+  if (status < 200 || status >= 300) throw new Error('Daftar model TokenPortal tidak dapat dimuat (HTTP ' + status + ').');
+  const data = JSON.parse(response.getContentText() || '{}');
+  const models = Array.isArray(data.data) ? data.data : [];
+  return models.map(function (item) { return { id: String(item.id || ''), name: String(item.name || item.id || '') }; })
+    .filter(function (item) { return !!item.id; });
+}
+function adminListAiUsage_() {
+  return listRows_('Events').filter(function (event) {
+    return String(event.eventType || '').indexOf('AI_') === 0;
+  }).slice(-200).reverse().map(function (event) {
+    const details = parseJson_(event.detailsJson, {});
+    return {
+      eventType: String(event.eventType || ''),
+      eventAt: String(event.eventAt || ''),
+      provider: String(details.provider || ''),
+      model: String(details.model || ''),
+      status: String(details.status || ''),
+      durationMs: Number(details.durationMs) || 0,
+      usage: details.usage || { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      error: String(details.error || '')
+    };
+  });
+}
 
 function saveSoloDominantVerification_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
