@@ -191,6 +191,9 @@ assert.match(source, /function saveSoloIndicatorVerification_\(/, 'SOLO Tax indi
 assert.match(source, /SOLO_INDICATOR_VERIFICATION_INVALIDATED/, 'Changing a score must invalidate prior indicator verification');
 assert.match(source, /assessment && String\(assessment\.classification \|\| ''\)\.toUpperCase\(\) === 'SOLO_TAX' && !canViewInternal \? \{\}/, 'Students must not receive per-question SOLO Tax scores');
 assert.match(source, /saveSoloIndicatorVerification: function \(\)/, 'Teacher route must expose the indicator verification action');
+assert.match(source, /function saveSoloDominantVerification_\(/, 'Dominant SOLO level must have a dedicated teacher verification endpoint');
+assert.match(source, /aiEvidenceSummary: aiEvidence/, 'Dominant level audit must preserve the qualitative AI evidence summary');
+assert.match(source, /teacherReason: teacherReason/, 'Teacher overrides of the AI level must retain a reason');
 assert.match(source, /latestAnswer\.photos\.length >= 1/, 'Concurrent SOLO Tax photo uploads must recheck the saved photo list under lock');
 assert.match(source, /points: String\(assessment\.classification \|\| ''\)\.toUpperCase\(\) === 'SOLO_TAX' && !canIncludeAnswers \? undefined/, 'Students must not receive per-question SOLO Tax points in assessment details');
 assert.match(source, /rubricLevels: canViewInternal \? parseJson_\(question\.rubricLevelsJson, \[\]\) : \[\]/, 'Students must not receive internal SOLO rubrics from submitted attempt details');
@@ -1218,5 +1221,49 @@ assert.throws(function () {
     ]
   });
 }, /Status verifikasi/, 'Verification status must be from the supported set');
+
+
+const dominantVerificationContext = {
+  LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () { dominantVerificationContext.released = true; } }; } },
+  requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('ID wajib'); return String(value).trim(); },
+  parseJson_: function (value, fallback) { try { return JSON.parse(value); } catch (e) { return fallback; } },
+  listRows_: function (table) {
+    if (table === 'Attempts') return [{ attemptId: 'ATT-SOLO', assessmentId: 'ASM-SOLO', studentId: 'ST-1', status: 'graded' }];
+    if (table === 'Assessments') return [{ assessmentId: 'ASM-SOLO', classification: 'SOLO_TAX' }];
+    if (table === 'Questions') return [{ questionId: 'SQ-1', assessmentId: 'ASM-SOLO' }];
+    if (table === 'Events') return [{
+      attemptId: 'ATT-SOLO', eventType: 'SOLO_INDICATOR_VERIFICATION',
+      eventAt: '2026-11-04T00:00:00Z',
+      detailsJson: JSON.stringify({ results: [{ indicatorId: 'IND-A', status: 'mastered', evidence: 'Siswa menghubungkan konsep.' }] })
+    }];
+    return [];
+  },
+  appendRow_: function (table, row) { dominantVerificationContext.appended.push({ table: table, row: row }); },
+  makeId_: function (prefix) { return prefix + '-TEST'; },
+  currentTimestamp_: function () { return '2026-11-04T00:01:00Z'; },
+  appended: [], released: false
+};
+vm.createContext(dominantVerificationContext);
+vm.runInContext(extractFunction('saveSoloDominantVerification_', source), dominantVerificationContext);
+const dominantResult = dominantVerificationContext.saveSoloDominantVerification_({
+  attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
+  aiProvider: 'TokenPortal', aiModel: 'model-test', promptVersion: 'solo-level-v1',
+  aiRecommendation: {
+    level: 'RELATIONAL', evidenceSummary: 'Jawaban mengintegrasikan dua konsep secara konsisten.',
+    questionEvidence: [{ questionId: 'SQ-1', evidence: 'Siswa menghubungkan konsep A dan B.' }]
+  },
+  teacherLevel: 'RELATIONAL', teacherReason: ''
+});
+assert.equal(dominantResult.status, 'verified', 'Teacher can verify an AI-supported dominant SOLO level');
+assert.equal(dominantVerificationContext.appended[0].table, 'Events', 'Dominant-level verification must be audit logged');
+assert.equal(dominantVerificationContext.released, true, 'Dominant-level verification lock must be released');
+assert.throws(function () {
+  dominantVerificationContext.saveSoloDominantVerification_({
+    attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
+    aiProvider: 'TokenPortal', aiModel: 'model-test', promptVersion: 'solo-level-v1',
+    aiRecommendation: { level: 'RELATIONAL', evidenceSummary: 'Ringkasan bukti.', questionEvidence: [{ questionId: 'SQ-1', evidence: 'Bukti.' }] },
+    teacherLevel: 'EXTENDED_ABSTRACT'
+  });
+}, /Alasan perubahan level/, 'Teacher must explain a different final level from the AI recommendation');
 
 console.log('PASS: learning repository static guard tests');
