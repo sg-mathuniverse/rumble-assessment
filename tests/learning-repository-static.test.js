@@ -980,4 +980,15 @@ vm.createContext(unpublishedStartContext); vm.runInContext(extractFunction('star
 assert.throws(function () { unpublishedStartContext.startAttempt_({ assessmentId: 'ASM-1', currentUser: { role: 'student', userId: 'ST-1', className: 'VII-A' } }); }, /tidak tersedia/,
   'Student cannot start a draft assessment');
 assert.equal(unpublishedStartContext.appended.length, 0, 'Unavailable assessment must not create an attempt');
+
+const submitSource = extractFunction('submitAttempt_', source);
+assert.ok(submitSource.indexOf("const currentAssessment = listRows_('Assessments')") > submitSource.indexOf('lock.waitLock'),
+  'Submission must reload assessment state only after acquiring the lock');
+assert.ok(submitSource.includes('const allowedQuestionIds = {}'),
+  'Submission must build an allowlist of question IDs belonging to the assessment');
+assert.ok(submitSource.includes('if (allowedQuestionIds[questionId]) answers[questionId] = submittedAnswers[questionId]'),
+  'Submission must discard answer keys for questions outside the assessment');
+assert.ok(submitSource.includes("if (!questions.length) throw new Error('Asesmen tidak memiliki soal.')"),
+  'Submission must reject assessments without questions');
+
 console.log('PASS: learning repository static guard tests');
