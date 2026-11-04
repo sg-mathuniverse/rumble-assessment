@@ -949,4 +949,35 @@ publishContext.assessment.status = 'draft'; publishContext.assessment.duration =
 assert.throws(function () { publishContext.publishAssessment_({ id: 'ASM-1' }); }, /Durasi asesmen/,
   'Invalid duration must block publication');
 assert.equal(publishContext.writes.length, 0, 'Invalid assessment must not change status');
+function makeStartAttemptContext() {
+  const ctx = {
+    LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () { ctx.released = true; } }; } },
+    requiredText_: function (v) { if (!String(v || '').trim()) throw new Error('ID wajib'); return String(v).trim(); },
+    listRows_: function (table) { return table === 'Assessments' ? [ctx.assessment] : table === 'Attempts' ? ctx.attempts : table === 'Questions' ? ctx.questions : []; },
+    assertStudentAssessmentAccess_: function (assessment, user) { if (!assessment || assessment.status !== 'published' || user.className !== assessment.className) throw new Error('Asesmen tidak tersedia.'); },
+    assertStudentAssessmentIdentity_: function (assessment, user) { if (!assessment || assessment.status !== 'published' || user.className !== assessment.className) throw new Error('Asesmen tidak tersedia.'); },
+    makeId_: function () { return 'ATT-NEW'; }, currentTimestamp_: function () { return new Date().toISOString(); },
+    appendRow_: function (table, row) { ctx.appended.push({ table: table, row: row }); },
+    assessment: { assessmentId: 'ASM-1', status: 'published', className: 'VII-A', duration: 60 },
+    attempts: [], questions: [{ assessmentId: 'ASM-1', questionId: 'Q-1', points: 5 }], appended: [], released: false
+  }; return ctx;
+}
+const startAttemptContext = makeStartAttemptContext();
+vm.createContext(startAttemptContext);
+vm.runInContext(extractFunction('startAttempt_', source), startAttemptContext);
+const startedAttempt = startAttemptContext.startAttempt_({ assessmentId: 'ASM-1', currentUser: { role: 'student', userId: 'ST-1', className: 'VII-A' } });
+assert.equal(startedAttempt.status, 'in_progress', 'Eligible student can start a published assessment');
+assert.equal(startAttemptContext.appended.length, 1, 'Starting an assessment creates exactly one attempt');
+assert.equal(startAttemptContext.appended[0].row.maxScore, 5, 'Attempt max score is derived from its questions');
+assert.equal(startAttemptContext.released, true, 'Attempt start always releases its lock');
+const emptyStartContext = makeStartAttemptContext(); emptyStartContext.questions = [];
+vm.createContext(emptyStartContext); vm.runInContext(extractFunction('startAttempt_', source), emptyStartContext);
+assert.throws(function () { emptyStartContext.startAttempt_({ assessmentId: 'ASM-1', currentUser: { role: 'student', userId: 'ST-1', className: 'VII-A' } }); }, /belum memiliki soal/,
+  'Student cannot start an assessment with no questions');
+assert.equal(emptyStartContext.appended.length, 0, 'Empty assessment must not create an attempt');
+const unpublishedStartContext = makeStartAttemptContext(); unpublishedStartContext.assessment.status = 'draft';
+vm.createContext(unpublishedStartContext); vm.runInContext(extractFunction('startAttempt_', source), unpublishedStartContext);
+assert.throws(function () { unpublishedStartContext.startAttempt_({ assessmentId: 'ASM-1', currentUser: { role: 'student', userId: 'ST-1', className: 'VII-A' } }); }, /tidak tersedia/,
+  'Student cannot start a draft assessment');
+assert.equal(unpublishedStartContext.appended.length, 0, 'Unavailable assessment must not create an attempt');
 console.log('PASS: learning repository static guard tests');
