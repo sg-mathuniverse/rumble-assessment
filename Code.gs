@@ -2012,6 +2012,7 @@ function requestSoloAiAssessment_(payload) {
     version: 1, assessmentId: String(attempt.assessmentId), promptId: prompt.promptId,
     promptVersion: Number(prompt.version), provider: 'TOKENPORTAL', model: model || settings.model,
     usage: usage, requestedBy: String(payload.currentUser && payload.currentUser.email || ''),
+    analyzedQuestionIds: questionInputs.map(function (item) { return item.questionId; }).sort(),
     dominantRecommendation: dominantRecommendation,
     results: results
   };
@@ -2452,7 +2453,12 @@ function saveSoloDominantVerification_(payload) {
     if (!aiEvidence || aiEvidence.length > 5000) throw new Error('Ringkasan bukti kualitatif dari AI tidak valid.');
     if (teacherLevel !== aiLevel && !teacherReason) throw new Error('Alasan perubahan level dari rekomendasi AI wajib diisi.');
     const questionEvidence = Array.isArray(recommendation.questionEvidence) ? recommendation.questionEvidence : [];
-    if (!questionEvidence.length) throw new Error('AI harus menyertakan bukti jawaban yang mendukung rekomendasi level.');
+    const analyzedQuestionIds = Array.isArray(aiDetails.analyzedQuestionIds) ? aiDetails.analyzedQuestionIds.map(String).sort() : [];
+    const receivedEvidenceIds = questionEvidence.map(function (item) { return String(item && item.questionId || ''); }).sort();
+    if (!analyzedQuestionIds.length || questionEvidence.length !== analyzedQuestionIds.length ||
+        analyzedQuestionIds.some(function (id, index) { return id !== receivedEvidenceIds[index]; })) {
+      throw new Error('Bukti level dominan harus mencakup tepat satu bukti untuk setiap soal yang dianalisis AI.');
+    }
     const questionIds = {};
     listRows_('Questions').filter(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); }).forEach(function (item) {
       questionIds[String(item.questionId)] = true;
