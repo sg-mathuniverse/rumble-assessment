@@ -571,6 +571,40 @@ function reportCorrectAnswer(q){
  if(q.type==='true_false')return String(q.answer);
  return '';
 }
+
+function soloVerificationPanel(attempt){
+ if(String(attempt.assessmentClassification||'').toUpperCase()!=='SOLO_TAX')return '';
+ const indicators=Array.isArray(attempt.soloIndicators)?attempt.soloIndicators:[],review=attempt.soloReview||{},saved=Array.isArray(review.results)?review.results:[];
+ const byId={};saved.forEach(function(item){byId[String(item.indicatorId)]=item});
+ if(!indicators.length)return '<div class="card"><h3>Verifikasi indikator SOLO</h3><div class="notice">Belum ada indikator TP yang terhubung dengan soal pada snapshot asesmen ini. Periksa pemetaan pada Bundel Soal.</div></div>';
+ const labels={mastered:'Dikuasai',developing:'Berkembang',needs_improvement:'Perlu ditingkatkan',insufficient_evidence:'Bukti belum cukup'};
+ const options=Object.keys(labels).map(function(key){return '<option value="'+key+'">'+labels[key]+'</option>'}).join('');
+ const rows=indicators.map(function(item,index){
+  const previous=byId[String(item.indicatorId)]||{};
+  return '<section class="report-question solo-indicator-review"><div><b>'+esc(item.indicatorCode||item.indicatorId)+'</b><p>'+esc(item.description||'')+'</p><small>Bukti dapat ditinjau pada soal: '+(item.questionOrders||[]).map(function(n){return 'Soal '+n}).join(', ')+'</small></div><div class="field"><label for="solo_status_'+esc(attempt.attemptId)+'_'+index+'">Status ketercapaian</label><select id="solo_status_'+esc(attempt.attemptId)+'_'+index+'">'+Object.keys(labels).map(function(key){return '<option value="'+key+'" '+(previous.status===key?'selected':'')+'>'+labels[key]+'</option>'}).join('')+'</select></div><div class="field"><label for="solo_evidence_'+esc(attempt.attemptId)+'_'+index+'">Bukti dan alasan verifikasi guru</label><textarea id="solo_evidence_'+esc(attempt.attemptId)+'_'+index+'" rows="3" maxlength="3000" placeholder="Jelaskan bukti dari jawaban siswa yang mendukung status ini.">'+esc(previous.evidence||'')+'</textarea></div></section>';
+ }).join('');
+ const history=(review.history||[]).slice().reverse().map(function(item){return '<li>'+esc(formatLocalDateTime(item.eventAt))+' · '+esc(item.verifiedBy||'Guru')+' · '+(item.eventType==='SOLO_INDICATOR_VERIFICATION'?'Verifikasi disimpan':'Verifikasi perlu diperiksa ulang setelah perubahan nilai')+'</li>'}).join('');
+ return '<div class="card"><div class="actions"><h3>Verifikasi ketercapaian indikator</h3><span class="pill '+(review.status==='verified'?'live':'')+'">'+(review.status==='verified'?'Terverifikasi':'Menunggu verifikasi')+'</span></div><p class="muted">Tinjau bukti jawaban untuk setiap indikator. Nilai soal tidak dibagi ke indikator; status ini ditetapkan berdasarkan bukti kualitatif.</p>'+rows+'<button class="btn primary" '+(attempt.status!=='graded'?'disabled':'')+' onclick="saveSoloVerification(\''+esc(attempt.attemptId)+'\')">Simpan verifikasi semua indikator</button>'+(review.verifiedAt?'<p class="muted">Verifikasi terakhir: '+esc(formatLocalDateTime(review.verifiedAt))+' · '+esc(review.verifiedBy||'')+'</p>':'')+(history?'<details class="report-question-text"><summary>Riwayat verifikasi</summary><ol>'+history+'</ol></details>':'')+'</div>';
+}
+async function saveSoloVerification(attemptId){
+ const attempt=(s.attempts||[]).find(function(item){return String(item.attemptId)===String(attemptId)});
+ if(!attempt){toast('Data pengerjaan tidak ditemukan.');return}
+ const indicators=Array.isArray(attempt.soloIndicators)?attempt.soloIndicators:[];
+ if(!indicators.length){toast('Tidak ada indikator untuk diverifikasi.');return}
+ const results=[];
+ for(let i=0;i<indicators.length;i++){
+  const item=indicators[i],status=document.getElementById('solo_status_'+attemptId+'_'+i),evidence=document.getElementById('solo_evidence_'+attemptId+'_'+i);
+  if(!status||!evidence||!String(evidence.value||'').trim()){toast('Lengkapi status dan bukti setiap indikator.');return}
+  results.push({indicatorId:item.indicatorId,status:status.value,evidence:evidence.value});
+ }
+ try{
+  const response=await api('saveSoloIndicatorVerification',{attemptId:attemptId,results:results});
+  if(!response||!response.ok)throw Error(response&&response.error?response.error:'Verifikasi gagal disimpan');
+  toast('Verifikasi indikator berhasil disimpan.');
+  await loadAttempts();
+ }catch(error){toast('Gagal menyimpan verifikasi: '+error.message)}
+}
+
 function reports(){
  const attempts=Array.isArray(s.attempts)?s.attempts:[],students=Array.isArray(s.students)?s.students:[];
  const groups={};attempts.forEach(a=>{const key=String(a.assessmentId||'');if(!groups[key])groups[key]=[];groups[key].push(a)});
@@ -590,7 +624,7 @@ function reports(){
    return '<section class="report-question"><div class="report-row"><div class="report-question-label">Soal '+(i+1)+'<small>'+esc(q.type)+'</small></div><div class="report-student-answer"><b>Jawaban murid</b><div class="math-content report-answer-text">'+esc(display)+'</div>'+photoHtml+'</div>'+keyCell+'<div class="report-weight-cell"><b>Bobot</b><span>'+maximum+' poin</span></div><div class="report-score-cell"><label for="qscore_'+esc(active.attemptId)+'_'+esc(q.id)+'">Skor</label><input class="question-score-input" id="qscore_'+esc(active.attemptId)+'_'+esc(q.id)+'" type="number" min="0" max="'+maximum+'" step="0.5" value="'+esc(existing===null?'':existing)+'" placeholder="—"></div></div>'+textDetails+(recommended!==null?'<small class="report-recommendation">Rekomendasi sistem: '+Number(recommended.toFixed(2))+' / '+maximum+' poin</small>':'<small class="report-recommendation">Soal uraian: skor ditentukan guru.</small>')+'</section>';
   }).join('');
   const total=qs.reduce((sum,q)=>sum+(Number(saved[q.id]??reportScoreRecommendation(q,answers[q.id])??0)||0),0),max=qs.reduce((sum,q)=>sum+(Number(q.points)||0),0);
-  return head('ANALITIK','Skor perbutir · '+esc(studentName),'Periksa jawaban dan sesuaikan skor rekomendasi sistem.')+breadcrumb+'<div class="report-questions">'+rows+'</div><div class="report-final-summary"><div><small>Nilai akhir murid</small><strong>'+total.toFixed(2)+' / '+max+' poin</strong></div><div class="field"><label>Umpan balik guru</label><textarea id="gradeFeedback_'+esc(active.attemptId)+'" rows="3">'+esc(active.teacherFeedback||'')+'</textarea></div><button class="btn primary" onclick="saveGrade(\''+esc(active.attemptId)+'\')">Simpan skor dan umpan balik</button></div>';
+  return head('ANALITIK','Skor perbutir · '+esc(studentName),'Periksa jawaban dan sesuaikan skor rekomendasi sistem.')+breadcrumb+'<div class="report-questions">'+rows+'</div><div class="report-final-summary"><div><small>Nilai akhir murid</small><strong>'+total.toFixed(2)+' / '+max+' poin</strong></div><div class="field"><label>Umpan balik guru</label><textarea id="gradeFeedback_'+esc(active.attemptId)+'" rows="3">'+esc(active.teacherFeedback||'')+'</textarea></div><button class="btn primary" onclick="saveGrade(\''+esc(active.attemptId)+'\')">Simpan skor dan umpan balik</button></div>'+soloVerificationPanel(active);
  }
  if(aid){
   const studentRows=list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),name=user?user.name:a.studentId,score=a.status==='graded'&&Number(a.maxScore)>0?Number(a.score)+' / '+Number(a.maxScore)+' poin':'Belum dinilai';return '<button class="report-student-row" onclick="chooseReportAttempt(\''+esc(a.attemptId)+'\')"><span><b>'+esc(name||'Murid')+'</b><small>'+esc(a.studentId||'')+' · '+esc(formatLocalDateTime(a.submittedAt))+'</small></span><span class="pill '+(a.status==='graded'?'live':'')+'">'+esc(score)+'</span></button>'}).join('');
