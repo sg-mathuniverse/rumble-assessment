@@ -1,0 +1,28 @@
+name: Static guard tests
+
+on:
+  push:
+    branches:
+      - feature/learning-repository-backend
+      - feature/solo-tax-foundation-2026-11-04
+      - integration/solo-tax-review-2026-11-04
+  pull_request:
+    branches:
+      - feature/learning-repository-backend
+      - feature/solo-tax-foundation-2026-11-04
+
+permissions:
+  contents: read
+
+jobs:
+  static-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run learning repository static guards
+        run: node tests/learning-repository-static.test.js

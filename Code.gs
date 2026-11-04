@@ -3,12 +3,16 @@
  *
  * Setup:
  * 1. Isi ID spreadsheet dan folder Drive pada CONFIG.
- * 2. Jalankan setupDatabase() satu kali.
- * 3. Deploy sebagai Web App untuk mengaktifkan endpoint.
+ * 2. Pada spreadsheet uji, jalankan migrasi yang sesuai secara eksplisit:
+ *    migrateDatabaseV1_() untuk fondasi versioning, lalu
+ *    migrateLearningRepositoryV1_() untuk repositori pembelajaran.
+ * 3. Tinjau hasil migrasi dan uji alur aplikasi sebelum deployment.
  *
  * Catatan keamanan:
- * Backend ini masih fondasi awal. Tambahkan autentikasi terverifikasi dan
- * pemeriksaan izin server sebelum digunakan dengan data siswa sungguhan.
+ * Backend menerapkan autentikasi sesi dan pemeriksaan peran di server untuk
+ * aksi yang telah didaftarkan. Implementasi ini belum dinyatakan siap produksi:
+ * pengujian runtime/integrasi, peninjauan konfigurasi deployment, dan kontrol
+ * operasional sekolah tetap wajib sebelum memakai data siswa sungguhan.
  */
 
 const CONFIG = {
@@ -73,7 +77,7 @@ function getFrontendHtml_() {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/feature/bundle-versioning-foundation/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/da44df77ba91169f9a35a6bce51c5965488a4ea2/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -97,8 +101,9 @@ function getFrontendHtml_() {
  * Jembatan frontend untuk google.script.run.
  * Semua operasi data diproses di server, bukan melalui fetch lintas domain.
  *
- * PENTING: deployment yang dibatasi domain saja belum merupakan otorisasi
- * per-peran. Tambahkan pemeriksaan izin guru/siswa sebelum memakai data nyata.
+ * Otorisasi sesi dan pemeriksaan peran dilakukan di routeAction_() pada
+ * server untuk setiap aksi terdaftar. Tetap lakukan pengujian runtime/integrasi
+ * dan tinjau konfigurasi deployment sebelum memakai data siswa sungguhan.
  */
 function clientApi(action, payload) {
   try {
@@ -164,14 +169,17 @@ function routeAction_(action, payload) {
     studentId: user.role === 'student' ? String(user.userId || '') : String(payload.studentId || ''),
     createdBy: user.email
   });
-  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive'];
+  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit','adminGetAiSettings','adminSaveAiSettings','adminTestAiConnection','adminListAiModels','adminListAiUsage','adminListAiPrompts','adminSaveAiPrompt','adminTestAiPrompt','adminActivateAiPrompt'];
+  if (['listAvailableLearningObjectives','listAvailableLearningIndicators'].indexOf(action) >= 0 && user.role !== 'admin' && user.role !== 'teacher') {
+    throw new Error('Repositori pembelajaran hanya dapat diakses oleh Admin dan Guru.');
+  }
   if (adminOnly.indexOf(action) >= 0 && user.role !== 'admin') {
     throw new Error('Fitur ini hanya dapat digunakan oleh administrator sekolah.');
   }
   const teacherOnly = [
-    'createAssessment','deleteAssessment','saveQuestionBundle','listQuestionBundles',
+    'createAssessment','deleteAssessment','requestSoloAiAssessment','saveSoloDominantVerification','saveQuestionBundle','listQuestionBundles',
     'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
-    'publishAssessment','gradeAttempt','listStudents','listMonitoring','getTeacherSummary'
+    'publishAssessment','gradeAttempt','saveSoloIndicatorVerification','listStudents','listMonitoring','getTeacherSummary'
   ];
   const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt','saveAttempt'];
   const shared = ['listAssessments','getAssessment','getAssessmentImage','listAttempts'];
@@ -213,7 +221,17 @@ function routeAction_(action, payload) {
       if (user.role === 'student') {
         trusted.studentId = String(user.userId || '');
         delete trusted.assessmentId;
-        return listAttempts_(trusted);
+        return listAttempts_(trusted).filter(function (attempt) {
+          const assessment = listRows_('Assessments').find(function (item) {
+            return String(item.assessmentId) === String(attempt.assessmentId);
+          });
+          if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') return true;
+          // SOLO Tax result is visible to the student only after an explicit release event.
+          return listRows_('Events').some(function (event) {
+            return String(event.attemptId) === String(attempt.attemptId) &&
+              String(event.eventType) === 'SOLO_RESULT_RELEASED';
+          });
+        });
       }
       return listAttempts_(trusted).filter(function (attempt) {
         const assessment = listRows_('Assessments').find(function (item) {
@@ -223,6 +241,13 @@ function routeAction_(action, payload) {
           String(assessment.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
       });
     },
+    requestSoloAiAssessment: function () {
+      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
+      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+      if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
+      assertAssessmentOwner_(attempt.assessmentId, user);
+      return requestSoloAiAssessment_(trusted);
+    },
     gradeAttempt: function () {
       const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
       const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
@@ -230,6 +255,21 @@ function routeAction_(action, payload) {
       assertAssessmentOwner_(attempt.assessmentId, user);
       return gradeAttempt_(trusted);
     },
+    saveSoloIndicatorVerification: function () {
+      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
+      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+      if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
+      assertAssessmentOwner_(attempt.assessmentId, user);
+      return saveSoloIndicatorVerification_(trusted);
+    },
+    saveSoloDominantVerification: function () {
+      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
+      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+      if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
+      assertAssessmentOwner_(attempt.assessmentId, user);
+      return saveSoloDominantVerification_(trusted);
+    },
+
     logEvent: function () {
       const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
       const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
@@ -246,6 +286,25 @@ function routeAction_(action, payload) {
     adminImportStudents: function () { return adminImportStudents_(trusted); },
     adminResetStudentPassword: function () { return adminResetStudentPassword_(trusted); },
     adminSetStudentActive: function () { return adminSetStudentActive_(trusted); },
+    adminListPendingLearningAudits: function () { return adminListPendingLearningAudits_(); },
+    adminReconcileLearningAudit: function () { return adminReconcileLearningAudit_(payload, user); },
+    adminGetAiSettings: function () { return adminGetAiSettings_(); },
+    adminSaveAiSettings: function () { return adminSaveAiSettings_(trusted); },
+    adminTestAiConnection: function () { return adminTestAiConnection_(trusted); },
+    adminListAiModels: function () { return adminListAiModels_(); },
+    adminListAiUsage: function () { return adminListAiUsage_(); },
+    adminListAiPrompts: function () { return adminListAiPrompts_(); },
+    adminSaveAiPrompt: function () { return adminSaveAiPrompt_(trusted); },
+    adminTestAiPrompt: function () { return adminTestAiPrompt_(trusted); },
+    adminActivateAiPrompt: function () { return adminActivateAiPrompt_(trusted); },
+    adminListLearningObjectives: function () { return adminListLearningObjectives_(); },
+    adminSaveLearningObjective: function () { return adminSaveLearningObjective_(trusted); },
+    adminSetLearningObjectiveActive: function () { return adminSetLearningObjectiveActive_(trusted); },
+    adminListLearningIndicators: function () { return adminListLearningIndicators_(trusted); },
+    adminSaveLearningIndicator: function () { return adminSaveLearningIndicator_(trusted); },
+    adminSetLearningIndicatorActive: function () { return adminSetLearningIndicatorActive_(trusted); },
+    listAvailableLearningObjectives: function () { return listAvailableLearningObjectives_(); },
+    listAvailableLearningIndicators: function () { return listAvailableLearningIndicators_(trusted); },
     listStudents: function () {
       return listRows_('Users').filter(function (item) {
         return String(item.role).toLowerCase() === 'student' &&
@@ -501,37 +560,60 @@ function saveQuestionBundle_(payload) {
   const title = requiredText_(payload.title, 'Judul bundel', 180);
   const questions = Array.isArray(payload.questions) ? payload.questions : [];
   if (!questions.length || questions.length > 200) throw new Error('Jumlah soal bundel harus antara 1 dan 200.');
-  questions.forEach(function (q, i) {
-    const type = String(q.type || 'multiple_choice'), points = Number(q.points);
-    if (['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type) < 0) throw new Error('Tipe soal tidak valid pada soal nomor ' + (i + 1));
-    if (!isFinite(points) || points < 0 || points > 1000) throw new Error('Bobot nilai tidak valid pada soal nomor ' + (i + 1));
-  });
-  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  const bundleId = String(payload.bundleId || payload.id || makeId_('BND'));
+  const lock=LockService.getScriptLock();lock.waitLock(10000);
   try {
-    const bundleId = String(payload.bundleId || payload.id || makeId_('BND'));
-    const sheet = getSheet_('QuestionBundles'), values = sheet.getDataRange().getValues(), headers = values[0].map(String);
-    const idCol = headers.indexOf('bundleId');
-    let rowNumber = -1, existing = null;
-    for (let i=1;i<values.length;i++) if (String(values[i][idCol])===bundleId) { rowNumber=i+1; existing=listRows_('QuestionBundles').find(function(b){return String(b.bundleId)===bundleId;}); break; }
-    if (existing && String(existing.status).toLowerCase()==='archived') throw new Error('Bundel yang sudah diarsipkan tidak dapat diubah.');
-    const classification=String(payload.classification || (existing && existing.classification) || 'REGULER').trim().toUpperCase();
-    if (['REGULER','SOLO_TAX'].indexOf(classification)<0) throw new Error('Klasifikasi bundel harus REGULER atau SOLO_TAX.');
-    if (classification === 'SOLO_TAX') throw new Error('Pembuatan Bundel SOLO Tax belum diaktifkan. Gunakan editor SOLO Tax setelah tahap pengembangan berikutnya selesai.');
-    const now=currentTimestamp_();
-    const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
-    validateBundleSnapshot_(snapshot);
-    const snapshotJson=JSON.stringify(snapshot);
-    let latest=null;
-    if(existing && existing.latestVersionId){
-      const prior=listRows_('BundleVersions').find(function(v){return String(v.versionId)===String(existing.latestVersionId);});
-      if(prior && String(prior.snapshotJson)===snapshotJson) latest={versionId:prior.versionId,versionNumber:Number(prior.versionNumber)};
-    }
-    if(!latest) latest=createBundleVersion_(bundleId,snapshot,String(payload.changeNote||(existing?'Perubahan isi bundel':'Versi awal')),String(payload.createdBy||(existing&&existing.createdBy)||''));
-    const record={bundleId:bundleId,title:title,subject:snapshot.subject,description:snapshot.description,tpCode:snapshot.tpCode,passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passagesJson:JSON.stringify(snapshot.passages),questionsJson:JSON.stringify(questions),status:'ready',classification:classification,latestVersionId:String(latest.versionId),latestVersionNumber:Number(latest.versionNumber),visibility:String(payload.visibility||(existing&&existing.visibility)||'shared')==='private'?'private':'shared',createdBy:String(payload.createdBy||(existing&&existing.createdBy)||''),createdAt:existing?String(existing.createdAt||now):now,updatedAt:now,archivedAt:'',archivedBy:''};
-    if(rowNumber>0) headers.forEach(function(h,col){if(Object.prototype.hasOwnProperty.call(record,h))sheet.getRange(rowNumber,col+1).setValue(record[h]);});
+  const sheet = getSheet_('QuestionBundles'), values = sheet.getDataRange().getValues(), headers = values[0].map(String);
+  const idCol = headers.indexOf('bundleId');
+  let rowNumber = -1, existing = null;
+  for (let i=1;i<values.length;i++) if (String(values[i][idCol])===bundleId) { rowNumber=i+1; existing=listRows_('QuestionBundles').find(function(b){return String(b.bundleId)===bundleId;}); break; }
+  if (existing && String(existing.status).toLowerCase()==='archived') throw new Error('Bundel yang sudah diarsipkan tidak dapat diubah.');
+  const classification=String(payload.classification || (existing && existing.classification) || 'REGULER').trim().toUpperCase();
+  if (['REGULER','SOLO_TAX'].indexOf(classification)<0) throw new Error('Klasifikasi bundel harus REGULER atau SOLO_TAX.');
+  if (classification === 'SOLO_TAX') questions.forEach(function(q,i){ validateSoloTaxQuestion_(q,i); });
+  else questions.forEach(function(q,i){
+    const type=String(q.type||'multiple_choice'),points=Number(q.points);
+    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(i+1));
+    if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot nilai tidak valid pada soal nomor '+(i+1));
+  });
+  const now=currentTimestamp_();
+  const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),learningObjectiveId:String(payload.learningObjectiveId||'').trim(),learningIndicatorId:String(payload.learningIndicatorId||'').trim(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
+  validateBundleLearningReference_(snapshot);
+  snapshotBundleLearningReferences_(snapshot);
+  validateBundleSnapshot_(snapshot);
+  const snapshotJson=JSON.stringify(snapshot);
+  let latest=null;
+  if(existing && existing.latestVersionId){
+    const prior=listRows_('BundleVersions').find(function(v){return String(v.versionId)===String(existing.latestVersionId);});
+    if(prior && String(prior.snapshotJson)===snapshotJson) latest={versionId:prior.versionId,versionNumber:Number(prior.versionNumber)};
+  }
+    if(!latest)latest=createBundleVersion_(bundleId,snapshot,String(payload.changeNote||(existing?'Perubahan isi bundel':'Versi awal')),String(payload.createdBy||(existing&&existing.createdBy)||''));
+    const record={bundleId:bundleId,title:title,subject:snapshot.subject,description:snapshot.description,tpCode:snapshot.tpCode,passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passagesJson:JSON.stringify(snapshot.passages),questionsJson:JSON.stringify(snapshot.questions),status:'ready',classification:classification,latestVersionId:String(latest.versionId),latestVersionNumber:Number(latest.versionNumber),visibility:String(payload.visibility||(existing&&existing.visibility)||'shared')==='private'?'private':'shared',createdBy:String(payload.createdBy||(existing&&existing.createdBy)||''),createdAt:existing?String(existing.createdAt||now):now,updatedAt:now,archivedAt:'',archivedBy:''};
+    if(rowNumber>0)headers.forEach(function(h,col){if(Object.prototype.hasOwnProperty.call(record,h))sheet.getRange(rowNumber,col+1).setValue(record[h]);});
     else appendRow_('QuestionBundles',record);
     return {bundleId:bundleId,title:title,questionCount:questions.length,status:'ready',classification:classification,versionId:String(latest.versionId),versionNumber:Number(latest.versionNumber)};
-  } finally {lock.releaseLock();}
+  } finally { lock.releaseLock(); }
+}
+function soloTaxLevelPoints_(level){
+  const key=String(level||'').trim().toUpperCase().replace(/[ -]+/g,'_');
+  const levels={MULTISTRUKTURAL:3,RELATIONAL:4,EXTENDED_ABSTRACT:5};
+  return Object.prototype.hasOwnProperty.call(levels,key)?levels[key]:0;
+}
+function validateSoloTaxQuestion_(question,index){
+  const q=question||{},number=index+1;
+  if(String(q.type||'').toLowerCase()!=='essay')throw new Error('SOLO Tax hanya mendukung tipe soal uraian (soal nomor '+number+').');
+  if(!String(q.text||'').trim())throw new Error('Pertanyaan utama wajib diisi pada soal SOLO Tax nomor '+number+'.');
+  const maximum=soloTaxLevelPoints_(q.soloLevel);
+  if(!maximum)throw new Error('Level SOLO soal nomor '+number+' harus Multistruktural, Relational, atau Extended Abstract.');
+  if(Number(q.points)!==maximum)throw new Error('Nilai maksimal soal nomor '+number+' harus '+maximum+' sesuai level SOLO.');
+  if(!Array.isArray(q.subquestions)||!q.subquestions.length||q.subquestions.some(function(x){return !String(x||'').trim();}))throw new Error('Setiap soal SOLO Tax harus memiliki minimal satu subpertanyaan yang terisi (soal nomor '+number+').');
+  if(!String(q.answerGuide||'').trim())throw new Error('Panduan jawaban wajib diisi pada soal SOLO Tax nomor '+number+'.');
+  if(!String(q.rubric||'').trim())throw new Error('Rubrik penilaian wajib diisi pada soal SOLO Tax nomor '+number+'.');
+  if(!Array.isArray(q.learningIndicatorIds)||!q.learningIndicatorIds.length)throw new Error('Pilih minimal satu indikator TP untuk soal SOLO Tax nomor '+number+'.');
+  const ids=q.learningIndicatorIds.map(function(id){return String(id||'').trim();});
+  if(ids.some(function(id){return !id;})||ids.some(function(id,i){return ids.indexOf(id)!==i;}))throw new Error('Daftar indikator TP pada soal nomor '+number+' tidak valid.');
+  if(!Array.isArray(q.rubricLevels)||!q.rubricLevels.length||q.rubricLevels.some(function(x){return !String(x||'').trim();}))throw new Error('Rubrik SOLO Tax harus memiliki deskripsi kriteria yang terisi pada soal nomor '+number+'.');
+  return true;
 }
 
 function listQuestionBundles_(payload) {
@@ -686,12 +768,11 @@ function getQuestionBundle_(payload) {
   if(payload.versionId||payload.versionNumber!==undefined)version=getBundleVersion_({versionId:payload.versionId,bundleId:bundleId,versionNumber:payload.versionNumber});
   else if(bundle.latestVersionId)version=getBundleVersion_({versionId:bundle.latestVersionId});
   const snapshot=version?version.snapshot:bundleSnapshotFromRecord_(bundle,bundle.classification||'REGULER');
-  return {bundle:{bundleId:bundle.bundleId,title:snapshot.title,subject:snapshot.subject,description:snapshot.description,tpCode:String(snapshot.tpCode||''),passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passages:snapshot.passages||[],status:bundle.status,visibility:String(bundle.visibility||'shared').toLowerCase(),isOwner:isOwner,classification:String(snapshot.classification||bundle.classification||'REGULER'),versionId:version?version.versionId:String(bundle.latestVersionId||''),versionNumber:version?version.versionNumber:Number(bundle.latestVersionNumber||0)},questions:snapshot.questions||[]};
+  return {bundle:{bundleId:bundle.bundleId,title:snapshot.title,subject:snapshot.subject,description:snapshot.description,tpCode:String(snapshot.tpCode||''),learningObjectiveId:String(snapshot.learningObjectiveId||''),learningIndicatorId:String(snapshot.learningIndicatorId||''),passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passages:snapshot.passages||[],status:bundle.status,visibility:String(bundle.visibility||'shared').toLowerCase(),isOwner:isOwner,classification:String(snapshot.classification||bundle.classification||'REGULER'),versionId:version?version.versionId:String(bundle.latestVersionId||''),versionNumber:version?version.versionNumber:Number(bundle.latestVersionNumber||0)},questions:snapshot.questions||[]};
 }
 function createAssessment_(payload) {
   const title=requiredText_(payload.title,'Judul',180);
   let questions=Array.isArray(payload.questions)?payload.questions:[];
-  if(questions.length<1||questions.length>200)throw new Error('Jumlah soal harus antara 1 dan 200.');
   const sourceBundleId=String(payload.sourceBundleId||payload.bundleId||'').trim();
   let sourceVersion=null;
   if(sourceBundleId){
@@ -720,7 +801,7 @@ function createAssessment_(payload) {
     appendRow_('Assessments',{assessmentId:assessmentId,title:title,subject:String(sourceVersion?sourceVersion.snapshot.subject:(payload.subject||'')),className:String(payload.className||''),duration:Math.max(1,Math.min(300,Number(payload.duration)||60)),startAt:String(payload.startAt||''),endAt:String(payload.endAt||''),passageText:String(sourceVersion?sourceVersion.snapshot.passageText:(payload.passageText||'')),passageImageUrl:String(sourceVersion?sourceVersion.snapshot.passageImageUrl:(payload.passageImageUrl||'')),status:'draft',createdBy:String(payload.createdBy||''),createdAt:timestamp,updatedAt:timestamp,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification,archivedAt:'',archivedBy:''});
     questions.forEach(function(question,index){
       const type=String(question.type||'multiple_choice'),points=Number(question.points);
-      appendRow_('Questions',{questionId:makeId_('Q'),assessmentId:assessmentId,order:index+1,type:type,text:String(question.text||''),points:points,optionsJson:JSON.stringify(question.options||[]),answerJson:JSON.stringify(question.answer===undefined?null:question.answer),rubric:String(question.rubric||''),pairsJson:JSON.stringify(question.pairs||''),imageUrl:String(question.imageUrl||''),optionImagesJson:JSON.stringify(question.optionImages||[]),subquestionsJson:JSON.stringify(question.subquestions||[]),subquestionImagesJson:JSON.stringify(question.subquestionImages||[]),rubricLevelsJson:JSON.stringify(question.rubricLevels||[]),passageText:String(question.passageText||''),passageImageUrl:String(question.passageImageUrl||''),sourceBundleVersionId:sourceVersion?sourceVersion.versionId:'',sourceQuestionKey:sourceVersion?String(question.questionId||question.id||('Q-'+(index+1))):''});
+      appendRow_('Questions',{questionId:makeId_('Q'),assessmentId:assessmentId,order:index+1,type:type,text:String(question.text||''),points:points,optionsJson:JSON.stringify(question.options||[]),answerJson:JSON.stringify(classification==='SOLO_TAX'?{__soloTaxMeta:{soloLevel:String(question.soloLevel||''),learningIndicatorIds:question.learningIndicatorIds||[],learningIndicators:question.learningIndicators||[],answerGuide:String(question.answerGuide||''),learningObjectiveSnapshot:sourceVersion&&sourceVersion.snapshot.learningObjectiveSnapshot?sourceVersion.snapshot.learningObjectiveSnapshot:null}}:(question.answer===undefined?null:question.answer)),rubric:String(question.rubric||''),pairsJson:JSON.stringify(question.pairs||''),imageUrl:String(question.imageUrl||''),optionImagesJson:JSON.stringify(question.optionImages||[]),subquestionsJson:JSON.stringify(question.subquestions||[]),subquestionImagesJson:JSON.stringify(question.subquestionImages||[]),rubricLevelsJson:JSON.stringify(question.rubricLevels||[]),passageText:String(question.passageText||''),passageImageUrl:String(question.passageImageUrl||''),sourceBundleVersionId:sourceVersion?sourceVersion.versionId:'',sourceQuestionKey:sourceVersion?String(question.questionId||question.id||('Q-'+(index+1))):''});
     });
     return {id:assessmentId,title:title,status:'draft',questionCount:questions.length,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification};
   }finally{lock.releaseLock();}
@@ -1052,6 +1133,12 @@ function getAssessment_(payload) {
     throw new Error('Akses ditolak. Asesmen lama tanpa pemilik terverifikasi perlu dimigrasikan oleh administrator.');
   }
 
+  const canIncludeAnswers = payload.includeAnswers === true &&
+    (user.role === 'admin' ||
+      (user.role === 'teacher' &&
+        String(assessment.createdBy || '').trim().toLowerCase() ===
+          String(user.email || '').trim().toLowerCase()));
+
   const questions = listRows_('Questions')
     .filter(function (question) {
       return question.assessmentId === assessmentId;
@@ -1062,19 +1149,23 @@ function getAssessment_(payload) {
     .map(function (question) {
       return {
         id: question.questionId,
-        answer: payload.includeAnswers ? parseJson_(question.answerJson, null) : undefined,
+        answer: canIncludeAnswers ? parseJson_(question.answerJson, null) : undefined,
+        soloMeta: canIncludeAnswers ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta:null;})() : undefined,
+        soloLevel: canIncludeAnswers ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta.soloLevel:'';})() : undefined,
+        learningIndicatorIds: canIncludeAnswers ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta.learningIndicatorIds||[]:[];})() : undefined,
+        answerGuide: canIncludeAnswers ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta.answerGuide||'':'';})() : undefined,
         order: Number(question.order),
         type: question.type,
         text: question.text,
-        points: Number(question.points),
+        points: String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && !canIncludeAnswers ? undefined : Number(question.points),
         options: parseJson_(question.optionsJson, []),
-        rubric: question.rubric,
+        rubric: canIncludeAnswers ? question.rubric : '',
         pairs: parseJson_(question.pairsJson, ''),
         imageUrl: question.imageUrl,
         optionImages: parseJson_(question.optionImagesJson, []),
         subquestions: parseJson_(question.subquestionsJson, []),
         subquestionImages: parseJson_(question.subquestionImagesJson, []),
-        rubricLevels: parseJson_(question.rubricLevelsJson, []),
+        rubricLevels: canIncludeAnswers ? parseJson_(question.rubricLevelsJson, []) : [],
         passageText: String(question.passageText || ''),
         passageImageUrl: String(question.passageImageUrl || '')
       };
@@ -1093,36 +1184,49 @@ function getAssessment_(payload) {
  * Tambahkan otorisasi berbasis identitas guru sebelum penggunaan produksi.
  */
 function publishAssessment_(payload) {
-  const assessmentId = requiredText_(
-    payload.id || payload.assessmentId,
-    'ID asesmen',
-    100
-  );
-  const sheet = getSheet_('Assessments');
-  const values = sheet.getDataRange().getValues();
-  if (values.length < 2) throw new Error('Asesmen tidak ditemukan.');
-  const headers = values[0].map(String);
-  const idCol = headers.indexOf('assessmentId');
-  const statusCol = headers.indexOf('status');
-  const updatedCol = headers.indexOf('updatedAt');
-  if (idCol < 0 || statusCol < 0) throw new Error('Kolom database asesmen tidak lengkap.');
-  for (let i = 1; i < values.length; i++) {
-    if (String(values[i][idCol]) === assessmentId) {
-      const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
-      if (assessment && (!assessment.title || !assessment.className || !assessment.duration)) {
-        throw new Error('Judul, kelas, dan durasi wajib diisi sebelum dipublikasikan.');
-      }
-      if (assessment && assessment.startAt && !isFinite(new Date(assessment.startAt).getTime())) throw new Error('Waktu mulai asesmen tidak valid.');
-      if (assessment && assessment.endAt && !isFinite(new Date(assessment.endAt).getTime())) throw new Error('Waktu selesai asesmen tidak valid.');
-      if (assessment && assessment.startAt && assessment.endAt && new Date(assessment.endAt).getTime() <= new Date(assessment.startAt).getTime()) throw new Error('Waktu selesai harus setelah waktu mulai.');
-      sheet.getRange(i + 1, statusCol + 1).setValue('published');
-      if (updatedCol >= 0) sheet.getRange(i + 1, updatedCol + 1).setValue(currentTimestamp_());
-      return { id: assessmentId, status: 'published' };
+  const assessmentId = requiredText_(payload.id || payload.assessmentId, 'ID asesmen', 100);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet_('Assessments');
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) throw new Error('Asesmen tidak ditemukan.');
+    const headers = values[0].map(String);
+    const idCol = headers.indexOf('assessmentId');
+    const statusCol = headers.indexOf('status');
+    const updatedCol = headers.indexOf('updatedAt');
+    if (idCol < 0 || statusCol < 0) throw new Error('Kolom database asesmen tidak lengkap.');
+    let rowIndex = -1;
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][idCol]) === assessmentId) { rowIndex = i; break; }
     }
+    if (rowIndex < 0) throw new Error('Asesmen tidak ditemukan.');
+    const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
+    if (!assessment) throw new Error('Asesmen tidak ditemukan.');
+    const status = String(assessment.status || '').toLowerCase();
+    if (status === 'archived') throw new Error('Asesmen yang diarsipkan tidak dapat dipublikasikan.');
+    if (status === 'published') return { id: assessmentId, status: 'published', alreadyPublished: true };
+    if (!String(assessment.title || '').trim() || !String(assessment.className || '').trim()) {
+      throw new Error('Judul dan kelas wajib diisi sebelum dipublikasikan.');
+    }
+    const duration = Number(assessment.duration);
+    if (!isFinite(duration) || duration < 1 || duration > 300) throw new Error('Durasi asesmen harus antara 1 dan 300 menit.');
+    if (assessment.startAt && !isFinite(new Date(assessment.startAt).getTime())) throw new Error('Waktu mulai asesmen tidak valid.');
+    if (assessment.endAt && !isFinite(new Date(assessment.endAt).getTime())) throw new Error('Waktu selesai asesmen tidak valid.');
+    if (assessment.startAt && assessment.endAt && new Date(assessment.endAt).getTime() <= new Date(assessment.startAt).getTime()) {
+      throw new Error('Waktu selesai harus setelah waktu mulai.');
+    }
+    const questionCount = listRows_('Questions').filter(function (question) {
+      return String(question.assessmentId) === assessmentId;
+    }).length;
+    if (questionCount < 1) throw new Error('Asesmen harus memiliki minimal satu soal sebelum dipublikasikan.');
+    sheet.getRange(rowIndex + 1, statusCol + 1).setValue('published');
+    if (updatedCol >= 0) sheet.getRange(rowIndex + 1, updatedCol + 1).setValue(currentTimestamp_());
+    return { id: assessmentId, status: 'published', questionCount: questionCount };
+  } finally {
+    lock.releaseLock();
   }
-  throw new Error('Asesmen tidak ditemukan.');
 }
-
 /**
  * Menerima jawaban dan menghitung nilai otomatis untuk tipe objektif.
  * Esai dan menjodohkan diberi status needs_review untuk pemeriksaan guru.
@@ -1135,30 +1239,28 @@ function startAttempt_(payload) {
   const user = payload.currentUser;
   if (!user || user.role !== 'student' || !user.userId) throw new Error('Akun siswa terverifikasi diperlukan.');
   const studentId = String(user.userId);
-  const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
-  const previousAttempt = listRows_('Attempts').find(function (attempt) {
-    return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
-  });
-  if (previousAttempt && String(previousAttempt.status) === 'in_progress') assertStudentAssessmentIdentity_(assessment, user);
-  else assertStudentAssessmentAccess_(assessment, user);
-  const duration = Number(assessment.duration);
-  if (!isFinite(duration) || duration < 1) throw new Error('Durasi asesmen tidak valid.');
-
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
     const previous = listRows_('Attempts').find(function (attempt) {
       return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
     });
     if (previous) {
       if (String(previous.status) !== 'in_progress') throw new Error('Jawaban untuk asesmen ini sudah pernah dikirim.');
+      assertStudentAssessmentIdentity_(assessment, user);
+      const duration = Number(assessment.duration);
       const started = new Date(previous.startedAt).getTime();
-      if (!isFinite(started)) throw new Error('Waktu mulai sesi tidak valid. Hubungi guru.');
+      if (!isFinite(duration) || duration < 1 || !isFinite(started)) throw new Error('Waktu sesi tidak valid. Hubungi guru.');
       const expired = Date.now() > started + duration * 60000 + 30000;
       return { attemptId: String(previous.attemptId), startedAt: previous.startedAt, status: 'in_progress', duration: duration, resumed: true, expired: expired, answers: parseJson_(previous.answersJson, {}) };
     }
-    const attemptId = makeId_('ATT'), startedAt = currentTimestamp_();
+    assertStudentAssessmentAccess_(assessment, user);
+    const duration = Number(assessment.duration);
+    if (!isFinite(duration) || duration < 1 || duration > 300) throw new Error('Durasi asesmen tidak valid.');
     const questions = listRows_('Questions').filter(function (question) { return String(question.assessmentId) === assessmentId; });
+    if (!questions.length) throw new Error('Asesmen belum memiliki soal dan tidak dapat dikerjakan.');
+    const attemptId = makeId_('ATT'), startedAt = currentTimestamp_();
     const maxScore = questions.reduce(function (sum, question) { return sum + (Number(question.points) || 0); }, 0);
     appendRow_('Attempts', {
       attemptId: attemptId, assessmentId: assessmentId, studentId: studentId,
@@ -1166,9 +1268,10 @@ function startAttempt_(payload) {
       maxScore: maxScore, focusLossCount: 0, answersJson: '{}', teacherFeedback: ''
     });
     return { attemptId: attemptId, startedAt: startedAt, status: 'in_progress', duration: duration, resumed: false, answers: {} };
-  } finally { lock.releaseLock(); }
+  } finally {
+    lock.releaseLock();
+  }
 }
-
 function mergeUploadedAnswerPhotos_(attemptId, answers, existingAnswers) {
   const next = answers && typeof answers === 'object' && !Array.isArray(answers) ? answers : {};
   const previous = existingAnswers && typeof existingAnswers === 'object' && !Array.isArray(existingAnswers) ? existingAnswers : {};
@@ -1207,7 +1310,9 @@ function saveAttempt_(payload) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const attemptsSheet = getSheet_('Attempts'), values = attemptsSheet.getDataRange().getValues();
+    const currentAssessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
+  assertStudentAssessmentIdentity_(currentAssessment, user);
+  const attemptsSheet = getSheet_('Attempts'), values = attemptsSheet.getDataRange().getValues();
     if (values.length < 2) throw new Error('Sesi pengerjaan tidak ditemukan.');
     const headers = values[0].map(String), idCol = headers.indexOf('attemptId'), assessmentCol = headers.indexOf('assessmentId'), studentCol = headers.indexOf('studentId');
     let rowNumber = -1, row = null;
@@ -1217,10 +1322,16 @@ function saveAttempt_(payload) {
     if (rowNumber < 0) throw new Error('Sesi pengerjaan tidak ditemukan atau bukan milik akun ini.');
     const col = function (name) { const index = headers.indexOf(name); if (index < 0) throw new Error('Kolom '+name+' tidak ditemukan.'); return index; };
     if (String(row[col('status')]) !== 'in_progress') throw new Error('Sesi ini sudah dikirim dan tidak dapat diubah.');
-    const started = new Date(row[col('startedAt')]).getTime(), durationMs = Number(assessment.duration) * 60000;
+    const started = new Date(row[col('startedAt')]).getTime(), durationMs = Number(currentAssessment.duration) * 60000;
     if (!isFinite(started) || !isFinite(durationMs) || durationMs <= 0 || Date.now() > started + durationMs + 30000) throw new Error('Waktu pengerjaan sudah habis.');
     const incomingAnswers = payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers) ? payload.answers : {};
-    const answers = mergeUploadedAnswerPhotos_(attemptId, incomingAnswers, parseJson_(row[col('answersJson')], {}));
+    const questions = listRows_('Questions').filter(function (question) { return String(question.assessmentId) === assessmentId; });
+    if (!questions.length) throw new Error('Asesmen tidak memiliki soal.');
+    const allowed = {};
+    questions.forEach(function (question) { allowed[String(question.questionId)] = true; });
+    const filteredAnswers = {};
+    Object.keys(incomingAnswers).forEach(function (questionId) { if (allowed[questionId]) filteredAnswers[questionId] = incomingAnswers[questionId]; });
+    const answers = mergeUploadedAnswerPhotos_(attemptId, filteredAnswers, parseJson_(row[col('answersJson')], {}));
     attemptsSheet.getRange(rowNumber, col('answersJson') + 1).setValue(JSON.stringify(answers));
     return { saved: true, savedAt: currentTimestamp_() };
   } finally { lock.releaseLock(); }
@@ -1247,21 +1358,32 @@ function submitAttempt_(payload) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    const currentAssessment = listRows_('Assessments').find(function (item) {
+      return String(item.assessmentId) === assessmentId;
+    });
+    if (!currentAssessment) throw new Error('Asesmen tidak ditemukan.');
     const previous = listRows_('Attempts').find(function (attempt) {
       return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
     });
     if (previous && String(previous.status) !== 'in_progress') throw new Error('Jawaban untuk asesmen ini sudah pernah dikirim.');
     if (previous && previous.startedAt) {
       const started = new Date(previous.startedAt).getTime();
-      const durationMs = Number(assessment.duration) * 60000;
+      const durationMs = Number(currentAssessment.duration) * 60000;
       if (!isFinite(started) || !isFinite(durationMs) || durationMs <= 0) throw new Error('Waktu sesi pengerjaan tidak valid.');
       const remainingMs = started + durationMs - Date.now();
       if (remainingMs > 8 * 60000) throw new Error('Pengumpulan jawaban hanya dapat dilakukan pada 8 menit terakhir. Silakan periksa jawaban kembali.');
       if (remainingMs < -30000 && payload.autoSubmitOnExpiry !== true) throw new Error('Waktu pengerjaan sudah habis. Jawaban tidak dapat dikirim terlambat.');
     }
-  const answers = payload.answers && typeof payload.answers === 'object' ? payload.answers : {};
+  const submittedAnswers = payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers) ? payload.answers : {};
   const questions = listRows_('Questions').filter(function (question) {
-    return question.assessmentId === assessmentId;
+    return String(question.assessmentId) === assessmentId;
+  });
+  if (!questions.length) throw new Error('Asesmen tidak memiliki soal.');
+  const allowedQuestionIds = {};
+  questions.forEach(function (question) { allowedQuestionIds[String(question.questionId)] = true; });
+  const answers = {};
+  Object.keys(submittedAnswers).forEach(function (questionId) {
+    if (allowedQuestionIds[questionId]) answers[questionId] = submittedAnswers[questionId];
   });
 
   let score = 0;
@@ -1331,9 +1453,9 @@ function submitAttempt_(payload) {
   // Sesi aktif boleh dikirim setelah jam jadwal berakhir selama durasi pengerjaan belum habis.
   // Identitas, kelas, status asesmen, dan batas durasi tetap divalidasi di sisi server.
   if (previous && String(previous.status) === 'in_progress') {
-    assertStudentAssessmentIdentity_(assessment, user);
+    assertStudentAssessmentIdentity_(currentAssessment, user);
   } else {
-    assertStudentAssessmentAccess_(assessment, user);
+    assertStudentAssessmentAccess_(currentAssessment, user);
   }
   const attemptId = previous ? String(previous.attemptId) : makeId_('ATT');
   const existingAnswers = previous ? parseJson_(previous.answersJson, {}) : {};
@@ -1391,6 +1513,10 @@ function listAttempts_(payload) {
       return matchesAssessment && matchesStudent && String(attempt.status) !== 'in_progress';
     })
     .map(function (attempt) {
+      const assessment = assessments.find(function (item) { return item.assessmentId === attempt.assessmentId; });
+      const viewer = payload.currentUser;
+      const canViewInternal = !!(viewer && viewer.role === 'teacher' && assessment &&
+        String(assessment.createdBy || '').trim().toLowerCase() === String(viewer.email || '').trim().toLowerCase());
       const details = allQuestions
         .filter(function (question) { return question.assessmentId === attempt.assessmentId; })
         .sort(function (a, b) { return Number(a.order) - Number(b.order); })
@@ -1400,20 +1526,19 @@ function listAttempts_(payload) {
             order: Number(question.order),
             type: question.type,
             text: question.text,
-            points: Number(question.points) || 0,
-            rubric: question.rubric,
-            rubricLevels: parseJson_(question.rubricLevelsJson, []),
+            points: assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && !canViewInternal ? undefined : Number(question.points) || 0,
+            rubric: canViewInternal ? question.rubric : '',
+            rubricLevels: canViewInternal ? parseJson_(question.rubricLevelsJson, []) : [],
+            soloMeta: canViewInternal ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta:null;})() : undefined,
             subquestions: parseJson_(question.subquestionsJson, []),
             options: parseJson_(question.optionsJson, []),
             pairs: parseJson_(question.pairsJson, []),
-            answer: payload.currentUser && payload.currentUser.role === 'teacher' ? parseJson_(question.answerJson, null) : undefined,
+            answer: canViewInternal ? parseJson_(question.answerJson, null) : undefined,
             imageUrl: question.imageUrl,
             optionImages: parseJson_(question.optionImagesJson, [])
           };
         });
-      const assessment = assessments.find(function (item) { return item.assessmentId === attempt.assessmentId; });
-      const viewer = payload.currentUser;
-      if (viewer && viewer.role === 'teacher' && assessment && String(assessment.createdBy || '').trim().toLowerCase() === String(viewer.email || '').trim().toLowerCase()) {
+      if (canViewInternal) {
         uploadedFiles.filter(function (file) { return String(file.attemptId) === String(attempt.attemptId) && file.driveFileId; }).forEach(function (file) {
           try {
             const answerFile = DriveApp.getFileById(String(file.driveFileId));
@@ -1455,8 +1580,115 @@ function listAttempts_(payload) {
           });
           return answers;
         })(),
-        questionScores: parseJson_(attempt.questionScoresJson, {}),
-        questionDetails: details
+        questionScores: assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && !canViewInternal ? {} : parseJson_(attempt.questionScoresJson, {}),
+        questionDetails: details,
+        assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
+        soloIndicators: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
+          ? (function () {
+              const mapped = {};
+              details.forEach(function (question) {
+                const meta = question.soloMeta || {};
+                const snapshots = Array.isArray(meta.learningIndicators) ? meta.learningIndicators : [];
+                const indicators = snapshots.length ? snapshots : (Array.isArray(meta.learningIndicatorIds) ? meta.learningIndicatorIds.map(function(id){return {indicatorId:id};}) : []);
+                indicators.forEach(function (indicator) {
+                  const id = String(indicator.indicatorId || '');
+                  if (!id) return;
+                  if (!mapped[id]) {
+                    mapped[id] = {
+                      indicatorId: id,
+                      indicatorCode: String(indicator.indicatorCode || id),
+                      description: String(indicator.description || 'Indikator tersimpan pada snapshot soal'),
+                      questionIds: [],
+                      questionOrders: []
+                    };
+                  }
+                  if (mapped[id].questionIds.indexOf(String(question.id)) < 0) {
+                    mapped[id].questionIds.push(String(question.id));
+                    mapped[id].questionOrders.push(Number(question.order));
+                  }
+                });
+              });
+              return Object.keys(mapped).map(function (id) { return mapped[id]; });
+            })()
+          : undefined,
+        soloReview: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
+          ? (function () {
+              const history = listRows_('Events').filter(function (event) {
+                return String(event.attemptId) === String(attempt.attemptId) &&
+                  String(event.eventType).indexOf('SOLO_INDICATOR_VERIFICATION') === 0;
+              }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+              const latest = history.length ? history[history.length - 1] : null;
+              const details = latest ? parseJson_(latest.detailsJson, {}) : {};
+              const aiHistory = listRows_('Events').filter(function (event) {
+                return String(event.attemptId) === String(attempt.attemptId) && String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION';
+              }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+              const latestAi = aiHistory.length ? aiHistory[aiHistory.length - 1] : null;
+              const aiDetails = latestAi ? parseJson_(latestAi.detailsJson, {}) : {};
+              return {
+                status: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? 'verified' : 'pending',
+                results: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' && Array.isArray(details.results) ? details.results : [],
+                recommendation: latestAi && aiDetails.dominantRecommendation ? aiDetails.dominantRecommendation : null,
+                recommendationProvider: latestAi ? String(aiDetails.provider || '') : '',
+                recommendationModel: latestAi ? String(aiDetails.model || '') : '',
+                recommendationPromptVersion: latestAi ? String(aiDetails.promptVersion || '') : '',
+                tpAchievement: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' && details.tpAchievement ? details.tpAchievement : null,
+                verifiedAt: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? String(latest.eventAt || '') : '',
+                verifiedBy: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? String(details.verifiedBy || '') : '',
+                history: history.map(function (event) {
+                  const detail = parseJson_(event.detailsJson, {});
+                  return { eventType: String(event.eventType), eventAt: String(event.eventAt || ''), verifiedBy: String(detail.verifiedBy || ''), reason: String(detail.reason || '') };
+                }),
+                dominant: (function () {
+                  const dominantEvents = listRows_('Events').filter(function (event) {
+                    return String(event.attemptId) === String(attempt.attemptId) &&
+                      String(event.eventType).indexOf('SOLO_DOMINANT_LEVEL_') === 0;
+                  }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+                  const latestDominant = dominantEvents.length ? dominantEvents[dominantEvents.length - 1] : null;
+                  const detail = latestDominant ? parseJson_(latestDominant.detailsJson, {}) : {};
+                  const currentIndicator = history.length ? history[history.length - 1] : null;
+                  const isCurrent = latestDominant && latestDominant.eventType === 'SOLO_DOMINANT_LEVEL_VERIFICATION' &&
+                    currentIndicator && currentIndicator.eventType === 'SOLO_INDICATOR_VERIFICATION' &&
+                    String(latestDominant.eventAt) >= String(currentIndicator.eventAt) &&
+                    (!latestAi || String(latestDominant.eventAt) >= String(latestAi.eventAt));
+                  return {
+                    status: isCurrent ? 'verified' : 'pending',
+                    aiLevel: isCurrent ? String(detail.aiLevel || '') : '',
+                    teacherLevel: isCurrent ? String(detail.teacherLevel || '') : '',
+                    aiEvidenceSummary: isCurrent ? String(detail.aiEvidenceSummary || '') : '',
+                    teacherReason: isCurrent ? String(detail.teacherReason || '') : '',
+                    verifiedAt: isCurrent ? String(latestDominant.eventAt || '') : '',
+                    verifiedBy: isCurrent ? String(detail.verifiedBy || '') : '',
+                    aiProvider: isCurrent ? String(detail.aiProvider || '') : '',
+                    aiModel: isCurrent ? String(detail.aiModel || '') : '',
+                    promptVersion: isCurrent ? String(detail.promptVersion || '') : '',
+                    questionEvidence: isCurrent && Array.isArray(detail.questionEvidence) ? detail.questionEvidence : []
+                  };
+                })()
+              };
+            })()
+          : undefined,
+        soloAiAssessment: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
+          ? (function () {
+              const events = listRows_('Events').filter(function (event) {
+                return String(event.attemptId) === String(attempt.attemptId) &&
+                  String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION';
+              }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+              if (!events.length) return null;
+              const latest = events[events.length - 1];
+              const detail = parseJson_(latest.detailsJson, {});
+              return {
+                promptId: String(detail.promptId || ''),
+                promptVersion: Number(detail.promptVersion) || 0,
+                provider: String(detail.provider || ''),
+                dominantRecommendation: detail.dominantRecommendation && typeof detail.dominantRecommendation === 'object' ? detail.dominantRecommendation : null,
+                model: String(detail.model || ''),
+                requestedBy: String(detail.requestedBy || ''),
+                eventAt: String(latest.eventAt || ''),
+                usage: detail.usage || {},
+                results: Array.isArray(detail.results) ? detail.results : []
+              };
+            })()
+          : undefined
       });
     });
 }
@@ -1466,65 +1698,797 @@ function listAttempts_(payload) {
  */
 function gradeAttempt_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
-  const questionScores = payload.questionScores && typeof payload.questionScores === 'object' ? payload.questionScores : null;
-  let score = Number(payload.score);
-  let maxScore = Number(payload.maxScore);
-  if (questionScores) {
-    const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+  const questionScores = payload.questionScores;
+  if (!questionScores || typeof questionScores !== 'object' || Array.isArray(questionScores)) {
+    throw new Error('Skor setiap soal wajib diisi sebelum penilaian disimpan.');
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const attempt = listRows_('Attempts').find(function (item) {
+      return String(item.attemptId) === attemptId;
+    });
     if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
-    const questions = listRows_('Questions').filter(function (q) { return String(q.assessmentId) === String(attempt.assessmentId); });
+    const status = String(attempt.status || '').toLowerCase();
+    if (status !== 'needs_review' && status !== 'graded') {
+      throw new Error('Pengerjaan yang masih berlangsung atau belum dikirim tidak dapat dinilai.');
+    }
+
+    const questions = listRows_('Questions').filter(function (q) {
+      return String(q.assessmentId) === String(attempt.assessmentId);
+    });
     if (!questions.length) throw new Error('Soal asesmen tidak ditemukan.');
-    score = 0; maxScore = 0;
+    const assessment = listRows_('Assessments').find(function(item){return String(item.assessmentId)===String(attempt.assessmentId);});
+    const isSoloTax = assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX';
+    const submittedAnswers = parseJson_(attempt.answersJson, {});
+
+    const scoreKeys = Object.keys(questionScores);
+    if (scoreKeys.length !== questions.length) {
+      throw new Error('Skor harus diisi tepat untuk seluruh soal dalam asesmen.');
+    }
+
+    const savedScores = {};
+    let score = 0;
+    let maxScore = 0;
+    const seenQuestionIds = {};
     questions.forEach(function (q) {
-      const maximum = Number(q.points) || 0;
-      const value = Number(questionScores[q.questionId]);
-      if (!Object.prototype.hasOwnProperty.call(questionScores, q.questionId) || !isFinite(value) || value < 0 || value > maximum) {
+      const questionId = String(q.questionId || '');
+      if (!questionId || seenQuestionIds[questionId]) {
+        throw new Error('Daftar soal asesmen tidak valid.');
+      }
+      seenQuestionIds[questionId] = true;
+
+      const maximum = Number(q.points);
+      const rawValue = questionScores[questionId];
+      const value = Number(rawValue);
+      if (!Object.prototype.hasOwnProperty.call(questionScores, questionId) ||
+          rawValue === null || rawValue === undefined ||
+          (typeof rawValue === 'string' && rawValue.trim() === '') ||
+          typeof rawValue === 'boolean' ||
+          !isFinite(maximum) || maximum < 0 ||
+          !isFinite(value) || value < 0 || value > maximum) {
         throw new Error('Skor soal nomor ' + q.order + ' tidak valid. Nilai harus antara 0 dan ' + maximum + '.');
       }
-      score += value; maxScore += maximum;
-    });
-  }
-  if (!isFinite(score) || !isFinite(maxScore) || score < 0 || maxScore < score) throw new Error('Nilai tidak valid.');
-  const sheet = getSheet_('Attempts');
-  const values = sheet.getDataRange().getValues();
-  const headers = values[0].map(String);
-
-  const columnIndex = function (name) {
-    return headers.indexOf(name);
-  };
-
-  for (let rowIndex = 1; rowIndex < values.length; rowIndex++) {
-    if (
-      String(values[rowIndex][columnIndex('attemptId')]) === attemptId
-    ) {
-      sheet.getRange(rowIndex + 1, columnIndex('score') + 1).setValue(score);
-      sheet.getRange(rowIndex + 1, columnIndex('maxScore') + 1)
-        .setValue(maxScore);
-      sheet.getRange(rowIndex + 1, columnIndex('status') + 1)
-        .setValue('graded');
-      sheet.getRange(rowIndex + 1, columnIndex('teacherFeedback') + 1)
-        .setValue(String(payload.feedback || ''));
-      if (payload.questionScores && typeof payload.questionScores === 'object') {
-        sheet.getRange(rowIndex + 1, columnIndex('questionScoresJson') + 1)
-          .setValue(JSON.stringify(payload.questionScores));
+      if (isSoloTax && String(q.type) === 'essay') {
+        const response = submittedAnswers[questionId];
+        let hasResponse = false;
+        if (typeof response === 'string') hasResponse = !!response.trim();
+        else if (response && typeof response === 'object' && !Array.isArray(response)) {
+          hasResponse = Object.keys(response).some(function(key){
+            if (key === 'photos') return false;
+            const item = response[key];
+            return item !== null && item !== undefined && String(item).trim() !== '';
+          }) || (Array.isArray(response.photos) && response.photos.length > 0);
+        }
+        if (!hasResponse && value !== 0) throw new Error('Soal SOLO Tax tanpa jawaban harus memperoleh nilai 0 (soal nomor ' + q.order + ').');
+        if (hasResponse && value < 1) throw new Error('Jawaban SOLO Tax yang dikumpulkan harus memperoleh minimal 1 poin (soal nomor ' + q.order + ').');
       }
+      savedScores[questionId] = value;
+      score += value;
+      maxScore += maximum;
+    });
 
-      return {
-        attemptId: attemptId,
-        score: score,
-        maxScore: maxScore,
-        status: 'graded'
-      };
+    if (scoreKeys.some(function (key) { return !seenQuestionIds[key]; })) {
+      throw new Error('Terdapat skor untuk soal yang bukan bagian dari asesmen ini.');
+    }
+
+    const sheet = getSheet_('Attempts');
+    const values = sheet.getDataRange().getValues();
+    if (!values.length) throw new Error('Struktur data pengerjaan tidak valid.');
+    const headers = values[0].map(String);
+    const requiredColumns = ['attemptId', 'score', 'maxScore', 'status', 'teacherFeedback', 'questionScoresJson'];
+    const columnIndex = function (name) { return headers.indexOf(name); };
+    requiredColumns.forEach(function (name) {
+      if (columnIndex(name) < 0) throw new Error('Kolom ' + name + ' tidak ditemukan pada data pengerjaan.');
+    });
+
+    for (let rowIndex = 1; rowIndex < values.length; rowIndex++) {
+      if (String(values[rowIndex][columnIndex('attemptId')]) === attemptId) {
+        sheet.getRange(rowIndex + 1, columnIndex('score') + 1).setValue(score);
+        sheet.getRange(rowIndex + 1, columnIndex('maxScore') + 1).setValue(maxScore);
+        sheet.getRange(rowIndex + 1, columnIndex('status') + 1).setValue('graded');
+        sheet.getRange(rowIndex + 1, columnIndex('teacherFeedback') + 1)
+          .setValue(String(payload.feedback || ''));
+        sheet.getRange(rowIndex + 1, columnIndex('questionScoresJson') + 1)
+          .setValue(JSON.stringify(savedScores));
+        if (isSoloTax) {
+          appendRow_('Events', {
+            eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+            eventType: 'SOLO_INDICATOR_VERIFICATION_INVALIDATED', eventAt: currentTimestamp_(),
+            detailsJson: JSON.stringify({ reason: 'Nilai soal berubah; verifikasi indikator perlu diperiksa ulang.' })
+          });
+          appendRow_('Events', {
+            eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+            eventType: 'SOLO_DOMINANT_LEVEL_INVALIDATED', eventAt: currentTimestamp_(),
+            detailsJson: JSON.stringify({ reason: 'Nilai soal berubah; level SOLO dominan perlu ditinjau ulang.' })
+          });
+        }
+
+        return {
+          attemptId: attemptId,
+          score: score,
+          maxScore: maxScore,
+          status: 'graded'
+        };
+      }
+    }
+    throw new Error('Pengerjaan tidak ditemukan.');
+  } finally {
+    lock.releaseLock();
+  }
+}
+/**
+ * Menyimpan verifikasi guru untuk seluruh indikator SOLO Tax pada satu pengerjaan.
+ * Riwayat disimpan sebagai event append-only agar struktur spreadsheet tetap.
+ */
+
+function requestSoloAiAssessment_(payload) {
+  const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
+  const settings = aiSettings_();
+  if (!settings.scoringEnabled) throw new Error('AI Penilaian belum diaktifkan oleh Admin.');
+  const prompt = aiPrompts_().filter(function (item) {
+    return item.service === 'SCORING' && item.active === true;
+  }).sort(function (a, b) { return Number(b.version) - Number(a.version); })[0];
+  if (!prompt) throw new Error('Belum ada prompt AI Penilaian aktif.');
+  const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+  if (!attempt || String(attempt.status || '').toLowerCase() !== 'needs_review') {
+    throw new Error('AI Penilaian hanya dapat diminta untuk jawaban yang sudah dikirim dan belum dinilai.');
+  }
+  const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+  if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') {
+    throw new Error('AI Penilaian SOLO hanya berlaku untuk Asesmen SOLO Tax.');
+  }
+  const questions = listRows_('Questions').filter(function (item) {
+    return String(item.assessmentId) === String(attempt.assessmentId);
+  }).sort(function (a, b) { return Number(a.order) - Number(b.order); });
+  if (!questions.length || questions.some(function (q) { return String(q.type) !== 'essay'; })) {
+    throw new Error('Struktur soal asesmen SOLO Tax tidak valid.');
+  }
+  const answers = parseJson_(attempt.answersJson, {});
+  const questionInputs = [], deterministic = [];
+  questions.forEach(function (question) {
+    const answer = answers[String(question.questionId)] || {};
+    const photos = answer && Array.isArray(answer.photos) ? answer.photos : [];
+    const subquestions = parseJson_(question.subquestionsJson, []);
+    const textResponses = [];
+    if (answer && typeof answer === 'object' && !Array.isArray(answer)) {
+      Object.keys(answer).forEach(function (key) {
+        if (key === 'photos' || key === 'text') return;
+        const value = String(answer[key] == null ? '' : answer[key]).trim();
+        if (value && /^\d+$/.test(key)) {
+          textResponses.push({ subquestionIndex: Number(key) + 1, prompt: String(subquestions[Number(key)] || ''), answer: value });
+        }
+      });
+      if (String(answer.text || '').trim()) textResponses.push({ subquestionIndex: 1, prompt: '', answer: String(answer.text).trim() });
+    } else if (typeof answer === 'string' && answer.trim()) {
+      textResponses.push({ subquestionIndex: 1, prompt: '', answer: answer.trim() });
+    }
+    const meta = parseJson_(question.answerJson, {}) || {};
+    const soloMeta = meta.__soloTaxMeta || {};
+    const indicators = Array.isArray(soloMeta.learningIndicators) ? soloMeta.learningIndicators : [];
+    if (!textResponses.length && !photos.length) {
+      deterministic.push({
+        questionId: String(question.questionId), order: Number(question.order),
+        recommendedScore: 0, maximumScore: Number(question.points),
+        reason: 'Tidak ada jawaban teks maupun foto yang dikumpulkan.',
+        evidence: [], evidenceSufficient: true, manualPhotoReviewRequired: false,
+        indicatorAnalysis: indicators.map(function (indicator) {
+          return { indicatorId: String(indicator.indicatorId), status: 'insufficient_evidence', evidence: 'Tidak ada jawaban yang dapat dijadikan bukti.' };
+        })
+      });
+      return;
+    }
+    if (!textResponses.length && photos.length) {
+      deterministic.push({
+        questionId: String(question.questionId), order: Number(question.order),
+        recommendedScore: null, maximumScore: Number(question.points),
+        reason: 'Jawaban hanya berupa foto. Foto tidak dikirim ke AI dan wajib diperiksa manual oleh guru.',
+        evidence: [], evidenceSufficient: false, manualPhotoReviewRequired: true,
+        indicatorAnalysis: indicators.map(function (indicator) {
+          return { indicatorId: String(indicator.indicatorId), status: 'insufficient_evidence', evidence: 'Bukti berupa foto harus diperiksa langsung oleh guru.' };
+        })
+      });
+      return;
+    }
+    questionInputs.push({
+      questionId: String(question.questionId),
+      order: Number(question.order),
+      mainQuestion: String(question.text || ''),
+      soloLevel: String(soloMeta.soloLevel || ''),
+      maximumScore: Number(question.points),
+      subquestions: subquestions,
+      textResponses: textResponses,
+      hasPhotoAttachment: photos.length > 0,
+      answerGuide: String(soloMeta.answerGuide || ''),
+      rubric: String(question.rubric || ''),
+      rubricLevels: parseJson_(question.rubricLevelsJson, []),
+      indicators: indicators.map(function (indicator) {
+        return { indicatorId: String(indicator.indicatorId), indicatorCode: String(indicator.indicatorCode || ''), description: String(indicator.description || '') };
+      })
+    });
+  });
+  let aiResults = [], dominantRecommendation = null, usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, model = '';
+  if (questionInputs.length) {
+    const systemPrompt = prompt.content + '\n\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown dengan bentuk {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["kutipan/parafrasa bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","evidence":"alasan berbasis jawaban"}]}],"dominantLevel":{"level":"PRESTRUCTURAL|UNISTRUCTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT","evidenceSummary":"ringkasan bukti kualitatif lintas jawaban","questionEvidence":[{"questionId":"...","evidence":"bukti spesifik dari jawaban pada soal ini"}]}}. Nilai rekomendasi per soal harus berada pada rentang 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup. Jika bukti tidak cukup, recommendedScore harus null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban yang berisi teks. Jangan mengarang bukti. Analisis setiap indikator yang tercantum. Foto tidak disertakan dalam data; jika hasPhotoAttachment true, tandai bahwa guru harus memeriksa foto secara manual. Rekomendasi level dominan harus berdasarkan pola kualitas berpikir secara holistik dari bukti kualitatif seluruh soal yang diberikan, bukan dari skor, persentase, atau perhitungan ambang. questionEvidence harus mencakup setiap questionId yang dianalisis tepat satu kali. Jika bukti kualitatif tidak cukup, dominantLevel harus null. Jangan membuat nilai persentase indikator atau TP.';
+    try {
+      const response = tokenPortalChatCompletion_([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: 'Nilai data jawaban anonim berikut. Tidak ada identitas siswa. Data: ' + JSON.stringify({ questions: questionInputs }) }
+      ], settings.model, settings.maxOutputTokens);
+      model = response.model;
+      usage = response.usage;
+      let parsed;
+      try {
+        const clean = response.content.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim();
+        parsed = JSON.parse(clean);
+      } catch (error) {
+        throw new Error('AI tidak mengembalikan JSON valid sesuai format penilaian.');
+      }
+      if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length !== questionInputs.length) {
+        throw new Error('Hasil AI tidak mencakup seluruh soal uraian yang dapat dianalisis.');
+      }
+      const byQuestion = {};
+      questionInputs.forEach(function (item) { byQuestion[item.questionId] = item; });
+      const seen = {};
+      aiResults = parsed.questions.map(function (item) {
+        const id = String(item.questionId || '');
+        const input = byQuestion[id];
+        if (!input || seen[id]) throw new Error('Hasil AI memuat ID soal yang tidak valid atau berulang.');
+        seen[id] = true;
+        const enough = item.evidenceSufficient === true;
+        const reason = String(item.reason || '').trim();
+        if (!reason) throw new Error('AI harus menjelaskan alasan rekomendasi pada soal nomor ' + input.order + '.');
+        const score = item.recommendedScore === null || item.recommendedScore === undefined ? null : Number(item.recommendedScore);
+        if (enough && (!isFinite(score) || score < 1 || score > Number(input.maximumScore))) {
+          throw new Error('Rekomendasi nilai AI di luar rentang untuk soal nomor ' + input.order + '.');
+        }
+        if (!enough && score !== null) throw new Error('AI harus mengosongkan rekomendasi nilai jika bukti tidak mencukupi.');
+        const evidence = Array.isArray(item.evidence) ? item.evidence.map(function (value) { return String(value || '').trim(); }).filter(Boolean) : [];
+        if (enough && !evidence.length) throw new Error('AI harus menyertakan bukti jawaban untuk setiap rekomendasi nilai.');
+        const expectedIndicators = input.indicators.map(function (indicator) { return indicator.indicatorId; }).sort();
+        const indicatorResults = Array.isArray(item.indicatorAnalysis) ? item.indicatorAnalysis : [];
+        const receivedIndicators = indicatorResults.map(function (indicator) { return String(indicator.indicatorId || ''); }).sort();
+        if (expectedIndicators.length !== receivedIndicators.length || expectedIndicators.some(function (id, index) { return id !== receivedIndicators[index]; })) {
+          throw new Error('Analisis AI harus mencakup setiap indikator pada soal nomor ' + input.order + '.');
+        }
+        const statuses = ['mastered', 'developing', 'needs_improvement', 'insufficient_evidence'];
+        const normalizedIndicators = indicatorResults.map(function (indicator) {
+          const status = String(indicator.status || '');
+          const indicatorEvidence = String(indicator.evidence || '').trim();
+          if (statuses.indexOf(status) < 0 || !indicatorEvidence) throw new Error('Analisis indikator AI tidak valid atau tanpa bukti.');
+          return { indicatorId: String(indicator.indicatorId), status: status, evidence: indicatorEvidence };
+        });
+        return {
+          questionId: id, order: input.order,
+          recommendedScore: enough ? score : null, maximumScore: Number(input.maximumScore),
+          reason: reason.slice(0, 2000),
+          evidence: evidence.slice(0, 20),
+          evidenceSufficient: enough,
+          manualPhotoReviewRequired: input.hasPhotoAttachment,
+          indicatorAnalysis: normalizedIndicators
+        };
+      });
+      if (!deterministic.length) {
+        const dominant = parsed.dominantLevel;
+        if (dominant !== null) {
+          if (!dominant || typeof dominant !== 'object' || Array.isArray(dominant)) {
+            throw new Error('Rekomendasi level SOLO dominan AI tidak valid.');
+          }
+          const allowedLevels = ['PRESTRUCTURAL', 'UNISTRUCTURAL', 'MULTISTRUKTURAL', 'RELATIONAL', 'EXTENDED_ABSTRACT'];
+          const level = String(dominant.level || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+          const evidenceSummary = String(dominant.evidenceSummary || '').trim();
+          const questionEvidence = Array.isArray(dominant.questionEvidence) ? dominant.questionEvidence : [];
+          const expectedIds = questionInputs.map(function (item) { return item.questionId; }).sort();
+          const receivedIds = questionEvidence.map(function (item) { return String(item && item.questionId || ''); }).sort();
+          if (allowedLevels.indexOf(level) < 0 || !evidenceSummary || evidenceSummary.length > 5000 ||
+              questionEvidence.length !== expectedIds.length ||
+              expectedIds.some(function (id, index) { return id !== receivedIds[index]; })) {
+            throw new Error('Rekomendasi level dominan harus memuat level dan bukti dari setiap soal yang dianalisis.');
+          }
+          dominantRecommendation = {
+            level: level,
+            evidenceSummary: evidenceSummary,
+            questionEvidence: questionEvidence.map(function (item) {
+              const evidence = String(item.evidence || '').trim();
+              if (!evidence || evidence.length > 3000) throw new Error('Bukti level dominan pada setiap soal wajib diisi.');
+              return { questionId: String(item.questionId), evidence: evidence };
+            })
+          };
+        }
+      }
+    } catch (error) {
+      logAiUsage_('AI_SOLO_SCORING_FAILED', {
+        provider: 'TOKENPORTAL', model: settings.model, promptId: prompt.promptId,
+        promptVersion: prompt.version, status: 'failed', usage: usage,
+        error: String(error && error.message || error).slice(0, 500)
+      });
+      throw error;
     }
   }
-
-  throw new Error('Pengerjaan tidak ditemukan.');
+  const results = deterministic.concat(aiResults).sort(function (a, b) { return a.order - b.order; });
+  const now = currentTimestamp_();
+  const record = {
+    version: 1, assessmentId: String(attempt.assessmentId), promptId: prompt.promptId,
+    promptVersion: Number(prompt.version), provider: 'TOKENPORTAL', model: model || settings.model,
+    usage: usage, requestedBy: String(payload.currentUser && payload.currentUser.email || ''),
+    analyzedQuestionIds: questionInputs.map(function (item) { return item.questionId; }).sort(),
+    dominantRecommendation: dominantRecommendation,
+    results: results
+  };
+  appendRow_('Events', {
+    eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+    eventType: 'AI_SOLO_SCORING_RECOMMENDATION', eventAt: now,
+    detailsJson: JSON.stringify(record)
+  });
+  return { attemptId: attemptId, status: 'completed', promptId: prompt.promptId, promptVersion: prompt.version, provider: 'TOKENPORTAL', model: record.model, usage: usage, dominantRecommendation: dominantRecommendation, results: results };
 }
 
-/**
- * Mencatat event keamanan dari sesi siswa yang telah diverifikasi oleh routeAction_.
- * Hanya event yang dikenal yang disimpan; waktu selalu dibuat di server.
- */
+function soloAchievementCategory_(percentage) {
+  const value = Number(percentage);
+  if (!isFinite(value) || value < 0 || value > 100) throw new Error('Persentase ketercapaian harus berada pada rentang 0–100%.');
+  if (value > 85) return 'exceeds';
+  if (value >= 70) return 'achieved';
+  return 'not_achieved';
+}
+
+function saveSoloIndicatorVerification_(payload) {
+  const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
+  const submitted = payload.results;
+  if (!Array.isArray(submitted) || !submitted.length) throw new Error('Verifikasi indikator belum diisi.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+    if (!attempt || String(attempt.status || '').toLowerCase() !== 'graded') {
+      throw new Error('Penilaian seluruh soal harus selesai sebelum indikator diverifikasi.');
+    }
+    const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+    if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') {
+      throw new Error('Verifikasi indikator hanya berlaku untuk Asesmen SOLO Tax.');
+    }
+    const questions = listRows_('Questions').filter(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+    const mapped = {};
+    questions.forEach(function (question) {
+      const meta = parseJson_(question.answerJson, {}) || {};
+      const solo = meta.__soloTaxMeta || {};
+      const indicators = Array.isArray(solo.learningIndicators) && solo.learningIndicators.length
+        ? solo.learningIndicators
+        : (Array.isArray(solo.learningIndicatorIds) ? solo.learningIndicatorIds.map(function(id){return {indicatorId:id};}) : []);
+      indicators.forEach(function (indicator) {
+        const key = String(indicator.indicatorId || '');
+        if (!key) return;
+        if (!mapped[key]) mapped[key] = [];
+        if (mapped[key].indexOf(String(question.questionId)) < 0) mapped[key].push(String(question.questionId));
+      });
+    });
+    const expectedIds = Object.keys(mapped).sort();
+    const receivedIds = submitted.map(function (item) { return String(item && item.indicatorId || ''); }).sort();
+    if (!expectedIds.length) throw new Error('Asesmen ini belum memiliki indikator TP yang terhubung dengan soal.');
+    if (receivedIds.length !== expectedIds.length || receivedIds.some(function (id, index) { return id !== expectedIds[index]; })) {
+      throw new Error('Verifikasi harus mencakup setiap indikator yang terhubung dengan soal, tepat satu kali.');
+    }
+    const results = submitted.map(function (item) {
+      const id = String(item.indicatorId);
+      const rawPercentage = item.percentage;
+      if (rawPercentage === '' || rawPercentage === null || rawPercentage === undefined) {
+        throw new Error('Persentase ketercapaian setiap indikator wajib diisi.');
+      }
+      const percentage = Number(rawPercentage);
+      if (!isFinite(percentage) || percentage < 0 || percentage > 100) {
+        throw new Error('Persentase ketercapaian harus berupa angka 0–100%.');
+      }
+      const evidence = String(item.evidence || '').trim();
+      if (!evidence || evidence.length > 3000) throw new Error('Bukti atau alasan verifikasi wajib diisi (maksimal 3.000 karakter).');
+      return {
+        indicatorId: id, percentage: percentage,
+        category: soloAchievementCategory_(percentage),
+        evidence: evidence, questionIds: mapped[id].slice()
+      };
+    });
+    const averagePercentage = results.reduce(function (sum, item) { return sum + item.percentage; }, 0) / results.length;
+    const roundedAveragePercentage = Math.round(averagePercentage * 100) / 100;
+    const tpAchievement = {
+      averagePercentage: roundedAveragePercentage,
+      category: soloAchievementCategory_(roundedAveragePercentage),
+      indicatorCount: results.length,
+      weighting: 'EQUAL'
+    };
+    const now = currentTimestamp_();
+    const user = payload.currentUser || {};
+    appendRow_('Events', {
+      eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+      eventType: 'SOLO_INDICATOR_VERIFICATION', eventAt: now,
+      detailsJson: JSON.stringify({ version: 2, assessmentId: String(attempt.assessmentId), verifiedBy: String(user.email || ''), results: results, tpAchievement: tpAchievement })
+    });
+    appendRow_('Events', {
+      eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+      eventType: 'SOLO_DOMINANT_LEVEL_INVALIDATED', eventAt: now,
+      detailsJson: JSON.stringify({ reason: 'Verifikasi indikator berubah; rekomendasi level dominan perlu ditinjau ulang.' })
+    });
+    return { attemptId: attemptId, status: 'verified', verifiedAt: now, indicatorCount: results.length, tpAchievement: tpAchievement };
+  } finally {
+    lock.releaseLock();
+  }
+}
+function aiScriptProperties_() {
+  return PropertiesService.getScriptProperties();
+}
+function aiSettings_() {
+  const raw = aiScriptProperties_().getProperty(RUMBLE_AI_SETTINGS_KEY_);
+  let saved = {};
+  try { saved = raw ? JSON.parse(raw) : {}; } catch (error) { saved = {}; }
+  return {
+    provider: 'TOKENPORTAL',
+    model: String(saved.model || ''),
+    scoringEnabled: saved.scoringEnabled === true,
+    reflectionEnabled: saved.reflectionEnabled === true,
+    dailyTokenLimit: Math.max(0, Number(saved.dailyTokenLimit) || 0),
+    maxOutputTokens: Math.max(128, Math.min(8000, Number(saved.maxOutputTokens) || 1600)),
+    updatedAt: String(saved.updatedAt || ''),
+    updatedBy: String(saved.updatedBy || '')
+  };
+}
+function adminGetAiSettings_() {
+  const settings = aiSettings_();
+  settings.hasApiKey = !!aiScriptProperties_().getProperty(RUMBLE_AI_API_KEY_);
+  return settings;
+}
+function adminSaveAiSettings_(payload) {
+  const model = requiredText_(payload.model, 'Model AI', 120);
+  const dailyTokenLimit = Number(payload.dailyTokenLimit);
+  const maxOutputTokens = Number(payload.maxOutputTokens);
+  if (!isFinite(dailyTokenLimit) || dailyTokenLimit < 0 || dailyTokenLimit > 100000000) {
+    throw new Error('Batas token harian harus berupa angka 0 sampai 100.000.000. Isi 0 jika tidak dibatasi.');
+  }
+  if (!isFinite(maxOutputTokens) || maxOutputTokens < 128 || maxOutputTokens > 8000) {
+    throw new Error('Batas token keluaran per permintaan harus 128 sampai 8.000.');
+  }
+  const properties = aiScriptProperties_();
+  const key = String(payload.apiKey || '').trim();
+  if (key && !/^tp-[A-Za-z0-9_-]{12,}$/.test(key)) throw new Error('Format API key TokenPortal tidak sesuai.');
+  if (key && payload.clearApiKey === true) throw new Error('Pilih untuk menyimpan API key baru atau menghapus API key lama, bukan keduanya.');
+  const activePrompts = aiPrompts_();
+  if (payload.scoringEnabled === true && !activePrompts.some(function (item) { return item.service === 'SCORING' && item.active === true; })) {
+    throw new Error('Aktifkan prompt AI Penilaian yang sudah lulus uji simulasi terlebih dahulu.');
+  }
+  if (payload.reflectionEnabled === true && !activePrompts.some(function (item) { return item.service === 'REFLECTION' && item.active === true; })) {
+    throw new Error('Aktifkan prompt AI Refleksi yang sudah lulus uji simulasi terlebih dahulu.');
+  }
+  if (key) properties.setProperty(RUMBLE_AI_API_KEY_, key);
+  if (payload.clearApiKey === true) properties.deleteProperty(RUMBLE_AI_API_KEY_);
+  const current = aiSettings_();
+  const saved = {
+    model: model,
+    scoringEnabled: payload.scoringEnabled === true,
+    reflectionEnabled: payload.reflectionEnabled === true,
+    dailyTokenLimit: Math.floor(dailyTokenLimit),
+    maxOutputTokens: Math.floor(maxOutputTokens),
+    updatedAt: currentTimestamp_(),
+    updatedBy: String(payload.currentUser && payload.currentUser.email || '')
+  };
+  properties.setProperty(RUMBLE_AI_SETTINGS_KEY_, JSON.stringify(saved));
+  return adminGetAiSettings_();
+}
+
+function aiTokensUsedToday_() {
+  const timezone = Session.getScriptTimeZone();
+  const today = Utilities.formatDate(new Date(), timezone, 'yyyy-MM-dd');
+  return listRows_('Events').filter(function (event) {
+    return String(event.eventType || '').indexOf('AI_') === 0 &&
+      Utilities.formatDate(new Date(event.eventAt), timezone, 'yyyy-MM-dd') === today;
+  }).reduce(function (total, event) {
+    const details = parseJson_(event.detailsJson, {});
+    return total + (Number(details.usage && details.usage.totalTokens) || 0);
+  }, 0);
+}
+
+function tokenPortalChatCompletion_(messages, model, maxTokens) {
+  const properties = aiScriptProperties_();
+  const apiKey = properties.getProperty(RUMBLE_AI_API_KEY_);
+  if (!apiKey) throw new Error('API key TokenPortal belum dikonfigurasi oleh Admin.');
+  const settings = aiSettings_();
+  const selectedModel = requiredText_(model || settings.model, 'Model AI', 120);
+  let outputLimit = Math.max(128, Math.min(8000, Number(maxTokens) || settings.maxOutputTokens));
+  if (settings.dailyTokenLimit > 0) {
+    const remaining = settings.dailyTokenLimit - aiTokensUsedToday_();
+    if (remaining < 128) throw new Error('Batas token AI harian telah tercapai. Coba lagi setelah periode penggunaan berikutnya.');
+    outputLimit = Math.min(outputLimit, remaining);
+  }
+  const response = UrlFetchApp.fetch(RUMBLE_AI_ENDPOINT_ + '/chat/completions', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + apiKey },
+    payload: JSON.stringify({
+      model: selectedModel,
+      messages: messages,
+      max_tokens: outputLimit,
+      stream: false
+    }),
+    muteHttpExceptions: true
+  });
+  const status = response.getResponseCode();
+  const body = response.getContentText() || '';
+  let data = {};
+  try { data = JSON.parse(body); } catch (error) {}
+  if (status < 200 || status >= 300) {
+    const providerMessage = data && data.error && data.error.message ? String(data.error.message) : '';
+    throw new Error('TokenPortal gagal merespons (HTTP ' + status + ')' + (providerMessage ? ': ' + providerMessage.slice(0, 240) : '. Periksa API key, model, dan saldo.'));
+  }
+  const content = data && data.choices && data.choices[0] && data.choices[0].message
+    ? String(data.choices[0].message.content || '') : '';
+  if (!content) throw new Error('Respons TokenPortal tidak berisi teks jawaban yang dapat dibaca.');
+  const usage = data.usage || {};
+  return {
+    content: content,
+    model: String(data.model || selectedModel),
+    requestId: String(data.id || ''),
+    usage: {
+      promptTokens: Number(usage.prompt_tokens) || 0,
+      completionTokens: Number(usage.completion_tokens) || 0,
+      totalTokens: Number(usage.total_tokens) || 0
+    }
+  };
+}
+function logAiUsage_(eventType, details) {
+  appendRow_('Events', {
+    eventId: makeId_('EVT'), attemptId: '', studentId: '',
+    eventType: eventType, eventAt: currentTimestamp_(),
+    detailsJson: JSON.stringify(details || {})
+  });
+}
+function adminTestAiConnection_(payload) {
+  const settings = aiSettings_();
+  const model = requiredText_(payload.model || settings.model, 'Model AI', 120);
+  const started = new Date().getTime();
+  try {
+    const result = tokenPortalChatCompletion_([
+      { role: 'system', content: 'Balas hanya dengan JSON valid: {"status":"ok","message":"connected"}.' },
+      { role: 'user', content: 'Ini uji koneksi simulasi Rumble Assessment. Jangan gunakan data siswa.' }
+    ], model, 128);
+    const details = {
+      provider: 'TOKENPORTAL', model: result.model, requestId: result.requestId,
+      durationMs: new Date().getTime() - started, usage: result.usage, status: 'success'
+    };
+    logAiUsage_('AI_PROVIDER_TEST_SUCCESS', details);
+    return { status: 'success', provider: 'TOKENPORTAL', model: result.model, response: result.content.slice(0, 500), usage: result.usage, durationMs: details.durationMs };
+  } catch (error) {
+    const details = {
+      provider: 'TOKENPORTAL', model: model, durationMs: new Date().getTime() - started,
+      status: 'failed', error: String(error && error.message || error).slice(0, 500)
+    };
+    logAiUsage_('AI_PROVIDER_TEST_FAILED', details);
+    throw error;
+  }
+}
+function adminListAiModels_() {
+  const response = UrlFetchApp.fetch(RUMBLE_AI_ENDPOINT_ + '/models', { method: 'get', muteHttpExceptions: true });
+  const status = response.getResponseCode();
+  if (status < 200 || status >= 300) throw new Error('Daftar model TokenPortal tidak dapat dimuat (HTTP ' + status + ').');
+  const data = JSON.parse(response.getContentText() || '{}');
+  const models = Array.isArray(data.data) ? data.data : [];
+  return models.map(function (item) { return { id: String(item.id || ''), name: String(item.name || item.id || '') }; })
+    .filter(function (item) { return !!item.id; });
+}
+
+const RUMBLE_AI_PROMPTS_KEY_ = 'RUMBLE_AI_PROMPT_INDEX_V1';
+function aiPromptContentKey_(promptId) { return 'RUMBLE_AI_PROMPT_CONTENT_' + String(promptId || ''); }
+function aiPromptTestKey_(promptId) { return 'RUMBLE_AI_PROMPT_TEST_' + String(promptId || ''); }
+function aiPrompts_() {
+  const properties = aiScriptProperties_();
+  const raw = properties.getProperty(RUMBLE_AI_PROMPTS_KEY_);
+  let index = [];
+  try { index = raw ? JSON.parse(raw) : []; } catch (error) { index = []; }
+  if (!Array.isArray(index)) return [];
+  return index.map(function (item) {
+    return Object.assign({}, item, {
+      content: properties.getProperty(aiPromptContentKey_(item.promptId)) || '',
+      testSummary: properties.getProperty(aiPromptTestKey_(item.promptId)) || ''
+    });
+  });
+}
+function saveAiPrompts_(items) {
+  const properties = aiScriptProperties_();
+  const index = items.map(function (item) {
+    properties.setProperty(aiPromptContentKey_(item.promptId), String(item.content || ''));
+    properties.setProperty(aiPromptTestKey_(item.promptId), String(item.testSummary || ''));
+    const copy = Object.assign({}, item);
+    delete copy.content;
+    delete copy.testSummary;
+    return copy;
+  });
+  properties.setProperty(RUMBLE_AI_PROMPTS_KEY_, JSON.stringify(index));
+}
+function adminListAiPrompts_() {
+  return aiPrompts_().slice().sort(function (a, b) {
+    return String(a.service).localeCompare(String(b.service)) || Number(b.version) - Number(a.version);
+  });
+}
+function adminSaveAiPrompt_(payload) {
+  const service = String(payload.service || '').trim().toUpperCase();
+  if (['SCORING', 'REFLECTION'].indexOf(service) < 0) throw new Error('Jenis prompt AI tidak valid.');
+  const content = requiredText_(payload.content, 'Isi prompt', 1200);
+  const items = aiPrompts_();
+  if (items.length >= 40) throw new Error('Batas 40 versi prompt tercapai. Tinjau dan arsipkan versi lama sebelum menambah versi baru.');
+  const version = items.filter(function (item) { return item.service === service; })
+    .reduce(function (max, item) { return Math.max(max, Number(item.version) || 0); }, 0) + 1;
+  const prompt = {
+    promptId: 'PROMPT_' + service + '_' + version,
+    service: service,
+    version: version,
+    content: content,
+    changeNote: String(payload.changeNote || '').slice(0, 500),
+    active: false,
+    testedAt: '',
+    testSummary: '',
+    createdAt: currentTimestamp_(),
+    createdBy: String(payload.currentUser && payload.currentUser.email || '')
+  };
+  items.push(prompt);
+  saveAiPrompts_(items);
+  return prompt;
+}
+function adminTestAiPrompt_(payload) {
+  const promptId = requiredText_(payload.promptId, 'ID prompt', 120);
+  const items = aiPrompts_();
+  const prompt = items.find(function (item) { return item.promptId === promptId; });
+  if (!prompt) throw new Error('Versi prompt tidak ditemukan.');
+  const simulation = prompt.service === 'SCORING'
+    ? {
+        task: 'simulasi penilaian jawaban uraian',
+        question: 'Jelaskan mengapa 2x + 3 = 7 menghasilkan x = 2.',
+        studentAnswer: 'Kurangi kedua ruas dengan 3 sehingga 2x = 4, lalu bagi 2 sehingga x = 2.',
+        answerGuide: 'Jawaban menjelaskan operasi yang sama pada kedua ruas.',
+        rubric: 'Nilai proses penalaran dan ketepatan kesimpulan.'
+      }
+    : {
+        task: 'simulasi refleksi pembelajaran kelas',
+        classStatistics: { participantCount: 20, completedCount: 18, objectiveAchievementPercent: 76, indicatorMastered: 9, indicatorDeveloping: 6, indicatorNeedsImprovement: 3 },
+        levelDistribution: { PRESTRUCTURAL: 1, UNISTRUCTURAL: 3, MULTISTRUKTURAL: 7, RELATIONAL: 6, EXTENDED_ABSTRACT: 1 }
+      };
+  let result;
+  try {
+    result = tokenPortalChatCompletion_([
+      { role: 'system', content: prompt.content },
+      { role: 'user', content: 'UJI COBA DENGAN DATA SIMULASI, BUKAN DATA SISWA NYATA. Berikan hasil sesuai prompt. Data simulasi: ' + JSON.stringify(simulation) }
+    ], aiSettings_().model, aiSettings_().maxOutputTokens);
+  } catch (error) {
+    logAiUsage_('AI_PROMPT_TEST_FAILED', {
+      provider: 'TOKENPORTAL', model: aiSettings_().model, promptId: promptId,
+      service: prompt.service, status: 'failed', error: String(error && error.message || error).slice(0, 500)
+    });
+    throw error;
+  }
+  const testedAt = currentTimestamp_();
+  prompt.testedAt = testedAt;
+  prompt.testSummary = result.content.slice(0, 1000);
+  prompt.testUsage = result.usage;
+  prompt.testedBy = String(payload.currentUser && payload.currentUser.email || '');
+  saveAiPrompts_(items);
+  logAiUsage_('AI_PROMPT_TEST_SUCCESS', {
+    provider: 'TOKENPORTAL', model: result.model, promptId: promptId,
+    service: prompt.service, status: 'success', usage: result.usage, testedAt: testedAt
+  });
+  return { promptId: promptId, testedAt: testedAt, model: result.model, response: result.content.slice(0, 3000), usage: result.usage };
+}
+function adminActivateAiPrompt_(payload) {
+  const promptId = requiredText_(payload.promptId, 'ID prompt', 120);
+  const items = aiPrompts_();
+  const selected = items.find(function (item) { return item.promptId === promptId; });
+  if (!selected) throw new Error('Versi prompt tidak ditemukan.');
+  if (!selected.testedAt) throw new Error('Prompt harus berhasil diuji menggunakan data simulasi sebelum diaktifkan.');
+  items.forEach(function (item) {
+    if (item.service === selected.service) item.active = item.promptId === promptId;
+  });
+  saveAiPrompts_(items);
+  return { promptId: promptId, service: selected.service, version: selected.version, active: true };
+}
+
+function adminListAiUsage_() {
+  return listRows_('Events').filter(function (event) {
+    return String(event.eventType || '').indexOf('AI_') === 0;
+  }).slice(-200).reverse().map(function (event) {
+    const details = parseJson_(event.detailsJson, {});
+    return {
+      eventType: String(event.eventType || ''),
+      eventAt: String(event.eventAt || ''),
+      provider: String(details.provider || ''),
+      model: String(details.model || ''),
+      status: String(details.status || ''),
+      durationMs: Number(details.durationMs) || 0,
+      usage: details.usage || { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      error: String(details.error || '')
+    };
+  });
+}
+
+function saveSoloDominantVerification_(payload) {
+  const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
+  const allowedLevels = ['PRESTRUCTURAL', 'UNISTRUKTURAL', 'MULTISTRUKTURAL', 'RELATIONAL', 'EXTENDED_ABSTRACT'];
+  const teacherLevel = String(payload.teacherLevel || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+  const teacherReason = String(payload.teacherReason || '').trim();
+  if (allowedLevels.indexOf(teacherLevel) < 0) {
+    throw new Error('Hasil verifikasi guru harus menggunakan salah satu dari lima level SOLO.');
+  }
+  if (teacherReason.length > 3000) throw new Error('Catatan guru maksimal 3.000 karakter.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+    if (!attempt || String(attempt.status || '').toLowerCase() !== 'graded') {
+      throw new Error('Seluruh soal harus selesai dinilai sebelum level SOLO dominan diverifikasi.');
+    }
+    const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+    if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') {
+      throw new Error('Verifikasi level dominan hanya berlaku untuk Asesmen SOLO Tax.');
+    }
+    const events = listRows_('Events').filter(function (event) { return String(event.attemptId) === attemptId; });
+    const latestIndicatorReview = events.filter(function (event) {
+      return String(event.eventType).indexOf('SOLO_INDICATOR_VERIFICATION') === 0;
+    }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); }).pop();
+    if (!latestIndicatorReview || latestIndicatorReview.eventType !== 'SOLO_INDICATOR_VERIFICATION') {
+      throw new Error('Seluruh indikator TP harus diverifikasi ulang setelah penilaian terakhir.');
+    }
+    const reviewDetails = parseJson_(latestIndicatorReview.detailsJson, {});
+    const results = Array.isArray(reviewDetails.results) ? reviewDetails.results : [];
+    if (!results.length || results.some(function (item) {
+      const percentage = Number(item && item.percentage);
+      const evidence = String(item && item.evidence || '').trim();
+      return !item || !item.indicatorId || !isFinite(percentage) || percentage < 0 || percentage > 100 || !evidence || evidence.length > 3000 || item.category !== soloAchievementCategory_(percentage);
+    })) {
+      throw new Error('Bukti dan persentase verifikasi indikator belum lengkap atau tidak valid.');
+    }
+    const latestAiEvent = events.filter(function (event) {
+      return String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION';
+    }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); }).pop();
+    if (!latestAiEvent) throw new Error('Rekomendasi level dominan AI belum tersedia. Jalankan analisis AI terlebih dahulu.');
+    const aiDetails = parseJson_(latestAiEvent.detailsJson, {});
+    const recommendation = aiDetails.dominantRecommendation;
+    if (!recommendation || typeof recommendation !== 'object' || Array.isArray(recommendation)) {
+      throw new Error('AI belum menghasilkan rekomendasi level dominan berbasis bukti yang cukup.');
+    }
+    const aiLevel = String(recommendation.level || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+    if (allowedLevels.indexOf(aiLevel) < 0) throw new Error('Level rekomendasi AI tidak valid.');
+    const aiEvidence = String(recommendation.evidenceSummary || '').trim();
+    if (!aiEvidence || aiEvidence.length > 5000) throw new Error('Ringkasan bukti kualitatif dari AI tidak valid.');
+    if (teacherLevel !== aiLevel && !teacherReason) throw new Error('Alasan perubahan level dari rekomendasi AI wajib diisi.');
+    const questionEvidence = Array.isArray(recommendation.questionEvidence) ? recommendation.questionEvidence : [];
+    const analyzedQuestionIds = Array.isArray(aiDetails.analyzedQuestionIds) ? aiDetails.analyzedQuestionIds.map(String).sort() : [];
+    const receivedEvidenceIds = questionEvidence.map(function (item) { return String(item && item.questionId || ''); }).sort();
+    if (!analyzedQuestionIds.length || questionEvidence.length !== analyzedQuestionIds.length ||
+        analyzedQuestionIds.some(function (id, index) { return id !== receivedEvidenceIds[index]; })) {
+      throw new Error('Bukti level dominan harus mencakup tepat satu bukti untuk setiap soal yang dianalisis AI.');
+    }
+    const questionIds = {};
+    listRows_('Questions').filter(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); }).forEach(function (item) {
+      questionIds[String(item.questionId)] = true;
+    });
+    const checkedEvidence = questionEvidence.map(function (item) {
+      const id = String(item && item.questionId || '');
+      const evidence = String(item && item.evidence || '').trim();
+      if (!questionIds[id] || !evidence || evidence.length > 3000) {
+        throw new Error('Bukti level SOLO harus merujuk pada soal asesmen dan menyertakan penjelasan yang valid.');
+      }
+      return { questionId: id, evidence: evidence };
+    });
+    const now = currentTimestamp_(), user = payload.currentUser || {};
+    appendRow_('Events', {
+      eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+      eventType: 'SOLO_DOMINANT_LEVEL_VERIFICATION', eventAt: now,
+      detailsJson: JSON.stringify({
+        version: 2, assessmentId: String(attempt.assessmentId),
+        verifiedBy: String(user.email || ''), aiLevel: aiLevel, teacherLevel: teacherLevel,
+        aiEvidenceSummary: aiEvidence, questionEvidence: checkedEvidence,
+        teacherReason: teacherReason, aiProvider: String(aiDetails.provider || ''),
+        aiModel: String(aiDetails.model || ''), promptVersion: String(aiDetails.promptVersion || '')
+      })
+    });
+    return { attemptId: attemptId, status: 'verified', aiLevel: aiLevel, teacherLevel: teacherLevel, verifiedAt: now };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function logEvent_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
@@ -1983,6 +2947,25 @@ function uploadAnswerImage_(payload) {
   lock.waitLock(10000);
   let file = null;
   try {
+    const latestValues = attemptSheet.getDataRange().getValues();
+    let latestRowIndex = -1, latestAttemptRow = null;
+    for (let i = 1; i < latestValues.length; i++) {
+      if (String(latestValues[i][col('attemptId')]) === attemptId &&
+          String(latestValues[i][col('studentId')]) === studentId &&
+          String(latestValues[i][col('assessmentId')]) === assessmentId) {
+        latestRowIndex = i; latestAttemptRow = latestValues[i]; break;
+      }
+    }
+    if (latestRowIndex < 0 || !latestAttemptRow || String(latestAttemptRow[col('status')]) !== 'in_progress') {
+      throw new Error('Sesi pengerjaan tidak ditemukan atau sudah berakhir.');
+    }
+    const latestAnswers = parseJson_(latestAttemptRow[col('answersJson')], {});
+    const latestAnswer = latestAnswers[questionId] && typeof latestAnswers[questionId] === 'object' && !Array.isArray(latestAnswers[questionId])
+      ? latestAnswers[questionId] : { text: typeof latestAnswers[questionId] === 'string' ? latestAnswers[questionId] : '' };
+    latestAnswer.photos = Array.isArray(latestAnswer.photos) ? latestAnswer.photos : [];
+    if (String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && latestAnswer.photos.length >= 1) {
+      throw new Error('SOLO Tax hanya mengizinkan satu foto untuk setiap soal utama.');
+    }
     const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
     const answerRoot = getOrCreateChildFolder_(root, '02 - Jawaban Siswa');
     const assessmentFolder = getOrCreateChildFolder_(answerRoot, assessmentId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100));
@@ -2009,13 +2992,11 @@ function uploadAnswerImage_(payload) {
     const imageUrl = 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.getId()) + '&sz=w1200';
     appendRow_('Files', { fileId: fileId, attemptId: attemptId, studentId: studentId, questionId: questionId, driveFileId: file.getId(), fileUrl: file.getUrl(), createdAt: currentTimestamp_() });
     const answersCol = col('answersJson');
-    const answers = parseJson_(attemptRow[answersCol], {});
-    const answer = answers[questionId] && typeof answers[questionId] === 'object' && !Array.isArray(answers[questionId])
-      ? answers[questionId] : { text: typeof answers[questionId] === 'string' ? answers[questionId] : '' };
-    answer.photos = Array.isArray(answer.photos) ? answer.photos : [];
+    const answers = latestAnswers;
+    const answer = latestAnswer;
     answer.photos.push({ fileId: fileId, url: file.getUrl(), imageUrl: imageUrl, name: file.getName() });
     answers[questionId] = answer;
-    attemptSheet.getRange(rowIndex + 1, answersCol + 1).setValue(JSON.stringify(answers));
+    attemptSheet.getRange(latestRowIndex + 1, answersCol + 1).setValue(JSON.stringify(answers));
     SpreadsheetApp.flush();
     return { fileId: fileId, name: file.getName(), url: file.getUrl(), imageUrl: imageUrl, folder: '02 - Jawaban Siswa/' + assessmentId + '/' + attemptId };
   } catch (error) {
@@ -2047,22 +3028,110 @@ function migrateDatabaseV1_() {
     return {success:true,migrationId:migrationId,bundles:bundles.length,createdVersions:created,reusedVersions:reused};
   }finally{lock.releaseLock();}
 }
-function updateRowByKey_(tableName,keyHeader,keyValue,fields){
-  const sheet=getSheet_(tableName),values=sheet.getDataRange().getValues(),headers=values[0].map(String),keyCol=headers.indexOf(keyHeader);
-  if(keyCol<0)throw new Error('Kolom '+keyHeader+' tidak tersedia pada '+tableName+'.');
-  let row=-1;for(let i=1;i<values.length;i++)if(String(values[i][keyCol])===String(keyValue)){row=i+1;break;}
-  if(row<0)throw new Error('Data '+tableName+' tidak ditemukan: '+keyValue);
-  Object.keys(fields).forEach(function(k){const c=headers.indexOf(k);if(c<0)throw new Error('Kolom '+k+' tidak tersedia pada '+tableName+'.');sheet.getRange(row,c+1).setValue(fields[k]);});
+function updateRowByKey_(tableName, keyHeader, keyValue, fields) {
+  const sheet = getSheet_(tableName);
+  const lastColumn = sheet.getLastColumn();
+  const lastRow = sheet.getLastRow();
+  if (lastColumn < 1 || lastRow < 1) {
+    throw new Error('Sheet ' + tableName + ' belum memiliki header yang valid.');
+  }
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(function (h) { return String(h).trim(); });
+  const keyCol = headers.indexOf(keyHeader);
+  if (keyCol < 0) throw new Error('Kolom ' + keyHeader + ' tidak tersedia pada ' + tableName + '.');
+  const columns = {};
+  Object.keys(fields).forEach(function (key) {
+    const col = headers.indexOf(key);
+    if (col < 0) throw new Error('Kolom ' + key + ' tidak tersedia pada ' + tableName + '.');
+    columns[key] = col;
+  });
+  const data = sheet.getRange(2, 1, Math.max(lastRow - 1, 1), lastColumn).getValues();
+  let rowNumber = -1;
+  for (let i = 0; i < data.length; i++) {
+    if (String(data[i][keyCol]) === String(keyValue)) {
+      rowNumber = i + 2;
+      break;
+    }
+  }
+  if (rowNumber < 0) throw new Error('Data ' + tableName + ' tidak ditemukan: ' + keyValue);
+
+  const rowRange = sheet.getRange(rowNumber, 1, 1, lastColumn);
+  const updatedRow = rowRange.getValues()[0];
+  const formulas = rowRange.getFormulas()[0];
+  // Preserve formulas in untouched columns while applying the requested values.
+  formulas.forEach(function (formula, index) {
+    if (formula) updatedRow[index] = formula;
+  });
+  Object.keys(columns).forEach(function (key) {
+    updatedRow[columns[key]] = fields[key];
+  });
+  rowRange.setValues([updatedRow]);
 }
 function bundleSnapshotFromRecord_(bundle,classification){
-  return {schemaVersion:1,bundleId:String(bundle.bundleId),classification:String(classification||'REGULER').toUpperCase(),title:String(bundle.title||''),subject:String(bundle.subject||''),description:String(bundle.description||''),tpCode:String(bundle.tpCode||''),passageText:String(bundle.passageText||''),passageImageUrl:String(bundle.passageImageUrl||''),passages:parseJson_(bundle.passagesJson,[]),questions:parseJson_(bundle.questionsJson,[])};
+  return {schemaVersion:1,bundleId:String(bundle.bundleId),classification:String(classification||'REGULER').toUpperCase(),title:String(bundle.title||''),subject:String(bundle.subject||''),description:String(bundle.description||''),tpCode:String(bundle.tpCode||''),learningObjectiveId:String(bundle.learningObjectiveId||''),learningIndicatorId:String(bundle.learningIndicatorId||''),passageText:String(bundle.passageText||''),passageImageUrl:String(bundle.passageImageUrl||''),passages:parseJson_(bundle.passagesJson,[]),questions:parseJson_(bundle.questionsJson,[])};
+}
+
+function snapshotBundleLearningReferences_(snapshot) {
+  if (String(snapshot.classification || '').toUpperCase() !== 'SOLO_TAX') return snapshot;
+  const objectiveId = String(snapshot.learningObjectiveId || '');
+  const objective = listRows_('LearningObjectives').find(function (item) {
+    return String(item.objectiveId) === objectiveId;
+  });
+  if (!objective) throw new Error('Snapshot SOLO Tax tidak dapat menyimpan tujuan pembelajaran yang dipilih.');
+  snapshot.learningObjectiveSnapshot = {
+    objectiveId: String(objective.objectiveId || ''),
+    tpCode: String(objective.tpCode || snapshot.tpCode || ''),
+    title: String(objective.title || ''),
+    subject: String(objective.subject || snapshot.subject || ''),
+    description: String(objective.description || '')
+  };
+  const indicators = listRows_('LearningIndicators');
+  snapshot.questions = (snapshot.questions || []).map(function (question) {
+    const copy = Object.assign({}, question);
+    copy.learningIndicators = (Array.isArray(question.learningIndicatorIds) ? question.learningIndicatorIds : []).map(function (id) {
+      const row = indicators.find(function (item) {
+        return String(item.indicatorId) === String(id) && String(item.objectiveId) === objectiveId;
+      });
+      if (!row) throw new Error('Indikator TP tidak dapat disimpan pada snapshot bundel.');
+      return {
+        indicatorId: String(row.indicatorId || ''),
+        objectiveId: String(row.objectiveId || ''),
+        indicatorCode: String(row.indicatorCode || ''),
+        description: String(row.description || '')
+      };
+    });
+    return copy;
+  });
+  return snapshot;
+}
+
+function validateBundleLearningReference_(snapshot){
+  const objectiveId=String(snapshot.learningObjectiveId||'').trim(),legacyId=String(snapshot.learningIndicatorId||'').trim(),ids=[];
+  (snapshot.questions||[]).forEach(function(q){(Array.isArray(q.learningIndicatorIds)?q.learningIndicatorIds:[]).forEach(function(id){ids.push(String(id||'').trim());});});
+  const indicatorIds=Array.from(new Set([legacyId].concat(ids).filter(Boolean)));
+  if(!objectiveId&&!indicatorIds.length){if(String(snapshot.classification||'').toUpperCase()==='SOLO_TAX')throw new Error('Pilih tujuan pembelajaran dan indikator TP untuk bundel SOLO Tax.');return true;}
+  if(!objectiveId)throw new Error('Pilih tujuan pembelajaran sebelum memilih indikator.');
+  learningRepositoryAssertReady_();
+  const objective=listRows_('LearningObjectives').find(function(row){return String(row.objectiveId)===objectiveId&&learningActive_(row.active);});
+  if(!objective)throw new Error('Tujuan pembelajaran yang dipilih tidak tersedia atau tidak aktif.');
+  if(String(objective.subject||'').trim().toLowerCase()!==String(snapshot.subject||'').trim().toLowerCase())throw new Error('Mata pelajaran bundel harus sama dengan mata pelajaran tujuan pembelajaran.');
+  indicatorIds.forEach(function(indicatorId){
+    const indicator=listRows_('LearningIndicators').find(function(row){return String(row.indicatorId)===indicatorId&&String(row.objectiveId)===objectiveId&&learningActive_(row.active);});
+    if(!indicator)throw new Error('Indikator tidak aktif atau tidak terhubung dengan tujuan pembelajaran yang dipilih.');
+  });
+  return true;
 }
 function validateBundleSnapshot_(snapshot){
   if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot))throw new Error('Snapshot bundel tidak valid.');
   requiredText_(snapshot.bundleId,'ID bundel',100);
-  if(['REGULER','SOLO_TAX'].indexOf(String(snapshot.classification||'').toUpperCase())<0)throw new Error('Klasifikasi bundel tidak valid.');
+  const classification=String(snapshot.classification||'').toUpperCase();
+  if(['REGULER','SOLO_TAX'].indexOf(classification)<0)throw new Error('Klasifikasi bundel tidak valid.');
   if(!Array.isArray(snapshot.questions)||snapshot.questions.length<1||snapshot.questions.length>200)throw new Error('Snapshot harus memiliki 1 sampai 200 soal.');
-  snapshot.questions.forEach(function(q,i){const type=String(q&&q.type||'multiple_choice'),points=Number(q&&q.points);if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal snapshot tidak valid pada nomor '+(i+1));if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal snapshot tidak valid pada nomor '+(i+1));});
+  snapshot.questions.forEach(function(q,i){
+    if(classification==='SOLO_TAX'){validateSoloTaxQuestion_(q,i);return;}
+    const type=String(q&&q.type||'multiple_choice'),points=Number(q&&q.points);
+    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal snapshot tidak valid pada nomor '+(i+1));
+    if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal snapshot tidak valid pada nomor '+(i+1));
+  });
   return true;
 }
 /** Caller must hold ScriptLock while updating the parent bundle's latest-version pointer. */
@@ -2082,3 +3151,390 @@ function getBundleVersion_(payload){
 function assertBundleVersioningReady_(){
   if(!listRows_('SchemaMigrations').some(function(r){return String(r.migrationId)==='BUNDLE_VERSIONING_V1'&&String(r.status)==='completed';}))throw new Error('Fondasi versioning belum dimigrasikan. Administrator harus menjalankan migrateDatabaseV1_() terlebih dahulu.');
 }
+
+/* -------------------------------------------------------------------------
+ * Repositori Pembelajaran — CRUD TP dan indikator (LEARNING_REPOSITORY_V1)
+ * Migrasi terpisah dari setupDatabase() agar tidak mengubah tabel lain.
+ * ------------------------------------------------------------------------- */
+const LEARNING_REPOSITORY_TABLES_ = {
+  LearningObjectives: ['objectiveId','tpCode','title','subject','description','createdBy','createdAt','updatedAt','active'],
+  LearningIndicators: ['indicatorId','objectiveId','indicatorCode','description','active','createdAt','updatedAt'],
+  AdminAuditLog: ['logId','actorUserId','actorEmail','action','entityType','entityId','beforeJson','afterJson','createdAt']
+};
+
+function validateLearningMigrationPreflight_(spreadsheet) {
+  const migrationSheet = spreadsheet.getSheetByName('SchemaMigrations');
+  if (!migrationSheet) {
+    throw new Error('Sheet SchemaMigrations belum tersedia. Selesaikan migrasi fondasi versioning terlebih dahulu.');
+  }
+  validateRepositorySheetHeaders_(migrationSheet, 'SchemaMigrations', ['migrationId', 'status']);
+  Object.keys(LEARNING_REPOSITORY_TABLES_).forEach(function (tableName) {
+    const sheet = spreadsheet.getSheetByName(tableName);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    const lastColumn = sheet.getLastColumn();
+    if (lastRow === 0 && lastColumn === 0) return;
+    if (lastRow < 1 || lastColumn < 1) {
+      throw new Error('Struktur sheet ' + tableName + ' tidak valid: baris data dan header tidak konsisten. Migrasi dihentikan sebelum mengubah sheet apa pun.');
+    }
+    const rawHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+    const seen = {};
+    rawHeaders.forEach(function (value, index) {
+      const raw = String(value == null ? '' : value);
+      const header = raw.trim();
+      if (!header) {
+        throw new Error('Header kosong pada kolom ' + (index + 1) + ' di sheet ' + tableName + '. Migrasi dihentikan sebelum perubahan.');
+      }
+      if (raw !== header) {
+        throw new Error('Header "' + raw + '" pada sheet ' + tableName + ' memiliki spasi di awal/akhir. Rapikan secara manual sebelum migrasi.');
+      }
+      if (seen[header]) {
+        throw new Error('Header duplikat "' + header + '" pada sheet ' + tableName + '. Migrasi dihentikan sebelum perubahan.');
+      }
+      seen[header] = true;
+    });
+  });
+  return true;
+}
+
+function migrateLearningRepositoryV1_() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    // Repositori hanya boleh dimigrasikan setelah fondasi versioning selesai.
+    // Pemeriksaan dilakukan sebelum perubahan sheet apa pun.
+    assertBundleVersioningReady_();
+    const migrationId = 'LEARNING_REPOSITORY_V1';
+    const spreadsheet = getSpreadsheet_();
+    validateLearningMigrationPreflight_(spreadsheet);
+    const migrationSheet = spreadsheet.getSheetByName('SchemaMigrations');
+    if (listRows_('SchemaMigrations').some(function (r) {
+      return String(r.migrationId) === migrationId && String(r.status) === 'completed';
+    })) return { success: true, alreadyApplied: true, migrationId: migrationId };
+
+    const changes = {};
+    Object.keys(LEARNING_REPOSITORY_TABLES_).forEach(function (tableName) {
+      let sheet = spreadsheet.getSheetByName(tableName);
+      if (!sheet) {
+        sheet = spreadsheet.insertSheet(tableName);
+        const headers = LEARNING_REPOSITORY_TABLES_[tableName];
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        sheet.setFrozenRows(1);
+        changes[tableName] = { created: true, addedHeaders: [] };
+        return;
+      }
+      if (sheet.getLastRow() === 0 && sheet.getLastColumn() === 0) {
+        const headers = LEARNING_REPOSITORY_TABLES_[tableName];
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        sheet.setFrozenRows(1);
+        changes[tableName] = { created: false, addedHeaders: headers.slice() };
+        return;
+      }
+      const current = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+      const added = [];
+      LEARNING_REPOSITORY_TABLES_[tableName].forEach(function (header) {
+        if (current.indexOf(header) < 0) {
+          sheet.getRange(1, sheet.getLastColumn() + 1).setValue(header);
+          current.push(header);
+          added.push(header);
+        }
+      });
+      changes[tableName] = { created: false, addedHeaders: added };
+    });
+    appendRow_('SchemaMigrations', {
+      migrationId: migrationId, version: 1, appliedAt: currentTimestamp_(),
+      appliedBy: Session.getActiveUser().getEmail() || 'Apps Script editor',
+      status: 'completed', detailsJson: JSON.stringify(changes)
+    });
+    return { success: true, migrationId: migrationId, changes: changes };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function validateRepositorySheetHeaders_(sheet, sheetName, requiredHeaders) {
+  if (!sheet) throw new Error('Sheet ' + sheetName + ' belum tersedia.');
+  const lastColumn = sheet.getLastColumn();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 1 || lastColumn < 1) {
+    throw new Error('Sheet ' + sheetName + ' kosong atau belum memiliki baris header. Periksa struktur sheet sebelum menjalankan endpoint repositori.');
+  }
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(function (value) {
+    return String(value == null ? '' : value).trim();
+  });
+  const seen = {};
+  headers.forEach(function (header, index) {
+    if (!header) throw new Error('Header kosong pada kolom ' + (index + 1) + ' di sheet ' + sheetName + '.');
+    if (seen[header]) throw new Error('Header duplikat "' + header + '" pada sheet ' + sheetName + '.');
+    seen[header] = true;
+  });
+  requiredHeaders.forEach(function (header) {
+    if (headers.indexOf(header) < 0) {
+      throw new Error('Kolom ' + header + ' belum tersedia pada ' + sheetName + '. Jalankan migrasi repositori.');
+    }
+  });
+  return headers;
+}
+function learningRepositoryAssertReady_() {
+  const spreadsheet = getSpreadsheet_();
+  const migrationSheet = spreadsheet.getSheetByName('SchemaMigrations');
+  if (!migrationSheet) {
+    throw new Error('Sheet SchemaMigrations belum tersedia. Selesaikan migrasi fondasi versioning dan repositori pembelajaran terlebih dahulu.');
+  }
+  validateRepositorySheetHeaders_(migrationSheet, 'SchemaMigrations', ['migrationId', 'status']);
+  const migrationCompleted = listRows_('SchemaMigrations').some(function (row) {
+    return String(row.migrationId) === 'LEARNING_REPOSITORY_V1' &&
+      String(row.status) === 'completed';
+  });
+  if (!migrationCompleted) {
+    throw new Error('Migrasi LEARNING_REPOSITORY_V1 belum tercatat completed. Jalankan migrasi repositori secara eksplisit setelah BUNDLE_VERSIONING_V1 selesai.');
+  }
+  Object.keys(LEARNING_REPOSITORY_TABLES_).forEach(function (name) {
+    const sheet = spreadsheet.getSheetByName(name);
+    if (!sheet) throw new Error('Repositori Pembelajaran belum dimigrasikan. Jalankan migrateLearningRepositoryV1_() secara eksplisit.');
+    validateRepositorySheetHeaders_(sheet, name, LEARNING_REPOSITORY_TABLES_[name]);
+  });
+}
+function learningActive_(value) {
+  return value === true || String(value).toLowerCase() === 'true' || String(value) === '1';
+}
+function learningAuditBegin_(user, action, entityType, entityId, beforeValue, afterValue) {
+  const logId = makeId_('AUD');
+  appendRow_('AdminAuditLog', {
+    logId: logId, actorUserId: String(user.userId || ''),
+    actorEmail: String(user.email || ''), action: 'PENDING_' + action,
+    entityType: entityType, entityId: String(entityId),
+    beforeJson: beforeValue == null ? '' : JSON.stringify(beforeValue),
+    afterJson: afterValue == null ? '' : JSON.stringify(afterValue),
+    createdAt: currentTimestamp_()
+  });
+  return logId;
+}
+function learningAuditComplete_(logId, action) {
+  updateRowByKey_('AdminAuditLog', 'logId', logId, { action: action });
+}
+function learningAuditedWrite_(user, action, entityType, entityId, beforeValue, afterValue, writeFn) {
+  // Catat intent terlebih dahulu agar perubahan tidak dapat terjadi tanpa jejak audit.
+  const logId = learningAuditBegin_(user, action, entityType, entityId, beforeValue, afterValue);
+  try {
+    writeFn();
+  } catch (writeError) {
+    throw new Error('Penulisan ' + entityType + ' gagal atau belum dapat dipastikan selesai. Audit ' + logId + ' tetap berstatus PENDING_' + action + ' untuk rekonsiliasi. Detail: ' + writeError.message);
+  }
+  try {
+    learningAuditComplete_(logId, action);
+  } catch (auditError) {
+    throw new Error(entityType + ' telah ditulis, tetapi audit ' + logId + ' belum dapat ditandai selesai. Periksa AdminAuditLog dan rekonsiliasi entri PENDING_' + action + '. Detail: ' + auditError.message);
+  }
+}
+function adminListPendingLearningAudits_() {
+  learningRepositoryAssertReady_();
+  return listRows_('AdminAuditLog').filter(function (row) {
+    return String(row.action || '').indexOf('PENDING_') === 0;
+  }).map(function (row) {
+    return {
+      logId: String(row.logId || ''), actorUserId: String(row.actorUserId || ''),
+      actorEmail: String(row.actorEmail || ''), action: String(row.action || ''),
+      entityType: String(row.entityType || ''), entityId: String(row.entityId || ''),
+      beforeJson: String(row.beforeJson || ''), afterJson: String(row.afterJson || ''),
+      createdAt: String(row.createdAt || '')
+    };
+  });
+}
+
+function adminReconcileLearningAudit_(payload, user) {
+  learningRepositoryAssertReady_();
+  const logId = requiredText_(payload.logId, 'ID audit', 100);
+  const resolution = requiredText_(payload.resolution, 'Hasil rekonsiliasi', 30).toLowerCase();
+  const note = requiredText_(payload.note, 'Catatan rekonsiliasi', 2000);
+  const allowed = ['applied', 'not_applied', 'manual'];
+  if (allowed.indexOf(resolution) < 0) throw new Error('Hasil rekonsiliasi tidak valid.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const row = listRows_('AdminAuditLog').find(function (item) {
+      return String(item.logId || '') === logId;
+    });
+    if (!row) throw new Error('Catatan audit tidak ditemukan.');
+    if (String(row.action || '').indexOf('PENDING_') !== 0) {
+      throw new Error('Catatan audit ini bukan lagi berstatus PENDING atau sudah direkonsiliasi.');
+    }
+    const finalAction = resolution === 'applied' ? 'RECONCILED_APPLIED' :
+      (resolution === 'not_applied' ? 'RECONCILED_NOT_APPLIED' : 'RECONCILED_MANUAL');
+    const auditRows = listRows_('AdminAuditLog');
+    const priorDecision = auditRows.find(function (item) {
+      return String(item.action || '') === 'RECONCILE_PENDING' &&
+        String(item.entityId || '') === logId;
+    });
+    if (priorDecision) {
+      // Retry aman: jika keputusan sudah tercatat tetapi pembaruan baris asal gagal,
+      // gunakan keputusan yang sama dan jangan membuat entri rekonsiliasi duplikat.
+      let prior;
+      try { prior = JSON.parse(String(priorDecision.afterJson || '{}')); } catch (parseError) { prior = null; }
+      const priorAction = prior && String(prior.finalAction || '');
+      if (['RECONCILED_APPLIED', 'RECONCILED_NOT_APPLIED', 'RECONCILED_MANUAL'].indexOf(priorAction) < 0) {
+        throw new Error('Entri rekonsiliasi sebelumnya tidak valid. Periksa AdminAuditLog secara manual.');
+      }
+      // Retry hanya idempoten jika keputusan dan catatan sama; jangan diam-diam
+      // menerima keputusan berbeda untuk audit yang sama.
+      if (!prior || String(prior.resolution || '') !== resolution || String(prior.note || '') !== note) {
+        throw new Error('Audit ini sudah memiliki keputusan rekonsiliasi yang berbeda. Periksa entri RECONCILE_PENDING sebelum mencoba lagi.');
+      }
+      updateRowByKey_('AdminAuditLog', 'logId', logId, { action: priorAction });
+      return { logId: logId, action: priorAction, reusedDecision: true };
+    }
+    // Simpan keputusan sebagai entri audit baru sebelum menutup status PENDING.
+    appendRow_('AdminAuditLog', {
+      logId: makeId_('AUD'), actorUserId: String(user.userId || ''),
+      actorEmail: String(user.email || ''), action: 'RECONCILE_PENDING',
+      entityType: 'AdminAuditLog', entityId: logId,
+      beforeJson: JSON.stringify({ action: String(row.action || '') }),
+      afterJson: JSON.stringify({ resolution: resolution, note: note, finalAction: finalAction }),
+      createdAt: currentTimestamp_()
+    });
+    updateRowByKey_('AdminAuditLog', 'logId', logId, { action: finalAction });
+    return { logId: logId, action: finalAction, reusedDecision: false };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function learningObjectivePublic_(row) {
+  return {
+    objectiveId: String(row.objectiveId || ''), tpCode: String(row.tpCode || ''),
+    title: String(row.title || ''), subject: String(row.subject || ''),
+    description: String(row.description || ''), active: learningActive_(row.active),
+    createdAt: String(row.createdAt || ''), updatedAt: String(row.updatedAt || '')
+  };
+}
+function learningIndicatorPublic_(row) {
+  return {
+    indicatorId: String(row.indicatorId || ''), objectiveId: String(row.objectiveId || ''),
+    indicatorCode: String(row.indicatorCode || ''), description: String(row.description || ''),
+    active: learningActive_(row.active), createdAt: String(row.createdAt || ''),
+    updatedAt: String(row.updatedAt || '')
+  };
+}
+function adminListLearningObjectives_() {
+  learningRepositoryAssertReady_();
+  return listRows_('LearningObjectives').map(learningObjectivePublic_);
+}
+function listAvailableLearningObjectives_() {
+  learningRepositoryAssertReady_();
+  return listRows_('LearningObjectives').filter(function (r) { return learningActive_(r.active); }).map(learningObjectivePublic_);
+}
+function adminSaveLearningObjective_(payload) {
+  learningRepositoryAssertReady_();
+  const code = requiredText_(payload.tpCode, 'Kode TP', 60).toUpperCase();
+  const title = requiredText_(payload.title, 'Judul TP', 240);
+  const subject = requiredText_(payload.subject, 'Mata pelajaran', 120);
+  const description = String(payload.description || '').trim();
+  if (description.length > 3000) throw new Error('Deskripsi TP terlalu panjang.');
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const rows = listRows_('LearningObjectives');
+    const id = String(payload.objectiveId || '').trim();
+    const before = id ? rows.find(function (r) { return String(r.objectiveId) === id; }) : null;
+    if (id && !before) throw new Error('TP tidak ditemukan.');
+    const duplicate = rows.some(function (r) {
+      return String(r.objectiveId) !== id &&
+        String(r.tpCode).trim().toUpperCase() === code &&
+        String(r.subject).trim().toLowerCase() === subject.toLowerCase();
+    });
+    if (duplicate) throw new Error('Kode TP sudah digunakan pada mata pelajaran tersebut.');
+    const now = currentTimestamp_();
+    const after = {
+      objectiveId: id || makeId_('TP'), tpCode: code, title: title, subject: subject,
+      description: description, createdBy: before ? String(before.createdBy || '') : String(payload.currentUser.email || ''),
+      createdAt: before ? String(before.createdAt || now) : now, updatedAt: now,
+      active: before ? learningActive_(before.active) : true
+    };
+    learningAuditedWrite_(payload.currentUser, before ? 'UPDATE' : 'CREATE', 'LearningObjective', after.objectiveId, before || null, after, function () {
+      if (before) updateRowByKey_('LearningObjectives', 'objectiveId', id, after);
+      else appendRow_('LearningObjectives', after);
+    });
+    return learningObjectivePublic_(after);
+  } finally { lock.releaseLock(); }
+}
+function adminSetLearningObjectiveActive_(payload) {
+  learningRepositoryAssertReady_();
+  const id = requiredText_(payload.objectiveId, 'ID TP', 100);
+  if (typeof payload.active !== 'boolean') throw new Error('Status aktif harus berupa boolean.');
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const before = listRows_('LearningObjectives').find(function (r) { return String(r.objectiveId) === id; });
+    if (!before) throw new Error('TP tidak ditemukan.');
+    const after = Object.assign({}, before, { active: payload.active, updatedAt: currentTimestamp_() });
+    learningAuditedWrite_(payload.currentUser, payload.active ? 'ACTIVATE' : 'DEACTIVATE', 'LearningObjective', id, before, after, function () {
+      updateRowByKey_('LearningObjectives', 'objectiveId', id, after);
+    });
+    return learningObjectivePublic_(after);
+  } finally { lock.releaseLock(); }
+}
+function adminListLearningIndicators_(payload) {
+  learningRepositoryAssertReady_();
+  const objectiveId = String(payload.objectiveId || '').trim();
+  return listRows_('LearningIndicators').filter(function (r) {
+    return !objectiveId || String(r.objectiveId) === objectiveId;
+  }).map(learningIndicatorPublic_);
+}
+function listAvailableLearningIndicators_(payload) {
+  learningRepositoryAssertReady_();
+  const objectiveId = requiredText_(payload.objectiveId, 'ID TP', 100);
+  const objective = listRows_('LearningObjectives').find(function (r) {
+    return String(r.objectiveId) === objectiveId && learningActive_(r.active);
+  });
+  if (!objective) return [];
+  return listRows_('LearningIndicators').filter(function (r) {
+    return String(r.objectiveId) === objectiveId && learningActive_(r.active);
+  }).map(learningIndicatorPublic_);
+}
+function adminSaveLearningIndicator_(payload) {
+  learningRepositoryAssertReady_();
+  const objectiveId = requiredText_(payload.objectiveId, 'TP', 100);
+  const code = requiredText_(payload.indicatorCode, 'Kode indikator', 80).toUpperCase();
+  const description = requiredText_(payload.description, 'Deskripsi indikator', 2000);
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const objective = listRows_('LearningObjectives').find(function (r) {
+      return String(r.objectiveId) === objectiveId && learningActive_(r.active);
+    });
+    if (!objective) throw new Error('Indikator harus terhubung ke TP yang aktif.');
+    const rows = listRows_('LearningIndicators');
+    const id = String(payload.indicatorId || '').trim();
+    const before = id ? rows.find(function (r) { return String(r.indicatorId) === id; }) : null;
+    if (id && !before) throw new Error('Indikator tidak ditemukan.');
+    const duplicate = rows.some(function (r) {
+      return String(r.indicatorId) !== id && String(r.objectiveId) === objectiveId &&
+        String(r.indicatorCode).trim().toUpperCase() === code;
+    });
+    if (duplicate) throw new Error('Kode indikator sudah digunakan pada TP tersebut.');
+    const now = currentTimestamp_();
+    const after = {
+      indicatorId: id || makeId_('IND'), objectiveId: objectiveId, indicatorCode: code,
+      description: description, active: before ? learningActive_(before.active) : true,
+      createdAt: before ? String(before.createdAt || now) : now, updatedAt: now
+    };
+    learningAuditedWrite_(payload.currentUser, before ? 'UPDATE' : 'CREATE', 'LearningIndicator', after.indicatorId, before || null, after, function () {
+      if (before) updateRowByKey_('LearningIndicators', 'indicatorId', id, after);
+      else appendRow_('LearningIndicators', after);
+    });
+    return learningIndicatorPublic_(after);
+  } finally { lock.releaseLock(); }
+}
+function adminSetLearningIndicatorActive_(payload) {
+  learningRepositoryAssertReady_();
+  const id = requiredText_(payload.indicatorId, 'ID indikator', 100);
+  if (typeof payload.active !== 'boolean') throw new Error('Status aktif harus berupa boolean.');
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const before = listRows_('LearningIndicators').find(function (r) { return String(r.indicatorId) === id; });
+    if (!before) throw new Error('Indikator tidak ditemukan.');
+    const after = Object.assign({}, before, { active: payload.active, updatedAt: currentTimestamp_() });
+    learningAuditedWrite_(payload.currentUser, payload.active ? 'ACTIVATE' : 'DEACTIVATE', 'LearningIndicator', id, before, after, function () {
+      updateRowByKey_('LearningIndicators', 'indicatorId', id, after);
+    });
+    return learningIndicatorPublic_(after);
+  } finally { lock.releaseLock(); }
+}
+
