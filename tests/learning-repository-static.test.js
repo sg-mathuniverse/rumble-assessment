@@ -203,6 +203,9 @@ assert.match(html, /function soloAiPanel\(/, 'Teacher reports must display AI sc
 assert.match(html, /requestSoloAiAssessment\(/, 'Teacher UI must provide an explicit action to request AI scoring');
 
 assert.match(source, /PropertiesService\.getScriptProperties\(\)/, 'AI credentials must be stored in server-side Script Properties');
+assert.match(source, /RUMBLE_AI_PROMPT_CONTENT_/, 'Prompt text must be stored separately from the prompt index to respect Script Properties value limits');
+assert.match(source, /requiredText_\(payload\.content, 'Isi prompt', 1200\)/, 'Each prompt version must stay within the bounded server property size');
+
 assert.match(source, /settings\.hasApiKey = !!aiScriptProperties_\(\)\.getProperty/, 'Admin settings may expose only whether an API key exists, never the key itself');
 assert.match(source, /Aktifkan prompt AI Penilaian yang sudah lulus uji simulasi/, 'AI scoring cannot be enabled without a tested active prompt');
 assert.match(source, /Aktifkan prompt AI Refleksi yang sudah lulus uji simulasi/, 'AI reflection cannot be enabled without a tested active prompt');
