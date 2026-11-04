@@ -1063,6 +1063,7 @@ function makeGradeContext(status, questionScores) {
       releaseLock: function () { ctx.released = true; ctx.locked = false; }
     }; } },
     requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('ID wajib'); return String(value).trim(); },
+    parseJson_: function (value, fallback) { try { return JSON.parse(value); } catch (e) { return fallback; } },
     listRows_: function (table) {
       if (table === 'Attempts') return [{ attemptId: 'ATT-1', assessmentId: 'ASM-1', status: status }];
       if (table === 'Questions') return [
