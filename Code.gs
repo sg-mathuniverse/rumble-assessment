@@ -1615,6 +1615,7 @@ function listAttempts_(payload) {
               return {
                 status: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? 'verified' : 'pending',
                 results: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' && Array.isArray(details.results) ? details.results : [],
+                tpAchievement: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' && details.tpAchievement ? details.tpAchievement : null,
                 verifiedAt: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? String(latest.eventAt || '') : '',
                 verifiedBy: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? String(details.verifiedBy || '') : '',
                 history: history.map(function (event) {
@@ -1975,6 +1976,14 @@ function requestSoloAiAssessment_(payload) {
   return { attemptId: attemptId, status: 'completed', promptId: prompt.promptId, promptVersion: prompt.version, provider: 'TOKENPORTAL', model: record.model, usage: usage, results: results };
 }
 
+function soloAchievementCategory_(percentage) {
+  const value = Number(percentage);
+  if (!isFinite(value) || value < 0 || value > 100) throw new Error('Persentase ketercapaian harus berada pada rentang 0–100%.');
+  if (value > 85) return 'exceeds';
+  if (value >= 70) return 'achieved';
+  return 'not_achieved';
+}
+
 function saveSoloIndicatorVerification_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const submitted = payload.results;
@@ -2002,7 +2011,7 @@ function saveSoloIndicatorVerification_(payload) {
         const key = String(indicator.indicatorId || '');
         if (!key) return;
         if (!mapped[key]) mapped[key] = [];
-        mapped[key].push(String(question.questionId));
+        if (mapped[key].indexOf(String(question.questionId)) < 0) mapped[key].push(String(question.questionId));
       });
     });
     const expectedIds = Object.keys(mapped).sort();
@@ -2011,39 +2020,48 @@ function saveSoloIndicatorVerification_(payload) {
     if (receivedIds.length !== expectedIds.length || receivedIds.some(function (id, index) { return id !== expectedIds[index]; })) {
       throw new Error('Verifikasi harus mencakup setiap indikator yang terhubung dengan soal, tepat satu kali.');
     }
-    const allowedStatuses = ['mastered', 'developing', 'needs_improvement', 'insufficient_evidence'];
     const results = submitted.map(function (item) {
       const id = String(item.indicatorId);
-      const status = String(item.status || '');
+      const rawPercentage = item.percentage;
+      if (rawPercentage === '' || rawPercentage === null || rawPercentage === undefined) {
+        throw new Error('Persentase ketercapaian setiap indikator wajib diisi.');
+      }
+      const percentage = Number(rawPercentage);
+      if (!isFinite(percentage) || percentage < 0 || percentage > 100) {
+        throw new Error('Persentase ketercapaian harus berupa angka 0–100%.');
+      }
       const evidence = String(item.evidence || '').trim();
-      if (allowedStatuses.indexOf(status) < 0) throw new Error('Status verifikasi indikator tidak valid.');
       if (!evidence || evidence.length > 3000) throw new Error('Bukti atau alasan verifikasi wajib diisi (maksimal 3.000 karakter).');
-      return { indicatorId: id, status: status, evidence: evidence, questionIds: mapped[id].slice() };
+      return {
+        indicatorId: id, percentage: percentage,
+        category: soloAchievementCategory_(percentage),
+        evidence: evidence, questionIds: mapped[id].slice()
+      };
     });
+    const averagePercentage = results.reduce(function (sum, item) { return sum + item.percentage; }, 0) / results.length;
+    const tpAchievement = {
+      averagePercentage: Math.round(averagePercentage * 100) / 100,
+      category: soloAchievementCategory_(averagePercentage),
+      indicatorCount: results.length,
+      weighting: 'EQUAL'
+    };
     const now = currentTimestamp_();
     const user = payload.currentUser || {};
     appendRow_('Events', {
       eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
       eventType: 'SOLO_INDICATOR_VERIFICATION', eventAt: now,
-      detailsJson: JSON.stringify({ version: 1, assessmentId: String(attempt.assessmentId), verifiedBy: String(user.email || ''), results: results })
+      detailsJson: JSON.stringify({ version: 2, assessmentId: String(attempt.assessmentId), verifiedBy: String(user.email || ''), results: results, tpAchievement: tpAchievement })
     });
     appendRow_('Events', {
       eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
       eventType: 'SOLO_DOMINANT_LEVEL_INVALIDATED', eventAt: now,
       detailsJson: JSON.stringify({ reason: 'Verifikasi indikator berubah; rekomendasi level dominan perlu ditinjau ulang.' })
     });
-    return { attemptId: attemptId, status: 'verified', verifiedAt: now, indicatorCount: results.length };
+    return { attemptId: attemptId, status: 'verified', verifiedAt: now, indicatorCount: results.length, tpAchievement: tpAchievement };
   } finally {
     lock.releaseLock();
   }
 }
-
-
-
-const RUMBLE_AI_SETTINGS_KEY_ = 'RUMBLE_AI_SETTINGS_V1';
-const RUMBLE_AI_API_KEY_ = 'RUMBLE_AI_TOKENPORTAL_KEY_V1';
-const RUMBLE_AI_ENDPOINT_ = 'https://api.tokenportal.id/v1';
-
 function aiScriptProperties_() {
   return PropertiesService.getScriptProperties();
 }
