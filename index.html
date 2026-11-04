@@ -572,6 +572,32 @@ function reportCorrectAnswer(q){
  return '';
 }
 
+
+async function requestSoloAiAssessment(attemptId){
+ if(!confirm('Kirim teks jawaban dan konteks soal anonim ke layanan AI yang diaktifkan Admin? Foto jawaban tidak dikirim.'))return;
+ try{const result=await api('requestSoloAiAssessment',{attemptId:attemptId});if(!result||!result.ok)throw Error(result&&result.error?result.error:'Analisis AI gagal');toast('Rekomendasi AI berhasil dibuat. Periksa bukti dan nilai sebelum menyimpan.');await loadAttempts()}
+ catch(error){toast('AI Penilaian gagal: '+error.message)}
+}
+function applySoloAiScores(attemptId){
+ const attempt=(s.attempts||[]).find(function(item){return String(item.attemptId)===String(attemptId)}),recommendation=attempt&&attempt.soloAiAssessment;
+ if(!recommendation||!Array.isArray(recommendation.results))return;
+ let applied=0;
+ recommendation.results.forEach(function(item){if(item.recommendedScore===null||item.recommendedScore===undefined)return;const input=document.getElementById('qscore_'+attemptId+'_'+item.questionId);if(input){input.value=String(item.recommendedScore);applied++}});
+ toast(applied+' rekomendasi nilai diisikan ke kolom. Tinjau dan simpan secara manual.');
+}
+function soloAiPanel(attempt){
+ if(String(attempt.assessmentClassification||'').toUpperCase()!=='SOLO_TAX')return '';
+ const ai=attempt.soloAiAssessment,results=ai&&Array.isArray(ai.results)?ai.results:[];
+ const labels={mastered:'Dikuasai',developing:'Berkembang',needs_improvement:'Perlu ditingkatkan',insufficient_evidence:'Bukti belum cukup'};
+ const rows=results.map(function(item){
+  const evidence=(item.evidence||[]).map(function(value){return '<li>'+esc(value)+'</li>'}).join('');
+  const indicators=(item.indicatorAnalysis||[]).map(function(value){return '<li>'+esc(value.indicatorId)+': '+esc(labels[value.status]||value.status)+' — '+esc(value.evidence||'')+'</li>'}).join('');
+  const score=item.recommendedScore===null||item.recommendedScore===undefined?'Belum ada rekomendasi nilai':Number(item.recommendedScore)+' / '+Number(item.maximumScore)+' poin';
+  return '<section class="report-question"><b>Soal '+Number(item.order)+'</b><p><b>Rekomendasi:</b> '+esc(score)+'</p><p>'+esc(item.reason||'')+'</p>'+(evidence?'<b>Bukti jawaban</b><ul>'+evidence+'</ul>':'')+(indicators?'<b>Analisis indikator</b><ul>'+indicators+'</ul>':'')+(item.manualPhotoReviewRequired?'<div class="notice">Foto tidak dikirim ke AI. Guru wajib memeriksa foto secara langsung sebelum menetapkan nilai.</div>':'')+(!item.evidenceSufficient?'<div class="notice">Bukti belum cukup untuk rekomendasi otomatis. Guru perlu menilai secara manual.</div>':'')+'</section>';
+ }).join('');
+ return '<div class="card"><div class="actions"><h3>AI Penilaian SOLO Tax</h3>'+(ai?'<span class="pill live">Rekomendasi tersedia</span>':'<span class="pill">Belum dianalisis</span>')+'</div><p class="muted">AI hanya memberi rekomendasi. Nilai tidak disimpan otomatis. Guru tetap memeriksa alasan dan bukti, termasuk semua foto jawaban.</p>'+(attempt.status==='needs_review'?'<button class="btn primary" onclick="requestSoloAiAssessment(\''+esc(attempt.attemptId)+'\')">'+(ai?'Analisis ulang dengan AI':'Minta analisis AI')+'</button>':'<p class="muted">Analisis AI hanya dapat diminta sebelum penilaian akhir disimpan.</p>')+(ai?'<p class="muted">Provider: '+esc(ai.provider)+' · Model: '+esc(ai.model)+' · Prompt: '+esc(ai.promptId)+' · '+Number((ai.usage||{}).totalTokens||0)+' token</p>'+rows+'<button class="btn" onclick="applySoloAiScores(\''+esc(attempt.attemptId)+'\')">Isi kolom skor dari rekomendasi (belum disimpan)</button>':'')+'</div>';
+}
+
 function soloVerificationPanel(attempt){
  if(String(attempt.assessmentClassification||'').toUpperCase()!=='SOLO_TAX')return '';
  const indicators=Array.isArray(attempt.soloIndicators)?attempt.soloIndicators:[],review=attempt.soloReview||{},saved=Array.isArray(review.results)?review.results:[];
@@ -625,7 +651,7 @@ function reports(){
    return '<section class="report-question"><div class="report-row"><div class="report-question-label">Soal '+(i+1)+'<small>'+esc(q.type)+'</small></div><div class="report-student-answer"><b>Jawaban murid</b><div class="math-content report-answer-text">'+esc(display)+'</div>'+photoHtml+'</div>'+keyCell+'<div class="report-weight-cell"><b>Bobot</b><span>'+maximum+' poin</span></div><div class="report-score-cell"><label for="qscore_'+esc(active.attemptId)+'_'+esc(q.id)+'">Skor</label><input class="question-score-input" id="qscore_'+esc(active.attemptId)+'_'+esc(q.id)+'" type="number" min="0" max="'+maximum+'" step="0.5" value="'+esc(existing===null?'':existing)+'" placeholder="—"></div></div>'+textDetails+(recommended!==null?'<small class="report-recommendation">Rekomendasi sistem: '+Number(recommended.toFixed(2))+' / '+maximum+' poin</small>':'<small class="report-recommendation">Soal uraian: skor ditentukan guru.</small>')+'</section>';
   }).join('');
   const total=qs.reduce((sum,q)=>sum+(Number(saved[q.id]??reportScoreRecommendation(q,answers[q.id])??0)||0),0),max=qs.reduce((sum,q)=>sum+(Number(q.points)||0),0);
-  return head('ANALITIK','Skor perbutir · '+esc(studentName),'Periksa jawaban dan sesuaikan skor rekomendasi sistem.')+breadcrumb+'<div class="report-questions">'+rows+'</div><div class="report-final-summary"><div><small>Nilai akhir murid</small><strong>'+total.toFixed(2)+' / '+max+' poin</strong></div><div class="field"><label>Umpan balik guru</label><textarea id="gradeFeedback_'+esc(active.attemptId)+'" rows="3">'+esc(active.teacherFeedback||'')+'</textarea></div><button class="btn primary" onclick="saveGrade(\''+esc(active.attemptId)+'\')">Simpan skor dan umpan balik</button></div>'+soloVerificationPanel(active);
+  return head('ANALITIK','Skor perbutir · '+esc(studentName),'Periksa jawaban dan sesuaikan skor rekomendasi sistem.')+breadcrumb+'<div class="report-questions">'+rows+'</div><div class="report-final-summary"><div><small>Nilai akhir murid</small><strong>'+total.toFixed(2)+' / '+max+' poin</strong></div><div class="field"><label>Umpan balik guru</label><textarea id="gradeFeedback_'+esc(active.attemptId)+'" rows="3">'+esc(active.teacherFeedback||'')+'</textarea></div><button class="btn primary" onclick="saveGrade(\''+esc(active.attemptId)+'\')">Simpan skor dan umpan balik</button></div>'+soloVerificationPanel(active)+soloAiPanel(active);
  }
  if(aid){
   const studentRows=list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),name=user?user.name:a.studentId,score=a.status==='graded'&&Number(a.maxScore)>0?Number(a.score)+' / '+Number(a.maxScore)+' poin':'Belum dinilai';return '<button class="report-student-row" onclick="chooseReportAttempt(\''+esc(a.attemptId)+'\')"><span><b>'+esc(name||'Murid')+'</b><small>'+esc(a.studentId||'')+' · '+esc(formatLocalDateTime(a.submittedAt))+'</small></span><span class="pill '+(a.status==='graded'?'live':'')+'">'+esc(score)+'</span></button>'}).join('');
