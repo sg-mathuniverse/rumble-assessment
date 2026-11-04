@@ -10,6 +10,9 @@ const vm = require('node:vm');
 const source = fs.readFileSync('Code.gs', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 assert.doesNotThrow(() => new vm.Script(source), 'Code.gs must be syntactically valid JavaScript');
+assert.match(source, /raw\.githubusercontent\.com\/sg-mathuniverse\/rumble-assessment\/[0-9a-f]{40}\/index\.html/, 'Apps Script frontend must be pinned to an immutable commit snapshot');
+assert.ok(html.includes('saveSoloDominantVerification'), 'Integration frontend must include the dominant SOLO verification action');
+assert.ok(html.includes('Level SOLO dominan'), 'Integration frontend must include the dominant SOLO verification UI');
 
 const appScriptStart = html.indexOf('<script>', html.indexOf('<body'));
 const appScriptEnd = html.indexOf('</script>', appScriptStart);
