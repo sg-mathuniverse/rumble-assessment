@@ -1,38 +1,4 @@
-async function saveSoloDominantVerification(attemptId){
- const attempt=(s.attempts||[]).find(function(item){return String(item.attemptId)===String(attemptId)});
- if(!attempt){toast('Data pengerjaan tidak ditemukan.');return}
- const review=attempt.soloReview||{},recommendation=review.recommendation;
- if(!recommendation){toast('Rekomendasi AI level dominan belum tersedia.');return}
- const level=document.getElementById('solo_dominant_level_'+attemptId),reason=document.getElementById('solo_dominant_reason_'+attemptId);
- if(!level){toast('Kolom verifikasi level tidak ditemukan.');return}
- if(level.value!==recommendation.level&&(!reason||!String(reason.value||'').trim())){toast('Alasan wajib diisi jika level guru berbeda dari rekomendasi AI.');return}
- try{
-  const response=await api('saveSoloDominantVerification',{attemptId:attemptId,teacherLevel:level.value,teacherReason:reason?reason.value:''});
-  if(!response||!response.ok)throw Error(response&&response.error?response.error:'Verifikasi level gagal disimpan');
-  toast('Verifikasi level SOLO dominan berhasil disimpan.');
-  await loadAttempts();
- }catch(error){toast('Gagal menyimpan verifikasi level: '+error.message)}
-}
-async function saveSoloVerification(attemptId){
- const attempt=(s.attempts||[]).find(function(item){return String(item.attemptId)===String(attemptId)});
- if(!attempt){toast('Data pengerjaan tidak ditemukan.');return}
- const indicators=Array.isArray(attempt.soloIndicators)?attempt.soloIndicators:[];
- if(!indicators.length){toast('Tidak ada indikator untuk diverifikasi.');return}
- const results=[];
- for(let i=0;i<indicators.length;i++){
-  const item=indicators[i],percentage=document.getElementById('solo_percentage_'+attemptId+'_'+i),evidence=document.getElementById('solo_evidence_'+attemptId+'_'+i);
-  if(!percentage||percentage.value===''||!evidence||!String(evidence.value||'').trim()){toast('Lengkapi persentase dan bukti setiap indikator.');return}
-  const value=Number(percentage.value);
-  if(!Number.isFinite(value)||value<0||value>100){toast('Persentase setiap indikator harus berada pada rentang 0–100%.');return}
-  results.push({indicatorId:item.indicatorId,percentage:value,evidence:evidence.value});
- }
- try{
-  const response=await api('saveSoloIndicatorVerification',{attemptId:attemptId,results:results});
-  if(!response||!response.ok)throw Error(response&&response.error?response.error:'Verifikasi gagal disimpan');
-  toast('Verifikasi tersimpan. Rata-rata ketercapaian TP: '+Number(response.tpAchievement.averagePercentage).toFixed(2)+'% ('+(response.tpAchievement.category==='exceeds'?'Melampaui':response.tpAchievement.category==='achieved'?'Tercapai':'Belum Tercapai')+').');
-  await loadAttempts();
- }catch(error){toast('Gagal menyimpan verifikasi: '+error.message)}
-}<!doctype html>
+<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rumble Assessment</title><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Manrope:wght@600;800&display=swap" rel="stylesheet"><style>
 :root{--navy:#142d4e;--blue:#285da8;--paper:#f5f7fb;--ink:#17243a;--muted:#718096;--line:#e1e8f0;--green:#1b8764}*{box-sizing:border-box}body{margin:0;background:var(--paper);font:14px 'DM Sans',sans-serif;color:var(--ink)}button,input,select,textarea{font:inherit}button{cursor:pointer}.layout{display:grid;grid-template-columns:230px 1fr;min-height:100vh}.layout.exam-layout{grid-template-columns:minmax(0,1fr)}.exam-layout .content{max-width:1050px;padding:18px clamp(14px,3vw,36px)}.side{background:var(--navy);color:white;padding:24px 15px;display:flex;flex-direction:column;gap:26px}.brand{display:flex;gap:10px;align-items:center;font:800 17px Manrope}.logo{background:#f3c76a;color:var(--navy);border-radius:11px;padding:9px 13px}.side small{color:#b7c9e0}.nav{display:grid;gap:6px}.nav button{border:0;border-radius:9px;text-align:left;padding:12px;background:transparent;color:#d2deed}.nav button.active,.nav button:hover{background:#ffffff20;color:white}.side footer{margin-top:auto;color:#b7c9e0;font-size:12px;line-height:1.7}.main{min-width:0}.top{height:70px;background:white;border-bottom:1px solid var(--line);padding:0 30px;display:flex;align-items:center;justify-content:space-between}.top select{padding:8px;border:1px solid var(--line);border-radius:8px}.content{padding:30px;max-width:1250px;margin:auto}.head{display:flex;justify-content:space-between;gap:15px;margin-bottom:24px}.kicker{color:var(--blue);font-size:11px;letter-spacing:.13em;font-weight:700;text-transform:uppercase}.head h2{font:800 27px Manrope;margin:7px 0}.head p,.muted{color:var(--muted)}.btn{padding:10px 14px;border:1px solid var(--line);border-radius:9px;background:white;font-weight:700;color:var(--ink)}.primary{background:var(--blue);color:white;border-color:var(--blue)}.grid{display:grid;gap:16px}.stats{grid-template-columns:repeat(4,1fr);margin-bottom:20px}.columns{grid-template-columns:1.4fr 1fr}.card{background:white;border:1px solid var(--line);border-radius:15px;padding:20px;min-width:0}.card h3{font:800 15px Manrope;margin:0 0 17px}.statlabel{color:var(--muted);font-size:12px}.num{font:800 28px Manrope;margin:12px 0 5px}.listitem{display:flex;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}.listitem:last-child{border:0}.symbol{background:#eaf2ff;color:var(--blue);padding:12px;border-radius:10px;font-weight:800}.grow{flex:1;min-width:0}.grow b{display:block;margin-bottom:5px}.grow small{color:var(--muted)}.pill{font-size:10px;font-weight:700;border-radius:30px;padding:5px 8px;background:#edf2f7}.pill.live{background:#e3f7ef;color:var(--green)}.bar{height:7px;border-radius:8px;background:#edf1f6;overflow:hidden;margin:8px 0 18px}.bar i{display:block;height:100%;background:var(--blue)}.notice{padding:13px;background:#edf5ff;border-radius:10px;color:#34567e;font-size:12px;line-height:1.6}.field{display:grid;gap:7px;margin:12px 0}.field label{font-size:12px;font-weight:700}.field input,.field select,.field textarea{width:100%;padding:10px;border:1px solid #d6dfeb;border-radius:8px;background:white}.field textarea{min-height:75px}.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.question{border:1px solid var(--line);border-radius:11px;padding:15px;margin:13px 0;background:#fafcff}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:15px}.table{width:100%;border-collapse:collapse}.table td,.table th{text-align:left;padding:12px;border-bottom:1px solid var(--line);font-size:12px}.table th{color:var(--muted)}.hidden{display:none}.toast{display:none;position:fixed;bottom:20px;right:20px;background:var(--navy);color:white;padding:13px 18px;border-radius:10px;max-width:360px}.footnote{font-size:11px;line-height:1.6;color:var(--muted);margin-top:20px}/* Standardized editor rows: text and image controls align side-by-side. */
 .question-text-image-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(220px,1fr);gap:14px;align-items:start}
@@ -350,6 +316,41 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 .detail-edit-actions{margin:14px 0;justify-content:flex-start}
 @media(max-width:760px){.summary-class-content{grid-template-columns:1fr}.assessment-class-toggle,.summary-class-toggle{padding:12px}.assessment-class-children{padding:0 9px}.assessment-class-item{flex-wrap:wrap}.section-refresh-button{font-size:12px}}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script></head><body><div id="app"></div><div class="toast" id="toast"></div><script>
+async function saveSoloDominantVerification(attemptId){
+ const attempt=(s.attempts||[]).find(function(item){return String(item.attemptId)===String(attemptId)});
+ if(!attempt){toast('Data pengerjaan tidak ditemukan.');return}
+ const review=attempt.soloReview||{},recommendation=review.recommendation;
+ if(!recommendation){toast('Rekomendasi AI level dominan belum tersedia.');return}
+ const level=document.getElementById('solo_dominant_level_'+attemptId),reason=document.getElementById('solo_dominant_reason_'+attemptId);
+ if(!level){toast('Kolom verifikasi level tidak ditemukan.');return}
+ if(level.value!==recommendation.level&&(!reason||!String(reason.value||'').trim())){toast('Alasan wajib diisi jika level guru berbeda dari rekomendasi AI.');return}
+ try{
+  const response=await api('saveSoloDominantVerification',{attemptId:attemptId,teacherLevel:level.value,teacherReason:reason?reason.value:''});
+  if(!response||!response.ok)throw Error(response&&response.error?response.error:'Verifikasi level gagal disimpan');
+  toast('Verifikasi level SOLO dominan berhasil disimpan.');
+  await loadAttempts();
+ }catch(error){toast('Gagal menyimpan verifikasi level: '+error.message)}
+}
+async function saveSoloVerification(attemptId){
+ const attempt=(s.attempts||[]).find(function(item){return String(item.attemptId)===String(attemptId)});
+ if(!attempt){toast('Data pengerjaan tidak ditemukan.');return}
+ const indicators=Array.isArray(attempt.soloIndicators)?attempt.soloIndicators:[];
+ if(!indicators.length){toast('Tidak ada indikator untuk diverifikasi.');return}
+ const results=[];
+ for(let i=0;i<indicators.length;i++){
+  const item=indicators[i],percentage=document.getElementById('solo_percentage_'+attemptId+'_'+i),evidence=document.getElementById('solo_evidence_'+attemptId+'_'+i);
+  if(!percentage||percentage.value===''||!evidence||!String(evidence.value||'').trim()){toast('Lengkapi persentase dan bukti setiap indikator.');return}
+  const value=Number(percentage.value);
+  if(!Number.isFinite(value)||value<0||value>100){toast('Persentase setiap indikator harus berada pada rentang 0–100%.');return}
+  results.push({indicatorId:item.indicatorId,percentage:value,evidence:evidence.value});
+ }
+ try{
+  const response=await api('saveSoloIndicatorVerification',{attemptId:attemptId,results:results});
+  if(!response||!response.ok)throw Error(response&&response.error?response.error:'Verifikasi gagal disimpan');
+  toast('Verifikasi tersimpan. Rata-rata ketercapaian TP: '+Number(response.tpAchievement.averagePercentage).toFixed(2)+'% ('+(response.tpAchievement.category==='exceeds'?'Melampaui':response.tpAchievement.category==='achieved'?'Tercapai':'Belum Tercapai')+').');
+  await loadAttempts();
+ }catch(error){toast('Gagal menyimpan verifikasi: '+error.message)}
+}
 const s={role:'teacher',page:'overview',adminStudents:[],adminStudentsLoaded:false,adminCredentials:[],aiSettings:null,aiSettingsLoaded:false,aiSettingsError:'',aiModels:[],aiUsage:[],aiPrompts:[],aiPromptTestResult:null,aiTestResult:null,learningObjectives:[],learningIndicators:[],learningRepositoryLoaded:false,learningRepositoryError:'',learningPendingAudits:[],learningObjectiveEdit:null,learningIndicatorEdit:null,learningIndicatorFilter:'',bundleLearningObjectives:[],bundleLearningIndicators:[],bundleLearningReferencesLoaded:false,bundleLearningReferencesError:'',adminCsvText:'',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,monitoring:[],monitoringLoaded:false,monitoringUpdatedAt:'',monitoringError:'',selectedMonitoringAttemptId:'',selectedMonitoringAssessmentId:'',monitoringFilter:'all',monitoringExpandedGroups:{},monitoringLoading:false,teacherSummary:[],teacherSummaryLoaded:false,teacherSummaryError:'',selectedAssessmentClass:'',selectedGradebookClass:'',selectedGradebookAssessmentId:'',selectedSummaryClass:'',bundleVisibility:'shared',bundleClassification:'REGULER',assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
 let monitoringPollInterval=null;
 let examSecurityActive=false,securityEventLastSent={},securityWarningCount=0;
