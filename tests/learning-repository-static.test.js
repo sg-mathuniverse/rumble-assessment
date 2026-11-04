@@ -182,7 +182,11 @@ const bundleRead = bodyOf('getQuestionBundle_', 'createAssessment_');
 assert.match(bundleRead, /getBundleVersion_\(\{versionId:bundle\.latestVersionId\}\)/, 'Opening a bundle must resolve the latest immutable version');
 assert.match(bundleRead, /learningObjectiveId:String\(snapshot\.learningObjectiveId/, 'Bundle read must return the objective from its snapshot');
 assert.match(bundleRead, /learningIndicatorId:String\(snapshot\.learningIndicatorId/, 'Bundle read must return the indicator from its snapshot');
-assert.match(source, /if \(classification === 'SOLO_TAX'\) throw new Error/, 'SOLO Tax creation must remain disabled until its editor is ready');
+assert.match(source, /function validateSoloTaxQuestion_\(/, 'SOLO Tax bundles must use dedicated essay validation');
+assert.match(source, /SOLO Tax hanya mendukung tipe soal uraian/, 'SOLO Tax must reject non-essay question types');
+assert.match(source, /SOLO Tax hanya mengizinkan satu foto/, 'SOLO Tax must enforce one answer photo per main question');
+assert.match(source, /hasResponse && value < 1/, 'Submitted SOLO Tax answers must receive at least one point');
+assert.match(source, /!hasResponse && value !== 0/, 'Blank SOLO Tax answers must receive zero');
 assert.match(source, /const teacherOnly = \[/, 'Teacher-only actions must be explicitly registered');
 
 const routeAction = bodyOf('routeAction_', 'assertAssessmentOwner_');
@@ -446,6 +450,42 @@ assert.equal(referenceContext.validateBundleLearningReference_({
   bundleId: 'BND-LEGACY', classification: 'REGULER', subject: 'Matematika',
   learningObjectiveId: '', learningIndicatorId: '', questions: [{ type: 'essay', points: 10 }]
 }), true, 'Legacy bundle without learning references must remain valid');
+
+const soloContext = { soloTaxLevelPoints_: null };
+vm.createContext(soloContext);
+vm.runInContext(extractFunction('soloTaxLevelPoints_', source), soloContext);
+vm.runInContext(extractFunction('validateSoloTaxQuestion_', source), soloContext);
+const validSoloQuestion = {
+  type: 'essay', text: 'Jelaskan hubungan konsep.',
+  soloLevel: 'RELATIONAL', points: 4,
+  subquestions: ['Jelaskan bagian pertama.', 'Hubungkan hasilnya.'],
+  answerGuide: 'Guru memeriksa hubungan antarkonsep.',
+  rubric: '0 = Tidak menjawab.\\n1 = Jawaban belum tepat.\\n4 = Mengintegrasikan konsep.',
+  rubricLevels: ['0 = Tidak menjawab.', '1 = Jawaban belum tepat.', '4 = Mengintegrasikan konsep.'],
+  learningIndicatorIds: ['IND-MATH']
+};
+assert.equal(soloContext.soloTaxLevelPoints_('MULTISTRUKTURAL'), 3, 'Multistruktural must map to 3 points');
+assert.equal(soloContext.soloTaxLevelPoints_('RELATIONAL'), 4, 'Relational must map to 4 points');
+assert.equal(soloContext.soloTaxLevelPoints_('EXTENDED_ABSTRACT'), 5, 'Extended Abstract must map to 5 points');
+assert.equal(soloContext.validateSoloTaxQuestion_(validSoloQuestion, 0), true, 'Complete SOLO essay question must validate');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { type: 'multiple_choice' }), 0); }, /hanya mendukung tipe soal uraian/, 'SOLO Tax must reject multiple choice');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { points: 5 }), 0); }, /Nilai maksimal/, 'SOLO points must match selected level');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { subquestions: [] }), 0); }, /minimal satu subpertanyaan/, 'SOLO question must have at least one subquestion');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { learningIndicatorIds: [] }), 0); }, /minimal satu indikator/, 'SOLO question must map at least one TP indicator');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { answerGuide: '' }), 0); }, /Panduan jawaban wajib/, 'SOLO question must include an answer guide');
+assert.throws(function () { soloContext.validateSoloTaxQuestion_(Object.assign({}, validSoloQuestion, { rubricLevels: [] }), 0); }, /Rubrik SOLO Tax harus memiliki/, 'SOLO question must include editable rubric criteria');
+assert.equal(referenceContext.validateBundleLearningReference_({
+  bundleId: 'BND-SOLO', classification: 'SOLO_TAX', subject: 'Matematika',
+  learningObjectiveId: 'TP-MATH', questions: [Object.assign({}, validSoloQuestion, { learningIndicatorIds: ['IND-MATH'] })]
+}), true, 'SOLO question indicators must be validated against its TP');
+assert.throws(function () {
+  referenceContext.validateBundleLearningReference_({
+    bundleId: 'BND-SOLO', classification: 'SOLO_TAX', subject: 'Matematika',
+    learningObjectiveId: 'TP-MATH', questions: [Object.assign({}, validSoloQuestion, { learningIndicatorIds: ['IND-OTHER'] })]
+  });
+}, /tidak aktif atau tidak terhubung/, 'SOLO indicators from a different TP must be rejected');
+const soloSnapshot = { bundleId: 'BND-SOLO', classification: 'SOLO_TAX', questions: [validSoloQuestion] };
+assert.equal(soloContext.validateSoloTaxQuestion_(soloSnapshot.questions[0], 0), true, 'SOLO snapshot question remains valid');
 
 const frozenSnapshot = {
   bundleId: 'BND-1', classification: 'REGULER', subject: 'Matematika',
