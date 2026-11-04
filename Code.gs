@@ -1117,36 +1117,49 @@ function getAssessment_(payload) {
  * Tambahkan otorisasi berbasis identitas guru sebelum penggunaan produksi.
  */
 function publishAssessment_(payload) {
-  const assessmentId = requiredText_(
-    payload.id || payload.assessmentId,
-    'ID asesmen',
-    100
-  );
-  const sheet = getSheet_('Assessments');
-  const values = sheet.getDataRange().getValues();
-  if (values.length < 2) throw new Error('Asesmen tidak ditemukan.');
-  const headers = values[0].map(String);
-  const idCol = headers.indexOf('assessmentId');
-  const statusCol = headers.indexOf('status');
-  const updatedCol = headers.indexOf('updatedAt');
-  if (idCol < 0 || statusCol < 0) throw new Error('Kolom database asesmen tidak lengkap.');
-  for (let i = 1; i < values.length; i++) {
-    if (String(values[i][idCol]) === assessmentId) {
-      const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
-      if (assessment && (!assessment.title || !assessment.className || !assessment.duration)) {
-        throw new Error('Judul, kelas, dan durasi wajib diisi sebelum dipublikasikan.');
-      }
-      if (assessment && assessment.startAt && !isFinite(new Date(assessment.startAt).getTime())) throw new Error('Waktu mulai asesmen tidak valid.');
-      if (assessment && assessment.endAt && !isFinite(new Date(assessment.endAt).getTime())) throw new Error('Waktu selesai asesmen tidak valid.');
-      if (assessment && assessment.startAt && assessment.endAt && new Date(assessment.endAt).getTime() <= new Date(assessment.startAt).getTime()) throw new Error('Waktu selesai harus setelah waktu mulai.');
-      sheet.getRange(i + 1, statusCol + 1).setValue('published');
-      if (updatedCol >= 0) sheet.getRange(i + 1, updatedCol + 1).setValue(currentTimestamp_());
-      return { id: assessmentId, status: 'published' };
+  const assessmentId = requiredText_(payload.id || payload.assessmentId, 'ID asesmen', 100);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSheet_('Assessments');
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) throw new Error('Asesmen tidak ditemukan.');
+    const headers = values[0].map(String);
+    const idCol = headers.indexOf('assessmentId');
+    const statusCol = headers.indexOf('status');
+    const updatedCol = headers.indexOf('updatedAt');
+    if (idCol < 0 || statusCol < 0) throw new Error('Kolom database asesmen tidak lengkap.');
+    let rowIndex = -1;
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][idCol]) === assessmentId) { rowIndex = i; break; }
     }
+    if (rowIndex < 0) throw new Error('Asesmen tidak ditemukan.');
+    const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
+    if (!assessment) throw new Error('Asesmen tidak ditemukan.');
+    const status = String(assessment.status || '').toLowerCase();
+    if (status === 'archived') throw new Error('Asesmen yang diarsipkan tidak dapat dipublikasikan.');
+    if (status === 'published') return { id: assessmentId, status: 'published', alreadyPublished: true };
+    if (!String(assessment.title || '').trim() || !String(assessment.className || '').trim()) {
+      throw new Error('Judul dan kelas wajib diisi sebelum dipublikasikan.');
+    }
+    const duration = Number(assessment.duration);
+    if (!isFinite(duration) || duration < 1 || duration > 300) throw new Error('Durasi asesmen harus antara 1 dan 300 menit.');
+    if (assessment.startAt && !isFinite(new Date(assessment.startAt).getTime())) throw new Error('Waktu mulai asesmen tidak valid.');
+    if (assessment.endAt && !isFinite(new Date(assessment.endAt).getTime())) throw new Error('Waktu selesai asesmen tidak valid.');
+    if (assessment.startAt && assessment.endAt && new Date(assessment.endAt).getTime() <= new Date(assessment.startAt).getTime()) {
+      throw new Error('Waktu selesai harus setelah waktu mulai.');
+    }
+    const questionCount = listRows_('Questions').filter(function (question) {
+      return String(question.assessmentId) === assessmentId;
+    }).length;
+    if (questionCount < 1) throw new Error('Asesmen harus memiliki minimal satu soal sebelum dipublikasikan.');
+    sheet.getRange(rowIndex + 1, statusCol + 1).setValue('published');
+    if (updatedCol >= 0) sheet.getRange(rowIndex + 1, updatedCol + 1).setValue(currentTimestamp_());
+    return { id: assessmentId, status: 'published', questionCount: questionCount };
+  } finally {
+    lock.releaseLock();
   }
-  throw new Error('Asesmen tidak ditemukan.');
 }
-
 /**
  * Menerima jawaban dan menghitung nilai otomatis untuk tipe objektif.
  * Esai dan menjodohkan diberi status needs_review untuk pemeriksaan guru.
