@@ -1521,65 +1521,97 @@ function listAttempts_(payload) {
  */
 function gradeAttempt_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
-  const questionScores = payload.questionScores && typeof payload.questionScores === 'object' ? payload.questionScores : null;
-  let score = Number(payload.score);
-  let maxScore = Number(payload.maxScore);
-  if (questionScores) {
-    const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+  const questionScores = payload.questionScores;
+  if (!questionScores || typeof questionScores !== 'object' || Array.isArray(questionScores)) {
+    throw new Error('Skor setiap soal wajib diisi sebelum penilaian disimpan.');
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const attempt = listRows_('Attempts').find(function (item) {
+      return String(item.attemptId) === attemptId;
+    });
     if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
-    const questions = listRows_('Questions').filter(function (q) { return String(q.assessmentId) === String(attempt.assessmentId); });
+    const status = String(attempt.status || '').toLowerCase();
+    if (status !== 'needs_review' && status !== 'graded') {
+      throw new Error('Pengerjaan yang masih berlangsung atau belum dikirim tidak dapat dinilai.');
+    }
+
+    const questions = listRows_('Questions').filter(function (q) {
+      return String(q.assessmentId) === String(attempt.assessmentId);
+    });
     if (!questions.length) throw new Error('Soal asesmen tidak ditemukan.');
-    score = 0; maxScore = 0;
+
+    const scoreKeys = Object.keys(questionScores);
+    if (scoreKeys.length !== questions.length) {
+      throw new Error('Skor harus diisi tepat untuk seluruh soal dalam asesmen.');
+    }
+
+    const savedScores = {};
+    let score = 0;
+    let maxScore = 0;
+    const seenQuestionIds = {};
     questions.forEach(function (q) {
-      const maximum = Number(q.points) || 0;
-      const value = Number(questionScores[q.questionId]);
-      if (!Object.prototype.hasOwnProperty.call(questionScores, q.questionId) || !isFinite(value) || value < 0 || value > maximum) {
+      const questionId = String(q.questionId || '');
+      if (!questionId || seenQuestionIds[questionId]) {
+        throw new Error('Daftar soal asesmen tidak valid.');
+      }
+      seenQuestionIds[questionId] = true;
+
+      const maximum = Number(q.points);
+      const rawValue = questionScores[questionId];
+      const value = Number(rawValue);
+      if (!Object.prototype.hasOwnProperty.call(questionScores, questionId) ||
+          rawValue === null || rawValue === undefined ||
+          (typeof rawValue === 'string' && rawValue.trim() === '') ||
+          typeof rawValue === 'boolean' ||
+          !isFinite(maximum) || maximum < 0 ||
+          !isFinite(value) || value < 0 || value > maximum) {
         throw new Error('Skor soal nomor ' + q.order + ' tidak valid. Nilai harus antara 0 dan ' + maximum + '.');
       }
-      score += value; maxScore += maximum;
+      savedScores[questionId] = value;
+      score += value;
+      maxScore += maximum;
     });
-  }
-  if (!isFinite(score) || !isFinite(maxScore) || score < 0 || maxScore < score) throw new Error('Nilai tidak valid.');
-  const sheet = getSheet_('Attempts');
-  const values = sheet.getDataRange().getValues();
-  const headers = values[0].map(String);
 
-  const columnIndex = function (name) {
-    return headers.indexOf(name);
-  };
-
-  for (let rowIndex = 1; rowIndex < values.length; rowIndex++) {
-    if (
-      String(values[rowIndex][columnIndex('attemptId')]) === attemptId
-    ) {
-      sheet.getRange(rowIndex + 1, columnIndex('score') + 1).setValue(score);
-      sheet.getRange(rowIndex + 1, columnIndex('maxScore') + 1)
-        .setValue(maxScore);
-      sheet.getRange(rowIndex + 1, columnIndex('status') + 1)
-        .setValue('graded');
-      sheet.getRange(rowIndex + 1, columnIndex('teacherFeedback') + 1)
-        .setValue(String(payload.feedback || ''));
-      if (payload.questionScores && typeof payload.questionScores === 'object') {
-        sheet.getRange(rowIndex + 1, columnIndex('questionScoresJson') + 1)
-          .setValue(JSON.stringify(payload.questionScores));
-      }
-
-      return {
-        attemptId: attemptId,
-        score: score,
-        maxScore: maxScore,
-        status: 'graded'
-      };
+    if (scoreKeys.some(function (key) { return !seenQuestionIds[key]; })) {
+      throw new Error('Terdapat skor untuk soal yang bukan bagian dari asesmen ini.');
     }
+
+    const sheet = getSheet_('Attempts');
+    const values = sheet.getDataRange().getValues();
+    if (!values.length) throw new Error('Struktur data pengerjaan tidak valid.');
+    const headers = values[0].map(String);
+    const requiredColumns = ['attemptId', 'score', 'maxScore', 'status', 'teacherFeedback', 'questionScoresJson'];
+    const columnIndex = function (name) { return headers.indexOf(name); };
+    requiredColumns.forEach(function (name) {
+      if (columnIndex(name) < 0) throw new Error('Kolom ' + name + ' tidak ditemukan pada data pengerjaan.');
+    });
+
+    for (let rowIndex = 1; rowIndex < values.length; rowIndex++) {
+      if (String(values[rowIndex][columnIndex('attemptId')]) === attemptId) {
+        sheet.getRange(rowIndex + 1, columnIndex('score') + 1).setValue(score);
+        sheet.getRange(rowIndex + 1, columnIndex('maxScore') + 1).setValue(maxScore);
+        sheet.getRange(rowIndex + 1, columnIndex('status') + 1).setValue('graded');
+        sheet.getRange(rowIndex + 1, columnIndex('teacherFeedback') + 1)
+          .setValue(String(payload.feedback || ''));
+        sheet.getRange(rowIndex + 1, columnIndex('questionScoresJson') + 1)
+          .setValue(JSON.stringify(savedScores));
+
+        return {
+          attemptId: attemptId,
+          score: score,
+          maxScore: maxScore,
+          status: 'graded'
+        };
+      }
+    }
+    throw new Error('Pengerjaan tidak ditemukan.');
+  } finally {
+    lock.releaseLock();
   }
-
-  throw new Error('Pengerjaan tidak ditemukan.');
 }
-
-/**
- * Mencatat event keamanan dari sesi siswa yang telah diverifikasi oleh routeAction_.
- * Hanya event yang dikenal yang disimpan; waktu selalu dibuat di server.
- */
 function logEvent_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
