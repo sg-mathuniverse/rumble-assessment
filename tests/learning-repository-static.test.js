@@ -192,6 +192,16 @@ assert.match(source, /SOLO_INDICATOR_VERIFICATION_INVALIDATED/, 'Changing a scor
 assert.match(source, /assessment && String\(assessment\.classification \|\| ''\)\.toUpperCase\(\) === 'SOLO_TAX' && !canViewInternal \? \{\}/, 'Students must not receive per-question SOLO Tax scores');
 assert.match(source, /saveSoloIndicatorVerification: function \(\)/, 'Teacher route must expose the indicator verification action');
 assert.match(source, /function saveSoloDominantVerification_\(/, 'Dominant SOLO level must have a dedicated teacher verification endpoint');
+assert.match(source, /function requestSoloAiAssessment_\(/, 'AI scoring must run only through an explicit teacher request');
+assert.match(source, /if \(!settings\.scoringEnabled\)/, 'AI scoring must remain disabled unless enabled by Admin');
+assert.match(source, /hasPhotoAttachment: photos\.length > 0/, 'AI input may indicate a photo exists without sending the photo');
+assert.match(source, /AI_SOLO_SCORING_RECOMMENDATION/, 'AI scoring recommendations must be saved separately from final grades');
+assert.match(source, /AI_SOLO_SCORING_FAILED/, 'Failed AI scoring requests must be logged');
+assert.match(source, /recommendedScore: 0/, 'An entirely blank SOLO response must be assigned zero without relying on AI');
+assert.match(source, /manualPhotoReviewRequired: true/, 'Photo-only answers must be reserved for manual teacher review');
+assert.match(source, /function soloAiPanel\(/, 'Teacher reports must display AI scoring recommendations and evidence');
+assert.match(source, /requestSoloAiAssessment\(/, 'Teacher UI must provide an explicit action to request AI scoring');
+
 assert.match(source, /PropertiesService\.getScriptProperties\(\)/, 'AI credentials must be stored in server-side Script Properties');
 assert.match(source, /settings\.hasApiKey = !!aiScriptProperties_\(\)\.getProperty/, 'Admin settings may expose only whether an API key exists, never the key itself');
 assert.match(source, /Aktifkan prompt AI Penilaian yang sudah lulus uji simulasi/, 'AI scoring cannot be enabled without a tested active prompt');
