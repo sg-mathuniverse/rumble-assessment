@@ -5,6 +5,7 @@ on:
     branches:
       - feature/learning-repository-backend
       - feature/solo-tax-foundation-2026-11-04
+      - integration/solo-tax-review-2026-11-04
   pull_request:
     branches:
       - feature/learning-repository-backend
