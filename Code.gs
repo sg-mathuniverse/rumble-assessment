@@ -179,7 +179,7 @@ function routeAction_(action, payload) {
   const teacherOnly = [
     'createAssessment','deleteAssessment','saveQuestionBundle','listQuestionBundles',
     'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
-    'publishAssessment','gradeAttempt','saveSoloIndicatorVerification','saveSoloDominantVerification','listStudents','listMonitoring','getTeacherSummary'
+    'publishAssessment','gradeAttempt','saveSoloIndicatorVerification','listStudents','listMonitoring','getTeacherSummary'
   ];
   const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt','saveAttempt'];
   const shared = ['listAssessments','getAssessment','getAssessmentImage','listAttempts'];
@@ -255,13 +255,7 @@ function routeAction_(action, payload) {
       assertAssessmentOwner_(attempt.assessmentId, user);
       return saveSoloIndicatorVerification_(trusted);
     },
-    saveSoloDominantVerification: function () {
-      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
-      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
-      if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
-      assertAssessmentOwner_(attempt.assessmentId, user);
-      return saveSoloDominantVerification_(trusted);
-    },
+
     logEvent: function () {
       const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
       const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
