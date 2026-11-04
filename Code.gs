@@ -1884,6 +1884,13 @@ function adminSaveAiSettings_(payload) {
     properties.setProperty(RUMBLE_AI_API_KEY_, key);
   }
   if (payload.clearApiKey === true) properties.deleteProperty(RUMBLE_AI_API_KEY_);
+  const activePrompts = aiPrompts_();
+  if (payload.scoringEnabled === true && !activePrompts.some(function (item) { return item.service === 'SCORING' && item.active === true; })) {
+    throw new Error('Aktifkan prompt AI Penilaian yang sudah lulus uji simulasi terlebih dahulu.');
+  }
+  if (payload.reflectionEnabled === true && !activePrompts.some(function (item) { return item.service === 'REFLECTION' && item.active === true; })) {
+    throw new Error('Aktifkan prompt AI Refleksi yang sudah lulus uji simulasi terlebih dahulu.');
+  }
   const current = aiSettings_();
   const saved = {
     model: model,
