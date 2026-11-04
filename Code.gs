@@ -1275,29 +1275,40 @@ function submitAttempt_(payload) {
     return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
   });
   if (existingAttempt && String(existingAttempt.status) === 'in_progress') {
-    assertStudentAssessmentIdentity_(assessment, user);
+    assertStudentAssessmentIdentity_(currentAssessment, user);
   } else {
-    assertStudentAssessmentAccess_(assessment, user);
+    assertStudentAssessmentAccess_(currentAssessment, user);
   }
 
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    const currentAssessment = listRows_('Assessments').find(function (item) {
+      return String(item.assessmentId) === assessmentId;
+    });
+    if (!currentAssessment) throw new Error('Asesmen tidak ditemukan.');
     const previous = listRows_('Attempts').find(function (attempt) {
       return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
     });
     if (previous && String(previous.status) !== 'in_progress') throw new Error('Jawaban untuk asesmen ini sudah pernah dikirim.');
     if (previous && previous.startedAt) {
       const started = new Date(previous.startedAt).getTime();
-      const durationMs = Number(assessment.duration) * 60000;
+      const durationMs = Number(currentAssessment.duration) * 60000;
       if (!isFinite(started) || !isFinite(durationMs) || durationMs <= 0) throw new Error('Waktu sesi pengerjaan tidak valid.');
       const remainingMs = started + durationMs - Date.now();
       if (remainingMs > 8 * 60000) throw new Error('Pengumpulan jawaban hanya dapat dilakukan pada 8 menit terakhir. Silakan periksa jawaban kembali.');
       if (remainingMs < -30000 && payload.autoSubmitOnExpiry !== true) throw new Error('Waktu pengerjaan sudah habis. Jawaban tidak dapat dikirim terlambat.');
     }
-  const answers = payload.answers && typeof payload.answers === 'object' ? payload.answers : {};
+  const submittedAnswers = payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers) ? payload.answers : {};
   const questions = listRows_('Questions').filter(function (question) {
-    return question.assessmentId === assessmentId;
+    return String(question.assessmentId) === assessmentId;
+  });
+  if (!questions.length) throw new Error('Asesmen tidak memiliki soal.');
+  const allowedQuestionIds = {};
+  questions.forEach(function (question) { allowedQuestionIds[String(question.questionId)] = true; });
+  const answers = {};
+  Object.keys(submittedAnswers).forEach(function (questionId) {
+    if (allowedQuestionIds[questionId]) answers[questionId] = submittedAnswers[questionId];
   });
 
   let score = 0;
@@ -1367,9 +1378,9 @@ function submitAttempt_(payload) {
   // Sesi aktif boleh dikirim setelah jam jadwal berakhir selama durasi pengerjaan belum habis.
   // Identitas, kelas, status asesmen, dan batas durasi tetap divalidasi di sisi server.
   if (previous && String(previous.status) === 'in_progress') {
-    assertStudentAssessmentIdentity_(assessment, user);
+    assertStudentAssessmentIdentity_(currentAssessment, user);
   } else {
-    assertStudentAssessmentAccess_(assessment, user);
+    assertStudentAssessmentAccess_(currentAssessment, user);
   }
   const attemptId = previous ? String(previous.attemptId) : makeId_('ATT');
   const existingAnswers = previous ? parseJson_(previous.answersJson, {}) : {};
