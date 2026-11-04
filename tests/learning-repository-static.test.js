@@ -1264,6 +1264,7 @@ assert.throws(function () {
 
 
 const dominantVerificationContext = {
+  soloAchievementCategory_: function (percentage) { return percentage > 85 ? 'exceeds' : percentage >= 70 ? 'achieved' : 'not_achieved'; },
   LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () { dominantVerificationContext.released = true; } }; } },
   requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('ID wajib'); return String(value).trim(); },
   parseJson_: function (value, fallback) { try { return JSON.parse(value); } catch (e) { return fallback; } },
