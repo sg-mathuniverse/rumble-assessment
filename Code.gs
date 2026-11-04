@@ -1648,6 +1648,27 @@ function listAttempts_(payload) {
                 })()
               };
             })()
+          : undefined,
+        soloAiAssessment: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
+          ? (function () {
+              const events = listRows_('Events').filter(function (event) {
+                return String(event.attemptId) === String(attempt.attemptId) &&
+                  String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION';
+              }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+              if (!events.length) return null;
+              const latest = events[events.length - 1];
+              const detail = parseJson_(latest.detailsJson, {});
+              return {
+                promptId: String(detail.promptId || ''),
+                promptVersion: Number(detail.promptVersion) || 0,
+                provider: String(detail.provider || ''),
+                model: String(detail.model || ''),
+                requestedBy: String(detail.requestedBy || ''),
+                eventAt: String(latest.eventAt || ''),
+                usage: detail.usage || {},
+                results: Array.isArray(detail.results) ? detail.results : []
+              };
+            })()
           : undefined
       });
     });
