@@ -1304,4 +1304,21 @@ assert.throws(function () {
   });
 }, /Alasan perubahan level/, 'Teacher must explain a different final level from the AI recommendation');
 
+const dominantSaveSource = extractFunction('saveSoloDominantVerification_', source);
+assert.ok(dominantSaveSource.includes("String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION'"),
+  'Dominant-level verification must source AI recommendations from server-side audit events');
+assert.ok(!dominantSaveSource.includes('payload.aiRecommendation'),
+  'Dominant-level verification must not trust a browser-supplied AI recommendation');
+assert.ok(dominantSaveSource.includes('item.category !== soloAchievementCategory_(percentage)'),
+  'Dominant-level verification must require percentage-based indicator review');
+const routeSource = extractFunction('routeAction_', source);
+assert.ok(routeSource.includes("'saveSoloDominantVerification'") &&
+  routeSource.includes('assertAssessmentOwner_(attempt.assessmentId, user)'),
+  'Dominant-level verification must be restricted to the teacher who owns the assessment');
+const aiScoringSource = extractFunction('requestSoloAiAssessment_', source);
+assert.ok(aiScoringSource.includes('dominantRecommendation = {') &&
+  aiScoringSource.includes('questionEvidence') &&
+  aiScoringSource.includes('dominantLevel'),
+  'AI scoring must provide a qualitative dominant-level recommendation with per-question evidence');
+
 console.log('PASS: learning repository static guard tests');
