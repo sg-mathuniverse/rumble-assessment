@@ -179,7 +179,7 @@ function routeAction_(action, payload) {
   const teacherOnly = [
     'createAssessment','deleteAssessment','saveQuestionBundle','listQuestionBundles',
     'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
-    'publishAssessment','gradeAttempt','listStudents','listMonitoring','getTeacherSummary'
+    'publishAssessment','gradeAttempt','saveSoloIndicatorVerification','listStudents','listMonitoring','getTeacherSummary'
   ];
   const studentOnly = ['submitAttempt','logEvent','uploadAnswerImage','startAttempt','saveAttempt'];
   const shared = ['listAssessments','getAssessment','getAssessmentImage','listAttempts'];
@@ -237,6 +237,13 @@ function routeAction_(action, payload) {
       if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
       assertAssessmentOwner_(attempt.assessmentId, user);
       return gradeAttempt_(trusted);
+    },
+    saveSoloIndicatorVerification: function () {
+      const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
+      const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+      if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
+      assertAssessmentOwner_(attempt.assessmentId, user);
+      return saveSoloIndicatorVerification_(trusted);
     },
     logEvent: function () {
       const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
@@ -1539,7 +1546,56 @@ function listAttempts_(payload) {
           return answers;
         })(),
         questionScores: parseJson_(attempt.questionScoresJson, {}),
-        questionDetails: details
+        questionDetails: details,
+        assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
+        soloIndicators: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
+          ? (function () {
+              const indicatorRows = listRows_('LearningIndicators');
+              const mapped = {};
+              details.forEach(function (question) {
+                const meta = question.soloMeta || {};
+                (Array.isArray(meta.learningIndicatorIds) ? meta.learningIndicatorIds : []).forEach(function (indicatorId) {
+                  const id = String(indicatorId || '');
+                  if (!id) return;
+                  if (!mapped[id]) {
+                    const indicator = indicatorRows.find(function (item) { return String(item.indicatorId) === id; }) || {};
+                    mapped[id] = {
+                      indicatorId: id,
+                      indicatorCode: String(indicator.indicatorCode || id),
+                      description: String(indicator.description || 'Indikator tersimpan pada snapshot soal'),
+                      questionIds: [],
+                      questionOrders: []
+                    };
+                  }
+                  if (mapped[id].questionIds.indexOf(String(question.id)) < 0) {
+                    mapped[id].questionIds.push(String(question.id));
+                    mapped[id].questionOrders.push(Number(question.order));
+                  }
+                });
+              });
+              return Object.keys(mapped).map(function (id) { return mapped[id]; });
+            })()
+          : undefined,
+        soloReview: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
+          ? (function () {
+              const history = listRows_('Events').filter(function (event) {
+                return String(event.attemptId) === String(attempt.attemptId) &&
+                  String(event.eventType).indexOf('SOLO_INDICATOR_VERIFICATION') === 0;
+              }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+              const latest = history.length ? history[history.length - 1] : null;
+              const details = latest ? parseJson_(latest.detailsJson, {}) : {};
+              return {
+                status: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? 'verified' : 'pending',
+                results: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' && Array.isArray(details.results) ? details.results : [],
+                verifiedAt: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? String(latest.eventAt || '') : '',
+                verifiedBy: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? String(details.verifiedBy || '') : '',
+                history: history.map(function (event) {
+                  const detail = parseJson_(event.detailsJson, {});
+                  return { eventType: String(event.eventType), eventAt: String(event.eventAt || ''), verifiedBy: String(detail.verifiedBy || ''), reason: String(detail.reason || '') };
+                })
+              };
+            })()
+          : undefined
       });
     });
 }
@@ -1657,6 +1713,65 @@ function gradeAttempt_(payload) {
     lock.releaseLock();
   }
 }
+/**
+ * Menyimpan verifikasi guru untuk seluruh indikator SOLO Tax pada satu pengerjaan.
+ * Riwayat disimpan sebagai event append-only agar struktur spreadsheet tetap.
+ */
+function saveSoloIndicatorVerification_(payload) {
+  const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
+  const submitted = payload.results;
+  if (!Array.isArray(submitted) || !submitted.length) throw new Error('Verifikasi indikator belum diisi.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
+    if (!attempt || String(attempt.status || '').toLowerCase() !== 'graded') {
+      throw new Error('Penilaian seluruh soal harus selesai sebelum indikator diverifikasi.');
+    }
+    const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+    if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') {
+      throw new Error('Verifikasi indikator hanya berlaku untuk Asesmen SOLO Tax.');
+    }
+    const questions = listRows_('Questions').filter(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+    const mapped = {};
+    questions.forEach(function (question) {
+      const meta = parseJson_(question.answerJson, {}) || {};
+      const ids = meta.__soloTaxMeta && Array.isArray(meta.__soloTaxMeta.learningIndicatorIds) ? meta.__soloTaxMeta.learningIndicatorIds : [];
+      ids.forEach(function (id) {
+        const key = String(id || '');
+        if (!key) return;
+        if (!mapped[key]) mapped[key] = [];
+        mapped[key].push(String(question.questionId));
+      });
+    });
+    const expectedIds = Object.keys(mapped).sort();
+    const receivedIds = submitted.map(function (item) { return String(item && item.indicatorId || ''); }).sort();
+    if (!expectedIds.length) throw new Error('Asesmen ini belum memiliki indikator TP yang terhubung dengan soal.');
+    if (receivedIds.length !== expectedIds.length || receivedIds.some(function (id, index) { return id !== expectedIds[index]; })) {
+      throw new Error('Verifikasi harus mencakup setiap indikator yang terhubung dengan soal, tepat satu kali.');
+    }
+    const allowedStatuses = ['mastered', 'developing', 'needs_improvement', 'insufficient_evidence'];
+    const results = submitted.map(function (item) {
+      const id = String(item.indicatorId);
+      const status = String(item.status || '');
+      const evidence = String(item.evidence || '').trim();
+      if (allowedStatuses.indexOf(status) < 0) throw new Error('Status verifikasi indikator tidak valid.');
+      if (!evidence || evidence.length > 3000) throw new Error('Bukti atau alasan verifikasi wajib diisi (maksimal 3.000 karakter).');
+      return { indicatorId: id, status: status, evidence: evidence, questionIds: mapped[id].slice() };
+    });
+    const now = currentTimestamp_();
+    const user = payload.currentUser || {};
+    appendRow_('Events', {
+      eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+      eventType: 'SOLO_INDICATOR_VERIFICATION', eventAt: now,
+      detailsJson: JSON.stringify({ version: 1, assessmentId: String(attempt.assessmentId), verifiedBy: String(user.email || ''), results: results })
+    });
+    return { attemptId: attemptId, status: 'verified', verifiedAt: now, indicatorCount: results.length };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function logEvent_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const studentId = requiredText_(payload.studentId, 'ID siswa', 120);
