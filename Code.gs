@@ -1172,30 +1172,28 @@ function startAttempt_(payload) {
   const user = payload.currentUser;
   if (!user || user.role !== 'student' || !user.userId) throw new Error('Akun siswa terverifikasi diperlukan.');
   const studentId = String(user.userId);
-  const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
-  const previousAttempt = listRows_('Attempts').find(function (attempt) {
-    return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
-  });
-  if (previousAttempt && String(previousAttempt.status) === 'in_progress') assertStudentAssessmentIdentity_(assessment, user);
-  else assertStudentAssessmentAccess_(assessment, user);
-  const duration = Number(assessment.duration);
-  if (!isFinite(duration) || duration < 1) throw new Error('Durasi asesmen tidak valid.');
-
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
     const previous = listRows_('Attempts').find(function (attempt) {
       return String(attempt.assessmentId) === assessmentId && String(attempt.studentId) === studentId;
     });
     if (previous) {
       if (String(previous.status) !== 'in_progress') throw new Error('Jawaban untuk asesmen ini sudah pernah dikirim.');
+      assertStudentAssessmentIdentity_(assessment, user);
+      const duration = Number(assessment.duration);
       const started = new Date(previous.startedAt).getTime();
-      if (!isFinite(started)) throw new Error('Waktu mulai sesi tidak valid. Hubungi guru.');
+      if (!isFinite(duration) || duration < 1 || !isFinite(started)) throw new Error('Waktu sesi tidak valid. Hubungi guru.');
       const expired = Date.now() > started + duration * 60000 + 30000;
       return { attemptId: String(previous.attemptId), startedAt: previous.startedAt, status: 'in_progress', duration: duration, resumed: true, expired: expired, answers: parseJson_(previous.answersJson, {}) };
     }
-    const attemptId = makeId_('ATT'), startedAt = currentTimestamp_();
+    assertStudentAssessmentAccess_(assessment, user);
+    const duration = Number(assessment.duration);
+    if (!isFinite(duration) || duration < 1 || duration > 300) throw new Error('Durasi asesmen tidak valid.');
     const questions = listRows_('Questions').filter(function (question) { return String(question.assessmentId) === assessmentId; });
+    if (!questions.length) throw new Error('Asesmen belum memiliki soal dan tidak dapat dikerjakan.');
+    const attemptId = makeId_('ATT'), startedAt = currentTimestamp_();
     const maxScore = questions.reduce(function (sum, question) { return sum + (Number(question.points) || 0); }, 0);
     appendRow_('Attempts', {
       attemptId: attemptId, assessmentId: assessmentId, studentId: studentId,
@@ -1203,9 +1201,10 @@ function startAttempt_(payload) {
       maxScore: maxScore, focusLossCount: 0, answersJson: '{}', teacherFeedback: ''
     });
     return { attemptId: attemptId, startedAt: startedAt, status: 'in_progress', duration: duration, resumed: false, answers: {} };
-  } finally { lock.releaseLock(); }
+  } finally {
+    lock.releaseLock();
+  }
 }
-
 function mergeUploadedAnswerPhotos_(attemptId, answers, existingAnswers) {
   const next = answers && typeof answers === 'object' && !Array.isArray(answers) ? answers : {};
   const previous = existingAnswers && typeof existingAnswers === 'object' && !Array.isArray(existingAnswers) ? existingAnswers : {};
