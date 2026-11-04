@@ -908,4 +908,45 @@ const studentSource = extractFunction('getAssessment_', source);
 assert.ok(studentSource.includes('const canIncludeAnswers = payload.includeAnswers === true'),
   'Answer inclusion must be decided by server-side authorization, not client input alone');
 
+const publishContext = {
+  LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () { publishContext.released = true; } }; } },
+  getSheet_: function () { return {
+    getDataRange: function () { return { getValues: function () { return [
+      ['assessmentId', 'status', 'updatedAt'],
+      ['ASM-1', publishContext.assessment.status, '']
+    ]; } }; },
+    getRange: function (row, col) { return { setValue: function (value) {
+      publishContext.writes.push({ row: row, col: col, value: value });
+    } }; }
+  }; },
+  listRows_: function (table) {
+    if (table === 'Assessments') return [publishContext.assessment];
+    if (table === 'Questions') return publishContext.questions;
+    return [];
+  },
+  requiredText_: function (v) { if (!String(v || '').trim()) throw new Error('ID wajib'); return String(v).trim(); },
+  currentTimestamp_: function () { return '2026-11-04T00:00:00Z'; },
+  assessment: { assessmentId: 'ASM-1', status: 'draft', title: 'Uji', className: 'VII-A', duration: 60 },
+  questions: [{ assessmentId: 'ASM-1', questionId: 'Q-1' }],
+  writes: [], released: false
+};
+vm.createContext(publishContext);
+vm.runInContext(extractFunction('publishAssessment_', source), publishContext);
+const published = publishContext.publishAssessment_({ id: 'ASM-1' });
+assert.equal(published.status, 'published', 'Valid draft with questions can be published');
+assert.equal(published.questionCount, 1, 'Publish response must report validated question count');
+assert.equal(publishContext.writes[0].value, 'published', 'Publish must write published status');
+assert.equal(publishContext.released, true, 'Publish must always release its script lock');
+publishContext.writes = []; publishContext.released = false; publishContext.questions = [];
+assert.throws(function () { publishContext.publishAssessment_({ id: 'ASM-1' }); }, /minimal satu soal/,
+  'Empty assessment cannot be published');
+assert.equal(publishContext.writes.length, 0, 'Empty assessment must not change status');
+publishContext.assessment.status = 'archived'; publishContext.questions = [{ assessmentId: 'ASM-1' }];
+assert.throws(function () { publishContext.publishAssessment_({ id: 'ASM-1' }); }, /diarsipkan/,
+  'Archived assessment cannot be published');
+assert.equal(publishContext.writes.length, 0, 'Archived assessment must not change status');
+publishContext.assessment.status = 'draft'; publishContext.assessment.duration = 0;
+assert.throws(function () { publishContext.publishAssessment_({ id: 'ASM-1' }); }, /Durasi asesmen/,
+  'Invalid duration must block publication');
+assert.equal(publishContext.writes.length, 0, 'Invalid assessment must not change status');
 console.log('PASS: learning repository static guard tests');
