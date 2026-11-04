@@ -187,6 +187,10 @@ assert.match(source, /SOLO Tax hanya mendukung tipe soal uraian/, 'SOLO Tax must
 assert.match(source, /SOLO Tax hanya mengizinkan satu foto/, 'SOLO Tax must enforce one answer photo per main question');
 assert.match(source, /hasResponse && value < 1/, 'Submitted SOLO Tax answers must receive at least one point');
 assert.match(source, /!hasResponse && value !== 0/, 'Blank SOLO Tax answers must receive zero');
+assert.match(source, /function saveSoloIndicatorVerification_\(/, 'SOLO Tax indicator verification must be persisted by a dedicated server function');
+assert.match(source, /SOLO_INDICATOR_VERIFICATION_INVALIDATED/, 'Changing a score must invalidate prior indicator verification');
+assert.match(source, /assessment && String\(assessment\.classification \|\| ''\)\.toUpperCase\(\) === 'SOLO_TAX' && !canViewInternal \? \{\}/, 'Students must not receive per-question SOLO Tax scores');
+assert.match(source, /saveSoloIndicatorVerification: function \(\)/, 'Teacher route must expose the indicator verification action');
 assert.match(source, /latestAnswer\.photos\.length >= 1/, 'Concurrent SOLO Tax photo uploads must recheck the saved photo list under lock');
 assert.match(source, /points: String\(assessment\.classification \|\| ''\)\.toUpperCase\(\) === 'SOLO_TAX' && !canIncludeAnswers \? undefined/, 'Students must not receive per-question SOLO Tax points in assessment details');
 assert.match(source, /rubricLevels: canViewInternal \? parseJson_\(question\.rubricLevelsJson, \[\]\) : \[\]/, 'Students must not receive internal SOLO rubrics from submitted attempt details');
@@ -1064,6 +1068,9 @@ function makeGradeContext(status, questionScores) {
     }; } },
     requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('ID wajib'); return String(value).trim(); },
     parseJson_: function (value, fallback) { try { return JSON.parse(value); } catch (e) { return fallback; } },
+    appendRow_: function (table, row) { (ctx.appended || (ctx.appended = [])).push({ table: table, row: row }); },
+    makeId_: function (prefix) { return prefix + '-TEST'; },
+    currentTimestamp_: function () { return '2026-11-04T00:00:00Z'; },
     listRows_: function (table) {
       if (table === 'Attempts') return [{ attemptId: 'ATT-1', assessmentId: 'ASM-1', status: status }];
       if (table === 'Questions') return [
@@ -1140,5 +1147,53 @@ assert.throws(function () {
 }, /tepat untuk seluruh soal/,
 'Extra question score keys must be rejected');
 assert.equal(extraScoreContext.writes.length, 0, 'Extra question score keys must not write a grade');
+
+
+const soloVerificationContext = {
+  LockService: { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () { soloVerificationContext.released = true; } }; } },
+  requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('ID wajib'); return String(value).trim(); },
+  parseJson_: function (value, fallback) { try { return JSON.parse(value); } catch (e) { return fallback; } },
+  listRows_: function (table) {
+    if (table === 'Attempts') return [{ attemptId: 'ATT-SOLO', assessmentId: 'ASM-SOLO', studentId: 'ST-1', status: 'graded' }];
+    if (table === 'Assessments') return [{ assessmentId: 'ASM-SOLO', classification: 'SOLO_TAX' }];
+    if (table === 'Questions') return [
+      { questionId: 'SQ-1', assessmentId: 'ASM-SOLO', answerJson: JSON.stringify({ __soloTaxMeta: { learningIndicatorIds: ['IND-A', 'IND-B'] } }) },
+      { questionId: 'SQ-2', assessmentId: 'ASM-SOLO', answerJson: JSON.stringify({ __soloTaxMeta: { learningIndicatorIds: ['IND-B'] } }) }
+    ];
+    return [];
+  },
+  appendRow_: function (table, row) { soloVerificationContext.appended.push({ table: table, row: row }); },
+  makeId_: function (prefix) { return prefix + '-TEST'; },
+  currentTimestamp_: function () { return '2026-11-04T00:00:00Z'; },
+  appended: [], released: false
+};
+vm.createContext(soloVerificationContext);
+vm.runInContext(extractFunction('saveSoloIndicatorVerification_', source), soloVerificationContext);
+const soloVerificationResult = soloVerificationContext.saveSoloIndicatorVerification_({
+  attemptId: 'ATT-SOLO', currentUser: { role: 'teacher', email: 'teacher@example.test' },
+  results: [
+    { indicatorId: 'IND-A', status: 'mastered', evidence: 'Siswa menghubungkan konsep pada jawaban soal pertama.' },
+    { indicatorId: 'IND-B', status: 'developing', evidence: 'Siswa menunjukkan hubungan parsial pada dua soal.' }
+  ]
+});
+assert.equal(soloVerificationResult.status, 'verified', 'Teacher can verify all mapped indicators');
+assert.equal(soloVerificationResult.indicatorCount, 2, 'Verification covers each distinct mapped indicator');
+assert.equal(soloVerificationContext.appended[0].table, 'Events', 'Verification must be appended to the audit event log');
+assert.equal(soloVerificationContext.released, true, 'Verification lock must always be released');
+assert.throws(function () {
+  soloVerificationContext.saveSoloIndicatorVerification_({
+    attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
+    results: [{ indicatorId: 'IND-A', status: 'mastered', evidence: 'Bukti.' }]
+  });
+}, /setiap indikator/, 'Verification must cover every mapped indicator exactly once');
+assert.throws(function () {
+  soloVerificationContext.saveSoloIndicatorVerification_({
+    attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
+    results: [
+      { indicatorId: 'IND-A', status: 'mastered', evidence: 'Bukti.' },
+      { indicatorId: 'IND-B', status: 'unknown', evidence: 'Bukti.' }
+    ]
+  });
+}, /Status verifikasi/, 'Verification status must be from the supported set');
 
 console.log('PASS: learning repository static guard tests');
