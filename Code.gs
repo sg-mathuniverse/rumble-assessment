@@ -16,8 +16,8 @@
  */
 
 const CONFIG = {
-  SPREADSHEET_ID: '1PtFTRSFWjjoOkYzph7Elf6fziqMdwIqTi4p0HGsdlps',
-  DRIVE_FOLDER_ID: '1_iKxvdIpBvbJp8r1cENloQroXMkMr9C8',
+  SPREADSHEET_ID: 'PASTE_TEST_SPREADSHEET_ID_HERE',
+  DRIVE_FOLDER_ID: 'PASTE_TEST_DRIVE_FOLDER_ID_HERE',
   APP_NAME: 'Rumble Assessment'
 };
 
@@ -77,7 +77,7 @@ function getFrontendHtml_() {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/da44df77ba91169f9a35a6bce51c5965488a4ea2/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/fe848cc5637f49afa1d5fc39635abb2ebd71a9e2/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
