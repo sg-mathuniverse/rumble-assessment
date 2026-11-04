@@ -2039,9 +2039,10 @@ function saveSoloIndicatorVerification_(payload) {
       };
     });
     const averagePercentage = results.reduce(function (sum, item) { return sum + item.percentage; }, 0) / results.length;
+    const roundedAveragePercentage = Math.round(averagePercentage * 100) / 100;
     const tpAchievement = {
-      averagePercentage: Math.round(averagePercentage * 100) / 100,
-      category: soloAchievementCategory_(averagePercentage),
+      averagePercentage: roundedAveragePercentage,
+      category: soloAchievementCategory_(roundedAveragePercentage),
       indicatorCount: results.length,
       weighting: 'EQUAL'
     };
