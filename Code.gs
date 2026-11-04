@@ -2079,11 +2079,8 @@ function adminSaveAiSettings_(payload) {
   }
   const properties = aiScriptProperties_();
   const key = String(payload.apiKey || '').trim();
-  if (key) {
-    if (!/^tp-[A-Za-z0-9_-]{12,}$/.test(key)) throw new Error('Format API key TokenPortal tidak sesuai.');
-    properties.setProperty(RUMBLE_AI_API_KEY_, key);
-  }
-  if (payload.clearApiKey === true) properties.deleteProperty(RUMBLE_AI_API_KEY_);
+  if (key && !/^tp-[A-Za-z0-9_-]{12,}$/.test(key)) throw new Error('Format API key TokenPortal tidak sesuai.');
+  if (key && payload.clearApiKey === true) throw new Error('Pilih untuk menyimpan API key baru atau menghapus API key lama, bukan keduanya.');
   const activePrompts = aiPrompts_();
   if (payload.scoringEnabled === true && !activePrompts.some(function (item) { return item.service === 'SCORING' && item.active === true; })) {
     throw new Error('Aktifkan prompt AI Penilaian yang sudah lulus uji simulasi terlebih dahulu.');
@@ -2091,6 +2088,8 @@ function adminSaveAiSettings_(payload) {
   if (payload.reflectionEnabled === true && !activePrompts.some(function (item) { return item.service === 'REFLECTION' && item.active === true; })) {
     throw new Error('Aktifkan prompt AI Refleksi yang sudah lulus uji simulasi terlebih dahulu.');
   }
+  if (key) properties.setProperty(RUMBLE_AI_API_KEY_, key);
+  if (payload.clearApiKey === true) properties.deleteProperty(RUMBLE_AI_API_KEY_);
   const current = aiSettings_();
   const saved = {
     model: model,
