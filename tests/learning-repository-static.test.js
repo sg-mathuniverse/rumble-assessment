@@ -1279,7 +1279,7 @@ const dominantVerificationContext = {
     }, {
       attemptId: 'ATT-SOLO', eventType: 'AI_SOLO_SCORING_RECOMMENDATION',
       eventAt: '2026-11-03T23:59:00Z',
-      detailsJson: JSON.stringify({ provider: 'TOKENPORTAL', model: 'model-test', promptVersion: 2, dominantRecommendation: { level: 'RELATIONAL', evidenceSummary: 'Jawaban mengintegrasikan dua konsep secara konsisten.', questionEvidence: [{ questionId: 'SQ-1', evidence: 'Siswa menghubungkan konsep A dan B.' }] } })
+      detailsJson: JSON.stringify({ provider: 'TOKENPORTAL', model: 'model-test', promptVersion: 2, analyzedQuestionIds: ['SQ-1'], dominantRecommendation: { level: 'RELATIONAL', evidenceSummary: 'Jawaban mengintegrasikan dua konsep secara konsisten.', questionEvidence: [{ questionId: 'SQ-1', evidence: 'Siswa menghubungkan konsep A dan B.' }] } })
     }];
     return [];
   },
@@ -1295,6 +1295,7 @@ const dominantResult = dominantVerificationContext.saveSoloDominantVerification_
   teacherLevel: 'RELATIONAL', teacherReason: ''
 });
 assert.equal(dominantResult.status, 'verified', 'Teacher can verify an AI-supported dominant SOLO level');
+assert.equal(dominantVerificationContext.appended[0].row.detailsJson.includes('teacher@example.test'), true, 'Dominant-level audit must record the verifying teacher identity');
 assert.equal(dominantVerificationContext.appended[0].table, 'Events', 'Dominant-level verification must be audit logged');
 assert.equal(dominantVerificationContext.released, true, 'Dominant-level verification lock must be released');
 assert.throws(function () {
@@ -1303,6 +1304,26 @@ assert.throws(function () {
     teacherLevel: 'EXTENDED_ABSTRACT'
   });
 }, /Alasan perubahan level/, 'Teacher must explain a different final level from the AI recommendation');
+assert.throws(function () {
+  const original = dominantVerificationContext.listRows_;
+  dominantVerificationContext.listRows_ = function (table) {
+    if (table === 'Events') return original(table).map(function (event) {
+      if (event.eventType === 'AI_SOLO_SCORING_RECOMMENDATION') {
+        const detail = JSON.parse(event.detailsJson);
+        detail.analyzedQuestionIds = ['SQ-1', 'SQ-2'];
+        event = Object.assign({}, event, { detailsJson: JSON.stringify(detail) });
+      }
+      return event;
+    });
+    return original(table);
+  };
+  try {
+    dominantVerificationContext.saveSoloDominantVerification_({
+      attemptId: 'ATT-SOLO', currentUser: { email: 'teacher@example.test' },
+      teacherLevel: 'RELATIONAL', teacherReason: ''
+    });
+  } finally { dominantVerificationContext.listRows_ = original; }
+}, /tepat satu bukti untuk setiap soal/, 'Dominant-level verification must reject incomplete AI evidence coverage');
 
 const dominantSaveSource = extractFunction('saveSoloDominantVerification_', source);
 assert.ok(dominantSaveSource.includes("String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION'"),
