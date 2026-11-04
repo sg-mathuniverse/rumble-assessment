@@ -1483,6 +1483,7 @@ function listAttempts_(payload) {
             points: Number(question.points) || 0,
             rubric: question.rubric,
             rubricLevels: parseJson_(question.rubricLevelsJson, []),
+            soloMeta: (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta:null;})(),
             subquestions: parseJson_(question.subquestionsJson, []),
             options: parseJson_(question.optionsJson, []),
             pairs: parseJson_(question.pairsJson, []),
@@ -1567,6 +1568,9 @@ function gradeAttempt_(payload) {
       return String(q.assessmentId) === String(attempt.assessmentId);
     });
     if (!questions.length) throw new Error('Soal asesmen tidak ditemukan.');
+    const assessment = listRows_('Assessments').find(function(item){return String(item.assessmentId)===String(attempt.assessmentId);});
+    const isSoloTax = assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX';
+    const submittedAnswers = parseJson_(attempt.answersJson, {});
 
     const scoreKeys = Object.keys(questionScores);
     if (scoreKeys.length !== questions.length) {
@@ -1594,6 +1598,20 @@ function gradeAttempt_(payload) {
           !isFinite(maximum) || maximum < 0 ||
           !isFinite(value) || value < 0 || value > maximum) {
         throw new Error('Skor soal nomor ' + q.order + ' tidak valid. Nilai harus antara 0 dan ' + maximum + '.');
+      }
+      if (isSoloTax && String(q.type) === 'essay') {
+        const response = submittedAnswers[questionId];
+        let hasResponse = false;
+        if (typeof response === 'string') hasResponse = !!response.trim();
+        else if (response && typeof response === 'object' && !Array.isArray(response)) {
+          hasResponse = Object.keys(response).some(function(key){
+            if (key === 'photos') return false;
+            const item = response[key];
+            return item !== null && item !== undefined && String(item).trim() !== '';
+          }) || (Array.isArray(response.photos) && response.photos.length > 0);
+        }
+        if (!hasResponse && value !== 0) throw new Error('Soal SOLO Tax tanpa jawaban harus memperoleh nilai 0 (soal nomor ' + q.order + ').');
+        if (hasResponse && value < 1) throw new Error('Jawaban SOLO Tax yang dikumpulkan harus memperoleh minimal 1 poin (soal nomor ' + q.order + ').');
       }
       savedScores[questionId] = value;
       score += value;
