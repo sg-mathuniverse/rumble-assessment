@@ -2205,14 +2205,33 @@ function adminListAiModels_() {
     .filter(function (item) { return !!item.id; });
 }
 
-const RUMBLE_AI_PROMPTS_KEY_ = 'RUMBLE_AI_PROMPTS_V1';
+const RUMBLE_AI_PROMPTS_KEY_ = 'RUMBLE_AI_PROMPT_INDEX_V1';
+function aiPromptContentKey_(promptId) { return 'RUMBLE_AI_PROMPT_CONTENT_' + String(promptId || ''); }
+function aiPromptTestKey_(promptId) { return 'RUMBLE_AI_PROMPT_TEST_' + String(promptId || ''); }
 function aiPrompts_() {
-  const raw = aiScriptProperties_().getProperty(RUMBLE_AI_PROMPTS_KEY_);
-  try { const value = raw ? JSON.parse(raw) : []; return Array.isArray(value) ? value : []; }
-  catch (error) { return []; }
+  const properties = aiScriptProperties_();
+  const raw = properties.getProperty(RUMBLE_AI_PROMPTS_KEY_);
+  let index = [];
+  try { index = raw ? JSON.parse(raw) : []; } catch (error) { index = []; }
+  if (!Array.isArray(index)) return [];
+  return index.map(function (item) {
+    return Object.assign({}, item, {
+      content: properties.getProperty(aiPromptContentKey_(item.promptId)) || '',
+      testSummary: properties.getProperty(aiPromptTestKey_(item.promptId)) || ''
+    });
+  });
 }
 function saveAiPrompts_(items) {
-  aiScriptProperties_().setProperty(RUMBLE_AI_PROMPTS_KEY_, JSON.stringify(items));
+  const properties = aiScriptProperties_();
+  const index = items.map(function (item) {
+    properties.setProperty(aiPromptContentKey_(item.promptId), String(item.content || ''));
+    properties.setProperty(aiPromptTestKey_(item.promptId), String(item.testSummary || ''));
+    const copy = Object.assign({}, item);
+    delete copy.content;
+    delete copy.testSummary;
+    return copy;
+  });
+  properties.setProperty(RUMBLE_AI_PROMPTS_KEY_, JSON.stringify(index));
 }
 function adminListAiPrompts_() {
   return aiPrompts_().slice().sort(function (a, b) {
@@ -2222,8 +2241,9 @@ function adminListAiPrompts_() {
 function adminSaveAiPrompt_(payload) {
   const service = String(payload.service || '').trim().toUpperCase();
   if (['SCORING', 'REFLECTION'].indexOf(service) < 0) throw new Error('Jenis prompt AI tidak valid.');
-  const content = requiredText_(payload.content, 'Isi prompt', 12000);
+  const content = requiredText_(payload.content, 'Isi prompt', 1200);
   const items = aiPrompts_();
+  if (items.length >= 40) throw new Error('Batas 40 versi prompt tercapai. Tinjau dan arsipkan versi lama sebelum menambah versi baru.');
   const version = items.filter(function (item) { return item.service === service; })
     .reduce(function (max, item) { return Math.max(max, Number(item.version) || 0); }, 0) + 1;
   const prompt = {
@@ -2275,7 +2295,7 @@ function adminTestAiPrompt_(payload) {
   }
   const testedAt = currentTimestamp_();
   prompt.testedAt = testedAt;
-  prompt.testSummary = result.content.slice(0, 1500);
+  prompt.testSummary = result.content.slice(0, 1000);
   prompt.testUsage = result.usage;
   prompt.testedBy = String(payload.currentUser && payload.currentUser.email || '');
   saveAiPrompts_(items);
