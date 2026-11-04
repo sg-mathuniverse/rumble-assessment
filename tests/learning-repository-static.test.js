@@ -1274,7 +1274,7 @@ const dominantVerificationContext = {
     if (table === 'Events') return [{
       attemptId: 'ATT-SOLO', eventType: 'SOLO_INDICATOR_VERIFICATION',
       eventAt: '2026-11-04T00:00:00Z',
-      detailsJson: JSON.stringify({ results: [{ indicatorId: 'IND-A', status: 'mastered', evidence: 'Siswa menghubungkan konsep.' }] })
+      detailsJson: JSON.stringify({ results: [{ indicatorId: 'IND-A', percentage: 90, category: 'exceeds', evidence: 'Siswa menghubungkan konsep.' }] })
     }];
     return [];
   },
