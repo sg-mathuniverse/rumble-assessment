@@ -991,4 +991,104 @@ assert.ok(submitSource.includes('if (allowedQuestionIds[questionId]) answers[que
 assert.ok(submitSource.includes("if (!questions.length) throw new Error('Asesmen tidak memiliki soal.')"),
   'Submission must reject assessments without questions');
 
+
+const gradingSource = extractFunction('gradeAttempt_', source);
+assert.ok(gradingSource.includes("status !== 'needs_review' && status !== 'graded'"),
+  'Manual grading must reject attempts that are not submitted for review or already graded');
+assert.ok(gradingSource.includes('lock.waitLock(30000)') && gradingSource.includes('lock.releaseLock()'),
+  'Manual grading must be protected by a Script Lock and release it in finally');
+assert.ok(gradingSource.includes('Skor setiap soal wajib diisi'),
+  'Manual grading must not accept a client-supplied total without per-question scores');
+assert.ok(gradingSource.includes('scoreKeys.length !== questions.length'),
+  'Manual grading must require scores for every question and reject extra score keys');
+assert.ok(gradingSource.includes('JSON.stringify(savedScores)'),
+  'Manual grading must persist only the validated server-side score map');
+assert.ok(html.includes("if(raw.trim()===''){toast('Skor soal '"),
+  'The grading UI must require an explicit score for each question; zero must be entered explicitly');
+
+function makeGradeContext(status, questionScores) {
+  const ctx = {
+    locked: false, released: false, writes: [],
+    LockService: { getScriptLock: function () { return {
+      waitLock: function () { ctx.locked = true; },
+      releaseLock: function () { ctx.released = true; ctx.locked = false; }
+    }; } },
+    requiredText_: function (value) { if (!String(value || '').trim()) throw new Error('ID wajib'); return String(value).trim(); },
+    listRows_: function (table) {
+      if (table === 'Attempts') return [{ attemptId: 'ATT-1', assessmentId: 'ASM-1', status: status }];
+      if (table === 'Questions') return [
+        { questionId: 'Q-1', assessmentId: 'ASM-1', order: 1, points: 2 },
+        { questionId: 'Q-2', assessmentId: 'ASM-1', order: 2, points: 3 }
+      ];
+      return [];
+    },
+    getSheet_: function () { return {
+      getDataRange: function () { return { getValues: function () {
+        return [
+          ['attemptId', 'score', 'maxScore', 'status', 'teacherFeedback', 'questionScoresJson'],
+          ['ATT-1', 0, 5, status, '', '']
+        ];
+      } }; },
+      getRange: function (row, col) { return { setValue: function (value) {
+        ctx.writes.push({ row: row, col: col, value: value });
+      } }; }
+    }; }
+  };
+  vm.createContext(ctx);
+  vm.runInContext(gradingSource, ctx);
+  return ctx;
+}
+const gradeContext = makeGradeContext('needs_review');
+const gradeResult = gradeContext.gradeAttempt_({
+  attemptId: 'ATT-1', questionScores: { 'Q-1': 1, 'Q-2': 2 }, feedback: 'Baik'
+});
+assert.equal(gradeResult.score, 3, 'Server must calculate total score from individual question scores');
+assert.equal(gradeResult.maxScore, 5, 'Server must calculate maximum score from assessment questions');
+assert.equal(gradeResult.status, 'graded', 'Submitted attempt must transition to graded');
+assert.equal(gradeContext.writes.find(x => x.col === 2).value, 3, 'Persisted score must use server calculation');
+assert.equal(gradeContext.writes.find(x => x.col === 3).value, 5, 'Persisted maximum must use assessment questions');
+assert.equal(JSON.parse(gradeContext.writes.find(x => x.col === 6).value)['Q-2'], 2,
+  'Only validated per-question scores must be persisted');
+assert.equal(gradeContext.released, true, 'Grading lock must always be released');
+
+const zeroGradeContext = makeGradeContext('needs_review');
+const zeroGrade = zeroGradeContext.gradeAttempt_({
+  attemptId: 'ATT-1', questionScores: { 'Q-1': 0, 'Q-2': 0 }
+});
+assert.equal(zeroGrade.score, 0, 'An explicitly entered zero score must remain valid');
+
+const alreadyGradedContext = makeGradeContext('graded');
+assert.equal(alreadyGradedContext.gradeAttempt_({
+  attemptId: 'ATT-1', questionScores: { 'Q-1': 2, 'Q-2': 3 }
+}).score, 5, 'An already graded attempt may be corrected by its authorized teacher');
+
+const inProgressContext = makeGradeContext('in_progress');
+assert.throws(function () {
+  inProgressContext.gradeAttempt_({ attemptId: 'ATT-1', questionScores: { 'Q-1': 1, 'Q-2': 2 } });
+}, /masih berlangsung atau belum dikirim/,
+'An in-progress attempt must not be manually graded');
+assert.equal(inProgressContext.writes.length, 0, 'Rejected in-progress grading must not write scores');
+assert.equal(inProgressContext.released, true, 'Lock must be released after a rejected grading attempt');
+
+const missingScoresContext = makeGradeContext('needs_review');
+assert.throws(function () {
+  missingScoresContext.gradeAttempt_({ attemptId: 'ATT-1', score: 5, maxScore: 5 });
+}, /Skor setiap soal wajib diisi/,
+'Client-supplied total score must not be accepted without per-question scores');
+assert.equal(missingScoresContext.writes.length, 0, 'Missing per-question scores must not write a grade');
+
+const blankScoreContext = makeGradeContext('needs_review');
+assert.throws(function () {
+  blankScoreContext.gradeAttempt_({ attemptId: 'ATT-1', questionScores: { 'Q-1': '', 'Q-2': 2 } });
+}, /tidak valid/,
+'Blank score must not be silently converted to zero');
+assert.equal(blankScoreContext.writes.length, 0, 'Blank per-question score must not write a grade');
+
+const extraScoreContext = makeGradeContext('needs_review');
+assert.throws(function () {
+  extraScoreContext.gradeAttempt_({ attemptId: 'ATT-1', questionScores: { 'Q-1': 1, 'Q-2': 2, 'Q-EXTRA': 1 } });
+}, /tepat untuk seluruh soal/,
+'Extra question score keys must be rejected');
+assert.equal(extraScoreContext.writes.length, 0, 'Extra question score keys must not write a grade');
+
 console.log('PASS: learning repository static guard tests');
