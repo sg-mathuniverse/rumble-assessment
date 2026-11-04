@@ -545,6 +545,7 @@ function saveQuestionBundle_(payload) {
   const now=currentTimestamp_();
   const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),learningObjectiveId:String(payload.learningObjectiveId||'').trim(),learningIndicatorId:String(payload.learningIndicatorId||'').trim(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
   validateBundleLearningReference_(snapshot);
+  snapshotBundleLearningReferences_(snapshot);
   validateBundleSnapshot_(snapshot);
   const snapshotJson=JSON.stringify(snapshot);
   let latest=null;
@@ -766,7 +767,7 @@ function createAssessment_(payload) {
     appendRow_('Assessments',{assessmentId:assessmentId,title:title,subject:String(sourceVersion?sourceVersion.snapshot.subject:(payload.subject||'')),className:String(payload.className||''),duration:Math.max(1,Math.min(300,Number(payload.duration)||60)),startAt:String(payload.startAt||''),endAt:String(payload.endAt||''),passageText:String(sourceVersion?sourceVersion.snapshot.passageText:(payload.passageText||'')),passageImageUrl:String(sourceVersion?sourceVersion.snapshot.passageImageUrl:(payload.passageImageUrl||'')),status:'draft',createdBy:String(payload.createdBy||''),createdAt:timestamp,updatedAt:timestamp,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification,archivedAt:'',archivedBy:''});
     questions.forEach(function(question,index){
       const type=String(question.type||'multiple_choice'),points=Number(question.points);
-      appendRow_('Questions',{questionId:makeId_('Q'),assessmentId:assessmentId,order:index+1,type:type,text:String(question.text||''),points:points,optionsJson:JSON.stringify(question.options||[]),answerJson:JSON.stringify(classification==='SOLO_TAX'?{__soloTaxMeta:{soloLevel:String(question.soloLevel||''),learningIndicatorIds:question.learningIndicatorIds||[],answerGuide:String(question.answerGuide||'')}}:(question.answer===undefined?null:question.answer)),rubric:String(question.rubric||''),pairsJson:JSON.stringify(question.pairs||''),imageUrl:String(question.imageUrl||''),optionImagesJson:JSON.stringify(question.optionImages||[]),subquestionsJson:JSON.stringify(question.subquestions||[]),subquestionImagesJson:JSON.stringify(question.subquestionImages||[]),rubricLevelsJson:JSON.stringify(question.rubricLevels||[]),passageText:String(question.passageText||''),passageImageUrl:String(question.passageImageUrl||''),sourceBundleVersionId:sourceVersion?sourceVersion.versionId:'',sourceQuestionKey:sourceVersion?String(question.questionId||question.id||('Q-'+(index+1))):''});
+      appendRow_('Questions',{questionId:makeId_('Q'),assessmentId:assessmentId,order:index+1,type:type,text:String(question.text||''),points:points,optionsJson:JSON.stringify(question.options||[]),answerJson:JSON.stringify(classification==='SOLO_TAX'?{__soloTaxMeta:{soloLevel:String(question.soloLevel||''),learningIndicatorIds:question.learningIndicatorIds||[],learningIndicators:question.learningIndicators||[],answerGuide:String(question.answerGuide||''),learningObjectiveSnapshot:sourceVersion&&sourceVersion.snapshot.learningObjectiveSnapshot?sourceVersion.snapshot.learningObjectiveSnapshot:null}}:(question.answer===undefined?null:question.answer)),rubric:String(question.rubric||''),pairsJson:JSON.stringify(question.pairs||''),imageUrl:String(question.imageUrl||''),optionImagesJson:JSON.stringify(question.optionImages||[]),subquestionsJson:JSON.stringify(question.subquestions||[]),subquestionImagesJson:JSON.stringify(question.subquestionImages||[]),rubricLevelsJson:JSON.stringify(question.rubricLevels||[]),passageText:String(question.passageText||''),passageImageUrl:String(question.passageImageUrl||''),sourceBundleVersionId:sourceVersion?sourceVersion.versionId:'',sourceQuestionKey:sourceVersion?String(question.questionId||question.id||('Q-'+(index+1))):''});
     });
     return {id:assessmentId,title:title,status:'draft',questionCount:questions.length,bundleId:sourceBundleId,bundleVersionId:sourceVersion?sourceVersion.versionId:'',bundleVersionNumber:sourceVersion?sourceVersion.versionNumber:'',classification:classification};
   }finally{lock.releaseLock();}
@@ -1550,15 +1551,15 @@ function listAttempts_(payload) {
         assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
         soloIndicators: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
           ? (function () {
-              const indicatorRows = listRows_('LearningIndicators');
               const mapped = {};
               details.forEach(function (question) {
                 const meta = question.soloMeta || {};
-                (Array.isArray(meta.learningIndicatorIds) ? meta.learningIndicatorIds : []).forEach(function (indicatorId) {
-                  const id = String(indicatorId || '');
+                const snapshots = Array.isArray(meta.learningIndicators) ? meta.learningIndicators : [];
+                const indicators = snapshots.length ? snapshots : (Array.isArray(meta.learningIndicatorIds) ? meta.learningIndicatorIds.map(function(id){return {indicatorId:id};}) : []);
+                indicators.forEach(function (indicator) {
+                  const id = String(indicator.indicatorId || '');
                   if (!id) return;
                   if (!mapped[id]) {
-                    const indicator = indicatorRows.find(function (item) { return String(item.indicatorId) === id; }) || {};
                     mapped[id] = {
                       indicatorId: id,
                       indicatorCode: String(indicator.indicatorCode || id),
@@ -1743,9 +1744,12 @@ function saveSoloIndicatorVerification_(payload) {
     const mapped = {};
     questions.forEach(function (question) {
       const meta = parseJson_(question.answerJson, {}) || {};
-      const ids = meta.__soloTaxMeta && Array.isArray(meta.__soloTaxMeta.learningIndicatorIds) ? meta.__soloTaxMeta.learningIndicatorIds : [];
-      ids.forEach(function (id) {
-        const key = String(id || '');
+      const solo = meta.__soloTaxMeta || {};
+      const indicators = Array.isArray(solo.learningIndicators) && solo.learningIndicators.length
+        ? solo.learningIndicators
+        : (Array.isArray(solo.learningIndicatorIds) ? solo.learningIndicatorIds.map(function(id){return {indicatorId:id};}) : []);
+      indicators.forEach(function (indicator) {
+        const key = String(indicator.indicatorId || '');
         if (!key) return;
         if (!mapped[key]) mapped[key] = [];
         mapped[key].push(String(question.questionId));
@@ -2359,6 +2363,41 @@ function updateRowByKey_(tableName, keyHeader, keyValue, fields) {
 function bundleSnapshotFromRecord_(bundle,classification){
   return {schemaVersion:1,bundleId:String(bundle.bundleId),classification:String(classification||'REGULER').toUpperCase(),title:String(bundle.title||''),subject:String(bundle.subject||''),description:String(bundle.description||''),tpCode:String(bundle.tpCode||''),learningObjectiveId:String(bundle.learningObjectiveId||''),learningIndicatorId:String(bundle.learningIndicatorId||''),passageText:String(bundle.passageText||''),passageImageUrl:String(bundle.passageImageUrl||''),passages:parseJson_(bundle.passagesJson,[]),questions:parseJson_(bundle.questionsJson,[])};
 }
+
+function snapshotBundleLearningReferences_(snapshot) {
+  if (String(snapshot.classification || '').toUpperCase() !== 'SOLO_TAX') return snapshot;
+  const objectiveId = String(snapshot.learningObjectiveId || '');
+  const objective = listRows_('LearningObjectives').find(function (item) {
+    return String(item.objectiveId) === objectiveId;
+  });
+  if (!objective) throw new Error('Snapshot SOLO Tax tidak dapat menyimpan tujuan pembelajaran yang dipilih.');
+  snapshot.learningObjectiveSnapshot = {
+    objectiveId: String(objective.objectiveId || ''),
+    tpCode: String(objective.tpCode || snapshot.tpCode || ''),
+    title: String(objective.title || ''),
+    subject: String(objective.subject || snapshot.subject || ''),
+    description: String(objective.description || '')
+  };
+  const indicators = listRows_('LearningIndicators');
+  snapshot.questions = (snapshot.questions || []).map(function (question) {
+    const copy = Object.assign({}, question);
+    copy.learningIndicators = (Array.isArray(question.learningIndicatorIds) ? question.learningIndicatorIds : []).map(function (id) {
+      const row = indicators.find(function (item) {
+        return String(item.indicatorId) === String(id) && String(item.objectiveId) === objectiveId;
+      });
+      if (!row) throw new Error('Indikator TP tidak dapat disimpan pada snapshot bundel.');
+      return {
+        indicatorId: String(row.indicatorId || ''),
+        objectiveId: String(row.objectiveId || ''),
+        indicatorCode: String(row.indicatorCode || ''),
+        description: String(row.description || '')
+      };
+    });
+    return copy;
+  });
+  return snapshot;
+}
+
 function validateBundleLearningReference_(snapshot){
   const objectiveId=String(snapshot.learningObjectiveId||'').trim(),legacyId=String(snapshot.learningIndicatorId||'').trim(),ids=[];
   (snapshot.questions||[]).forEach(function(q){(Array.isArray(q.learningIndicatorIds)?q.learningIndicatorIds:[]).forEach(function(id){ids.push(String(id||'').trim());});});
