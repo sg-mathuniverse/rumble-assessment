@@ -1280,7 +1280,7 @@ function saveAttempt_(payload) {
     if (rowNumber < 0) throw new Error('Sesi pengerjaan tidak ditemukan atau bukan milik akun ini.');
     const col = function (name) { const index = headers.indexOf(name); if (index < 0) throw new Error('Kolom '+name+' tidak ditemukan.'); return index; };
     if (String(row[col('status')]) !== 'in_progress') throw new Error('Sesi ini sudah dikirim dan tidak dapat diubah.');
-    const started = new Date(row[col('startedAt')]).getTime(), durationMs = Number(assessment.duration) * 60000;
+    const started = new Date(row[col('startedAt')]).getTime(), durationMs = Number(currentAssessment.duration) * 60000;
     if (!isFinite(started) || !isFinite(durationMs) || durationMs <= 0 || Date.now() > started + durationMs + 30000) throw new Error('Waktu pengerjaan sudah habis.');
     const incomingAnswers = payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers) ? payload.answers : {};
     const questions = listRows_('Questions').filter(function (question) { return String(question.assessmentId) === assessmentId; });
