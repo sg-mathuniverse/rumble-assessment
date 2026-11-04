@@ -991,4 +991,19 @@ assert.ok(submitSource.includes('if (allowedQuestionIds[questionId]) answers[que
 assert.ok(submitSource.includes("if (!questions.length) throw new Error('Asesmen tidak memiliki soal.')"),
   'Submission must reject assessments without questions');
 
+
+const saveAttemptSource = extractFunction('saveAttempt_', source);
+assert.ok(saveAttemptSource.indexOf("const currentAssessment = listRows_('Assessments')") > saveAttemptSource.indexOf('lock.waitLock'),
+  'Draft save must reload assessment state after acquiring the lock');
+assert.ok(saveAttemptSource.includes('const allowed = {}') &&
+  saveAttemptSource.includes('if (allowed[questionId]) filteredAnswers[questionId] = incomingAnswers[questionId]'),
+  'Draft save must discard answers for questions outside the assessment');
+assert.ok(saveAttemptSource.includes("if (!questions.length) throw new Error('Asesmen tidak memiliki soal.')"),
+  'Draft save must reject an assessment with no questions');
+const submitAttemptSource = extractFunction('submitAttempt_', source);
+assert.ok(submitAttemptSource.includes('assertStudentAssessmentIdentity_(assessment, user)'),
+  'Initial submission access check must use the assessment loaded before the lock');
+assert.ok(submitAttemptSource.indexOf("const currentAssessment = listRows_('Assessments')") > submitAttemptSource.indexOf('lock.waitLock'),
+  'Submission must reload assessment state after acquiring the lock');
+
 console.log('PASS: learning repository static guard tests');
