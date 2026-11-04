@@ -199,6 +199,7 @@ assert.match(source, /AI_SOLO_SCORING_RECOMMENDATION/, 'AI scoring recommendatio
 assert.match(source, /AI_SOLO_SCORING_FAILED/, 'Failed AI scoring requests must be logged');
 assert.match(source, /recommendedScore: 0/, 'An entirely blank SOLO response must be assigned zero without relying on AI');
 assert.match(source, /manualPhotoReviewRequired: true/, 'Photo-only answers must be reserved for manual teacher review');
+assert.match(bodyOf('requestSoloAiAssessment_'), /if \(!deterministic\.length\) \{\s*const dominant = parsed\.dominantLevel;/, 'Dominant-level recommendation must be withheld when any question requires deterministic or manual review');
 assert.match(html, /function soloAiPanel\(/, 'Teacher reports must display AI scoring recommendations and evidence');
 assert.match(html, /requestSoloAiAssessment\(/, 'Teacher UI must provide an explicit action to request AI scoring');
 
