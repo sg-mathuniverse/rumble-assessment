@@ -221,7 +221,17 @@ function routeAction_(action, payload) {
       if (user.role === 'student') {
         trusted.studentId = String(user.userId || '');
         delete trusted.assessmentId;
-        return listAttempts_(trusted);
+        return listAttempts_(trusted).filter(function (attempt) {
+          const assessment = listRows_('Assessments').find(function (item) {
+            return String(item.assessmentId) === String(attempt.assessmentId);
+          });
+          if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') return true;
+          // SOLO Tax result is visible to the student only after an explicit release event.
+          return listRows_('Events').some(function (event) {
+            return String(event.attemptId) === String(attempt.attemptId) &&
+              String(event.eventType) === 'SOLO_RESULT_RELEASED';
+          });
+        });
       }
       return listAttempts_(trusted).filter(function (attempt) {
         const assessment = listRows_('Assessments').find(function (item) {
