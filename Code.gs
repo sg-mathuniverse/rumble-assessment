@@ -520,6 +520,8 @@ function saveQuestionBundle_(payload) {
   const questions = Array.isArray(payload.questions) ? payload.questions : [];
   if (!questions.length || questions.length > 200) throw new Error('Jumlah soal bundel harus antara 1 dan 200.');
   const bundleId = String(payload.bundleId || payload.id || makeId_('BND'));
+  const lock=LockService.getScriptLock();lock.waitLock(10000);
+  try {
   const sheet = getSheet_('QuestionBundles'), values = sheet.getDataRange().getValues(), headers = values[0].map(String);
   const idCol = headers.indexOf('bundleId');
   let rowNumber = -1, existing = null;
@@ -543,14 +545,12 @@ function saveQuestionBundle_(payload) {
     const prior=listRows_('BundleVersions').find(function(v){return String(v.versionId)===String(existing.latestVersionId);});
     if(prior && String(prior.snapshotJson)===snapshotJson) latest={versionId:prior.versionId,versionNumber:Number(prior.versionNumber)};
   }
-  const lock=LockService.getScriptLock();lock.waitLock(10000);
-  try{
     if(!latest)latest=createBundleVersion_(bundleId,snapshot,String(payload.changeNote||(existing?'Perubahan isi bundel':'Versi awal')),String(payload.createdBy||(existing&&existing.createdBy)||''));
     const record={bundleId:bundleId,title:title,subject:snapshot.subject,description:snapshot.description,tpCode:snapshot.tpCode,passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passagesJson:JSON.stringify(snapshot.passages),questionsJson:JSON.stringify(questions),status:'ready',classification:classification,latestVersionId:String(latest.versionId),latestVersionNumber:Number(latest.versionNumber),visibility:String(payload.visibility||(existing&&existing.visibility)||'shared')==='private'?'private':'shared',createdBy:String(payload.createdBy||(existing&&existing.createdBy)||''),createdAt:existing?String(existing.createdAt||now):now,updatedAt:now,archivedAt:'',archivedBy:''};
     if(rowNumber>0)headers.forEach(function(h,col){if(Object.prototype.hasOwnProperty.call(record,h))sheet.getRange(rowNumber,col+1).setValue(record[h]);});
     else appendRow_('QuestionBundles',record);
     return {bundleId:bundleId,title:title,questionCount:questions.length,status:'ready',classification:classification,versionId:String(latest.versionId),versionNumber:Number(latest.versionNumber)};
-  }finally{lock.releaseLock();}
+  } finally { lock.releaseLock(); }
 }
 function soloTaxLevelPoints_(level){
   const key=String(level||'').trim().toUpperCase().replace(/[ -]+/g,'_');
