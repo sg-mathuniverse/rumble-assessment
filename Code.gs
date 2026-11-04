@@ -2395,8 +2395,12 @@ function saveSoloDominantVerification_(payload) {
     }
     const reviewDetails = parseJson_(latestIndicatorReview.detailsJson, {});
     const results = Array.isArray(reviewDetails.results) ? reviewDetails.results : [];
-    if (!results.length || results.some(function (item) { return !item.evidence || !item.status; })) {
-      throw new Error('Bukti verifikasi indikator belum lengkap.');
+    if (!results.length || results.some(function (item) {
+      const percentage = Number(item && item.percentage);
+      const evidence = String(item && item.evidence || '').trim();
+      return !item || !item.indicatorId || !isFinite(percentage) || percentage < 0 || percentage > 100 || !evidence || evidence.length > 3000 || item.category !== soloAchievementCategory_(percentage);
+    })) {
+      throw new Error('Bukti dan persentase verifikasi indikator belum lengkap atau tidak valid.');
     }
     const questionIds = {};
     listRows_('Questions').filter(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); }).forEach(function (item) {
