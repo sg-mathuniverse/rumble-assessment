@@ -680,6 +680,8 @@ async function loadBundleLearningReferences(selectedObjectiveId,selectedIndicato
   if(!r||!r.ok)throw Error(r&&r.error?r.error:'Referensi TP belum tersedia');
   s.bundleLearningObjectives=Array.isArray(r.data)?r.data:[];
   const objectiveId=selectedObjectiveId||'';
+  const selectedObjective=s.bundleLearningObjectives.find(function(item){return String(item.objectiveId)===String(objectiveId)});
+  if(selectedObjective&&!String(s.meta.tpCode||'').trim())s.meta.tpCode=selectedObjective.tpCode||'';
   if(objectiveId){
    const ir=await api('listAvailableLearningIndicators',{objectiveId});
    if(!ir||!ir.ok)throw Error(ir&&ir.error?ir.error:'Indikator belum tersedia');
@@ -691,6 +693,8 @@ async function loadBundleLearningReferences(selectedObjectiveId,selectedIndicato
 }
 async function changeBundleLearningObjective(objectiveId){
  s.meta.learningObjectiveId=objectiveId;s.meta.learningIndicatorId='';s.bundleLearningIndicators=[];
+ const selectedObjective=(s.bundleLearningObjectives||[]).find(function(item){return String(item.objectiveId)===String(objectiveId)});
+ if(selectedObjective&&selectedObjective.tpCode)s.meta.tpCode=selectedObjective.tpCode;
  if(objectiveId){
   try{const r=await api('listAvailableLearningIndicators',{objectiveId});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Indikator belum tersedia');s.bundleLearningIndicators=Array.isArray(r.data)?r.data:[]}
   catch(e){s.bundleLearningReferencesError=e.message||String(e)}
