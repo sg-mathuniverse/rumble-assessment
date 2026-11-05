@@ -170,7 +170,7 @@ function routeAction_(action, payload) {
     createdBy: user.email
   });
   const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningClassOptions','adminListLearningSubjectOptions','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit','adminGetAiSettings','adminSaveAiSettings','adminTestAiConnection','adminListAiModels','adminListAiUsage','adminListAiPrompts','adminSaveAiPrompt','adminTestAiPrompt','adminActivateAiPrompt'];
-  if (['listAvailableLearningObjectives','listAvailableLearningIndicators'].indexOf(action) >= 0 && user.role !== 'admin' && user.role !== 'teacher') {
+  if (['listAvailableLearningObjectives','listAvailableLearningIndicators','listAvailableLearningClassOptions','listAvailableLearningSubjectOptions'].indexOf(action) >= 0 && user.role !== 'admin' && user.role !== 'teacher') {
     throw new Error('Repositori pembelajaran hanya dapat diakses oleh Admin dan Guru.');
   }
   if (adminOnly.indexOf(action) >= 0 && user.role !== 'admin') {
@@ -310,6 +310,8 @@ function routeAction_(action, payload) {
     adminSaveLearningIndicator: function () { return adminSaveLearningIndicator_(trusted); },
     adminSetLearningIndicatorActive: function () { return adminSetLearningIndicatorActive_(trusted); },
     listAvailableLearningObjectives: function () { return listAvailableLearningObjectives_(); },
+    listAvailableLearningClassOptions: function () { return adminListLearningClassOptions_(); },
+    listAvailableLearningSubjectOptions: function () { return adminListLearningSubjectOptions_(); },
     listAvailableLearningIndicators: function () { return listAvailableLearningIndicators_(trusted); },
     listStudents: function () {
       return listRows_('Users').filter(function (item) {
