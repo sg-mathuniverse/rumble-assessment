@@ -176,7 +176,7 @@ function routeAction_(action, payload) {
     throw new Error('Fitur ini hanya dapat digunakan oleh administrator sekolah.');
   }
   const teacherOnly = [
-    'createAssessment','deleteAssessment','requestSoloAiAssessment','saveSoloDominantVerification','saveQuestionBundle','saveQuestionBundleDraft','listQuestionBundleDrafts','getQuestionBundleDraft','deleteQuestionBundleDraft','listQuestionBundles',
+    'createAssessment','deleteAssessment','requestSoloAiAssessment','requestSoloClassReflection','saveSoloDominantVerification','saveQuestionBundle','saveQuestionBundleDraft','listQuestionBundleDrafts','getQuestionBundleDraft','deleteQuestionBundleDraft','listQuestionBundles',
     'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
     'publishAssessment','gradeAttempt','saveSoloIndicatorVerification','listStudents','listMonitoring','getTeacherSummary'
   ];
@@ -243,6 +243,11 @@ function routeAction_(action, payload) {
         return assessment && assessment.createdBy &&
           String(assessment.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
       });
+    },
+    requestSoloClassReflection: function () {
+      const assessmentId = requiredText_(trusted.assessmentId, 'ID asesmen', 100);
+      assertAssessmentOwner_(assessmentId, user);
+      return requestSoloClassReflection_(trusted);
     },
     requestSoloAiAssessment: function () {
       const attemptId = requiredText_(trusted.attemptId, 'ID pengerjaan', 100);
@@ -1602,6 +1607,16 @@ function listAttempts_(payload) {
         questionScores: assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && !canViewInternal ? {} : parseJson_(attempt.questionScoresJson, {}),
         questionDetails: details,
         assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
+        soloClassReflection: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
+          ? (function () {
+              const reflections = listRows_('Events').filter(function (event) {
+                if (String(event.eventType) !== 'AI_SOLO_CLASS_REFLECTION') return false;
+                const detail = parseJson_(event.detailsJson, {});
+                return String(detail.assessmentId || '') === String(assessment.assessmentId);
+              }).sort(function (a,b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+              return reflections.length ? parseJson_(reflections[reflections.length-1].detailsJson,{}) : null;
+            })()
+          : undefined,
         soloIndicators: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
           ? (function () {
               const mapped = {};
@@ -2419,6 +2434,152 @@ function adminListAiUsage_() {
       error: String(details.error || '')
     };
   });
+}
+
+function requestSoloClassReflection_(payload) {
+  const assessmentId = requiredText_(payload.assessmentId, 'ID asesmen', 100);
+  const settings = aiSettings_();
+  if (!settings.reflectionEnabled) throw new Error('AI Refleksi belum diaktifkan oleh Admin.');
+  const prompt = aiPrompts_().filter(function (item) {
+    return item.service === 'REFLECTION' && item.active === true;
+  }).sort(function (a, b) { return Number(b.version) - Number(a.version); })[0];
+  if (!prompt) throw new Error('Belum ada prompt AI Refleksi aktif.');
+  const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === assessmentId; });
+  if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') {
+    throw new Error('Refleksi AI hanya tersedia untuk asesmen SOLO Tax.');
+  }
+  const questions = listRows_('Questions').filter(function (item) {
+    return String(item.assessmentId) === assessmentId;
+  }).sort(function (a, b) { return Number(a.order) - Number(b.order); });
+  const attempts = listRows_('Attempts').filter(function (item) {
+    return String(item.assessmentId) === assessmentId && String(item.status || '').toLowerCase() === 'graded';
+  });
+  if (!attempts.length) throw new Error('Belum ada hasil akhir yang dinilai. Refleksi dapat dibuat setelah penilaian murid selesai.');
+  const events = listRows_('Events').filter(function (event) {
+    return String(event.eventType || '') === 'SOLO_INDICATOR_VERIFICATION' &&
+      attempts.some(function (attempt) { return String(attempt.attemptId) === String(event.attemptId); });
+  });
+  const latestReviewByAttempt = {};
+  events.forEach(function (event) {
+    const id = String(event.attemptId);
+    if (!latestReviewByAttempt[id] || String(event.eventAt) > String(latestReviewByAttempt[id].eventAt)) latestReviewByAttempt[id] = event;
+  });
+  const levelNames = {
+    PRESTRUCTURAL:'Prestructural', UNISTRUKTURAL:'Unistructural',
+    MULTISTRUKTURAL:'Multistructural', RELATIONAL:'Relational',
+    EXTENDED_ABSTRACT:'Extended Abstract'
+  };
+  const levelCounts = {PRESTRUCTURAL:0,UNISTRUKTURAL:0,MULTISTRUKTURAL:0,RELATIONAL:0,EXTENDED_ABSTRACT:0};
+  const verifiedLevelCounts = {PRESTRUCTURAL:0,UNISTRUKTURAL:0,MULTISTRUKTURAL:0,RELATIONAL:0,EXTENDED_ABSTRACT:0};
+  let scorePercentTotal = 0, scorePercentCount = 0, verifiedLevelCount = 0;
+  const indicatorTotals = {};
+  attempts.forEach(function (attempt) {
+    const max = Number(attempt.maxScore), score = Number(attempt.score);
+    if (isFinite(max) && max > 0 && isFinite(score)) { scorePercentTotal += score / max * 100; scorePercentCount++; }
+    const review = latestReviewByAttempt[String(attempt.attemptId)];
+    if (!review) return;
+    const detail = parseJson_(review.detailsJson, {});
+    (Array.isArray(detail.results) ? detail.results : []).forEach(function (item) {
+      const id = String(item.indicatorId || '');
+      if (!id) return;
+      if (!indicatorTotals[id]) indicatorTotals[id] = {sum:0,count:0};
+      const pct = Number(item.percentage);
+      if (isFinite(pct) && pct >= 0 && pct <= 100) { indicatorTotals[id].sum += pct; indicatorTotals[id].count++; }
+    });
+    const dominantEvents = listRows_('Events').filter(function (event) {
+      return String(event.attemptId) === String(attempt.attemptId) &&
+        String(event.eventType) === 'SOLO_DOMINANT_LEVEL_VERIFICATION';
+    }).sort(function (a,b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+    const dominant = dominantEvents.length ? parseJson_(dominantEvents[dominantEvents.length-1].detailsJson,{}) : null;
+    const level = dominant && String(dominant.teacherLevel || '').toUpperCase().replace(/[ -]+/g,'_');
+    if (level && Object.prototype.hasOwnProperty.call(verifiedLevelCounts,level)) {
+      verifiedLevelCounts[level]++; verifiedLevelCount++;
+    }
+  });
+  const indicatorRows = listRows_('LearningIndicators');
+  const indicatorSummary = Object.keys(indicatorTotals).map(function (id) {
+    const item = indicatorTotals[id], ref = indicatorRows.find(function (row) { return String(row.indicatorId) === id; });
+    return {indicatorId:id,code:ref?String(ref.indicatorCode||id):id,description:ref?String(ref.description||''):'',averagePercent:Math.round(item.sum/item.count*100)/100,verifiedStudents:item.count};
+  });
+  const questionSummary = questions.map(function (question) {
+    const meta = parseJson_(question.answerJson,{}) || {}, solo = meta.__soloTaxMeta || {};
+    const level = String(solo.soloLevel || '').toUpperCase().replace(/[ -]+/g,'_');
+    const scores = attempts.map(function (attempt) {
+      const values = parseJson_(attempt.questionScoresJson,{});
+      const value = Number(values[String(question.questionId)]);
+      return isFinite(value) && Number(question.points)>0 ? value/Number(question.points)*100 : null;
+    }).filter(function (value) { return value !== null; });
+    const avg = scores.length ? scores.reduce(function (sum,value) { return sum+value; },0)/scores.length : null;
+    const low = scores.filter(function (value) { return value < 50; }).length;
+    const high = scores.filter(function (value) { return value >= 80; }).length;
+    return {
+      order:Number(question.order),level:level,levelLabel:levelNames[level]||String(solo.soloLevel||''),
+      question:String(question.text||'').slice(0,1200),
+      indicators:(Array.isArray(solo.learningIndicators)?solo.learningIndicators:[]).map(function (x) { return {code:String(x.indicatorCode||''),description:String(x.description||'')}; }),
+      averageScorePercent:avg===null?null:Math.round(avg*100)/100,
+      below50Percent:scores.length?Math.round(low/scores.length*10000)/100:null,
+      atLeast80Percent:scores.length?Math.round(high/scores.length*10000)/100:null,
+      scoredResponses:scores.length
+    };
+  });
+  const levelDistribution = {};
+  Object.keys(levelCounts).forEach(function (key) { levelDistribution[key] = verifiedLevelCounts[key]; });
+  const typeGroups = {
+    conceptUnderstanding:questionSummary.filter(function (q) { return q.level==='MULTISTRUKTURAL'; }),
+    connectingConcepts:questionSummary.filter(function (q) { return q.level==='RELATIONAL'; }),
+    applyingToNewSituations:questionSummary.filter(function (q) { return q.level==='EXTENDED_ABSTRACT'; })
+  };
+  function meanQuestionScore(items) {
+    const vals=items.map(function (item) { return item.averageScorePercent; }).filter(function (v) { return v!==null; });
+    return vals.length?Math.round(vals.reduce(function (sum,v) { return sum+v; },0)/vals.length*100)/100:null;
+  }
+  const data = {
+    assessmentTitle:String(assessment.title||''),subject:String(assessment.subject||''),className:String(assessment.className||''),
+    participants:attempts.length,overallAveragePercent:scorePercentCount?Math.round(scorePercentTotal/scorePercentCount*100)/100:null,
+    tpAchievement:indicatorSummary.length?Math.round(indicatorSummary.reduce(function (sum,item) { return sum+item.averagePercent; },0)/indicatorSummary.length*100)/100:null,
+    verifiedIndicatorCount:indicatorSummary.length,indicatorSummary:indicatorSummary,
+    verifiedDominantLevelCount:verifiedLevelCount,dominantLevelDistribution:levelDistribution,
+    unverifiedDominantLevelCount:attempts.length-verifiedLevelCount,
+    questionTypeAchievement:{
+      conceptUnderstanding:{questionCount:typeGroups.conceptUnderstanding.length,averagePercent:meanQuestionScore(typeGroups.conceptUnderstanding)},
+      connectingConcepts:{questionCount:typeGroups.connectingConcepts.length,averagePercent:meanQuestionScore(typeGroups.connectingConcepts)},
+      applyingToNewSituations:{questionCount:typeGroups.applyingToNewSituations.length,averagePercent:meanQuestionScore(typeGroups.applyingToNewSituations)}
+    },
+    questionAnalysis:questionSummary
+  };
+  const systemPrompt = prompt.content + '\n\nATURAN WAJIB: Gunakan hanya data agregat berikut. Jangan menebak kesalahan spesifik yang tidak dapat dibuktikan oleh distribusi skor; nyatakan keterbatasan jika jawaban rinci tidak dianalisis. Jangan mengarang persentase. Bahas: (1) persentase ketercapaian TP kelas, (2) capaian Multistruktural untuk pemahaman konsep, Relational untuk menghubungkan konsep, Extended Abstract untuk penerapan pada situasi baru, (3) analisis butir, pola skor rendah/tinggi, dan kualitas soal dengan catatan keterbatasan bukti, (4) refleksi pembelajaran, (5) rekomendasi tindak lanjut bagi guru. Bedakan level SOLO yang sudah diverifikasi guru dari yang belum diverifikasi. Kembalikan JSON valid saja dengan bentuk {"tpAchievement":"...","abilityAnalysis":"...","errorAndItemQuality":"...","learningReflection":"...","teacherRecommendations":["..."],"limitations":"..."}; setiap bagian berupa teks Bahasa Indonesia.';
+  const started = new Date().getTime();
+  try {
+    const response = tokenPortalChatCompletion_([
+      {role:'system',content:systemPrompt},
+      {role:'user',content:'Buat refleksi pembelajaran kelas berdasarkan rekap hasil akhir SOLO Tax berikut. Data anonim dan agregat: '+JSON.stringify(data)}
+    ], settings.model, settings.maxOutputTokens);
+    let parsed;
+    try {
+      const clean=response.content.replace(/^\s*```(?:json)?/i,'').replace(/```\s*$/,'').trim();
+      parsed=JSON.parse(clean);
+    } catch (error) { throw new Error('AI Refleksi tidak mengembalikan JSON valid. Periksa prompt REFLECTION aktif.'); }
+    const required=['tpAchievement','abilityAnalysis','errorAndItemQuality','learningReflection','limitations'];
+    required.forEach(function (key) { if (typeof parsed[key] !== 'string' || !parsed[key].trim()) throw new Error('Bagian refleksi AI belum lengkap: '+key+'.'); });
+    if (!Array.isArray(parsed.teacherRecommendations) || !parsed.teacherRecommendations.length) throw new Error('Rekomendasi tindak lanjut guru belum tersedia.');
+    const result = {
+      assessmentId:assessmentId,assessmentTitle:String(assessment.title||''),generatedAt:currentTimestamp_(),
+      generatedBy:String(payload.currentUser&&payload.currentUser.email||''),promptId:prompt.promptId,promptVersion:Number(prompt.version)||0,
+      provider:'TOKENPORTAL',model:response.model,usage:response.usage,statistics:data,
+      reflection:{
+        tpAchievement:parsed.tpAchievement,abilityAnalysis:parsed.abilityAnalysis,
+        errorAndItemQuality:parsed.errorAndItemQuality,learningReflection:parsed.learningReflection,
+        teacherRecommendations:parsed.teacherRecommendations.map(function (x) { return String(x||'').trim(); }).filter(Boolean),
+        limitations:parsed.limitations
+      }
+    };
+    appendRow_('Events',{eventId:makeId_('EVT'),attemptId:'',studentId:'',eventType:'AI_SOLO_CLASS_REFLECTION',eventAt:result.generatedAt,detailsJson:JSON.stringify(result)});
+    logAiUsage_('AI_SOLO_CLASS_REFLECTION_SUCCESS',{provider:'TOKENPORTAL',model:response.model,promptId:prompt.promptId,service:'REFLECTION',status:'success',durationMs:new Date().getTime()-started,usage:response.usage,assessmentId:assessmentId});
+    return result;
+  } catch (error) {
+    logAiUsage_('AI_SOLO_CLASS_REFLECTION_FAILED',{provider:'TOKENPORTAL',model:settings.model,promptId:prompt.promptId,service:'REFLECTION',status:'failed',durationMs:new Date().getTime()-started,error:String(error&&error.message||error).slice(0,500),assessmentId:assessmentId});
+    throw error;
+  }
 }
 
 function saveSoloDominantVerification_(payload) {
