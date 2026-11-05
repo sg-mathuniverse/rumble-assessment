@@ -743,6 +743,19 @@ function progress(){
  const history=!s.attemptsLoaded?'<p class="muted">Memuat riwayat…</p>':!attempts.length?'<p class="muted">Belum ada pengerjaan yang tercatat pada akun ini.</p>':Object.keys(groups).sort().map(subject=>'<section class="subject-history"><h3>'+esc(subject)+'</h3>'+groups[subject].map(a=>{const score=a.status==='graded'&&Number(a.maxScore)>0?String(Math.round(Number(a.score)/Number(a.maxScore)*100)):'—';return '<div class="listitem"><div class="symbol">✓</div><div class="grow"><b>'+esc(a.assessmentTitle||a.assessmentId||'Asesmen')+'</b><small>'+esc(formatLocalDateTime(a.submittedAt))+'</small>'+(a.status==='graded'&&a.teacherFeedback?'<p class="teacher-feedback"><b>Umpan balik guru:</b> '+esc(a.teacherFeedback)+'</p>':'')+'</div><span class="pill '+(a.status==='graded'?'live':'')+'">'+(a.status==='graded'?'Sudah dinilai':'Menunggu koreksi')+'</span><strong>'+score+'</strong></div>'}).join('')+'</section>').join('');
  return head('RUANG SISWA','Perkembangan belajarku','Lihat riwayat pengerjaan dan nilai yang sudah dinilai.')+statsHtml+'<div class="card"><div class="actions"><h3>Riwayat asesmen</h3><button class="btn" onclick="loadAttempts()">Muat ulang</button></div>'+history+'</div>';
 }
+function soloClassReflectionPanel(attempt){
+ const reflection=attempt&&attempt.soloClassReflection;
+ const r=reflection&&reflection.reflection;
+ if(!r)return '<div class="card"><div class="actions"><h3>Refleksi pembelajaran kelas</h3><button class="btn primary" onclick="requestSoloClassReflection(\''+esc(attempt.assessmentId)+'\')">Buat Refleksi AI</button></div><p class="muted">Refleksi dibuat atas permintaan guru setelah hasil akhir murid dinilai. AI menggunakan data agregat dan indikator yang sudah diverifikasi.</p></div>';
+ const recommendations=(r.teacherRecommendations||[]).map(function(x){return '<li>'+esc(x)+'</li>'}).join('');
+ return '<div class="card"><div class="actions"><h3>Refleksi pembelajaran kelas</h3><button class="btn" onclick="requestSoloClassReflection(\''+esc(attempt.assessmentId)+'\')">Buat ulang Refleksi AI</button></div><p class="muted">Dibuat '+esc(formatLocalDateTime(reflection.generatedAt))+' · '+esc(reflection.model||'')+' · '+esc(reflection.promptId||'')+'</p><h4>1. Ketercapaian tujuan pembelajaran</h4><p>'+esc(r.tpAchievement)+'</p><h4>2. Capaian berdasarkan jenis kemampuan</h4><p>'+esc(r.abilityAnalysis)+'</p><h4>3. Analisis kesalahan dan kualitas soal</h4><p>'+esc(r.errorAndItemQuality)+'</p><h4>4. Refleksi pembelajaran</h4><p>'+esc(r.learningReflection)+'</p><h4>5. Rekomendasi tindak lanjut untuk guru</h4><ol>'+recommendations+'</ol><p><b>Keterbatasan analisis:</b> '+esc(r.limitations)+'</p></div>';
+}
+async function requestSoloClassReflection(assessmentId){
+ if(!confirm('Buat refleksi AI menggunakan rekap nilai akhir dan verifikasi indikator kelas? Data yang dikirim berupa statistik agregat tanpa nama atau identitas siswa.'))return;
+ try{const result=await api('requestSoloClassReflection',{assessmentId:assessmentId});if(!result||!result.ok)throw Error(result&&result.error?result.error:'Refleksi AI gagal');toast('Refleksi pembelajaran berhasil dibuat.');await loadAttempts();}
+ catch(error){toast('Gagal membuat Refleksi AI: '+error.message)}
+}
+
 function soloGradebookSummary(attempt){
  const review=attempt.soloReview||{},dominant=review.dominant||{},recommendation=review.recommendation||{};
  const labels={PRESTRUCTURAL:'Prestructural',UNISTRUKTURAL:'Unistructural',MULTISTRUKTURAL:'Multistructural',RELATIONAL:'Relational',EXTENDED_ABSTRACT:'Extended Abstract'};
@@ -777,7 +790,7 @@ function gradebook(){
  const list=group.items,qs=list[0].questionDetails||[];
  const isSoloTax=String((list[0]||{}).assessmentClassification||'').toUpperCase()==='SOLO_TAX';
  const table='<div class="table-scroll"><table class="gradebook-table"><thead><tr><th>Nama murid</th>'+qs.map((q,i)=>'<th>Soal '+(i+1)+'<small>'+Number(q.points||0)+' poin</small></th>').join('')+'<th>Nilai akhir</th>'+(isSoloTax?'<th>Level SOLO Murid</th><th>Keterangan</th>':'')+'</tr></thead><tbody>'+list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),scores=a.questionScores||{},solo= isSoloTax?soloGradebookSummary(a):null;return '<tr><td>'+esc(user?user.name:a.studentId)+'</td>'+qs.map(q=>'<td>'+((a.status==='graded'||a.status==='needs_review')&&scores[q.id]!==undefined?esc(scores[q.id]):'—')+'</td>').join('')+'<td><b>'+(a.status==='graded'&&Number(a.maxScore)>0?Math.round(Number(a.score)/Number(a.maxScore)*100):'—')+'</b></td>'+(isSoloTax?'<td>'+esc(solo.level)+'</td><td>'+esc(solo.note)+'</td>':'')+'</tr>'}).join('')+'</tbody></table></div>';
- return head('REKAP NILAI',esc(group.title),esc(cls)+' · '+esc(group.subject))+breadcrumb+'<div class="card"><div class="actions"><h3>Nilai siswa</h3><span class="muted">'+list.length+' sesi</span></div>'+table+'</div>';
+ return head('REKAP NILAI',esc(group.title),esc(cls)+' · '+esc(group.subject))+breadcrumb+'<div class="card"><div class="actions"><h3>Nilai siswa</h3><span class="muted">'+list.length+' sesi</span></div>'+table+'</div>'+(isSoloTax?soloClassReflectionPanel(list[0]):'');
 }
 function selectGradebookClass(name){s.selectedGradebookClass=String(name||'');s.selectedGradebookAssessmentId='';render()}
 function selectGradebookAssessment(id){s.selectedGradebookAssessmentId=String(id||'');render()}
