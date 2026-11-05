@@ -912,8 +912,7 @@ async function saveBundleDraftNow(){
   if(!result||!result.ok)throw Error(result&&result.error?result.error:'Draf belum tersimpan');
   s.bundleDraftUpdatedAt=result.data.updatedAt||'';
   updateBundleDraftStatus('Tersimpan otomatis · '+(s.bundleDraftUpdatedAt||''));
-  const list=await api('listQuestionBundleDrafts');
-  if(list&&list.ok){s.bundleDrafts=Array.isArray(list.data)?list.data:[];s.bundleDraftsLoaded=true}
+  try{const list=await api('listQuestionBundleDrafts');if(list&&list.ok){s.bundleDrafts=Array.isArray(list.data)?list.data:[];s.bundleDraftsLoaded=true}}catch(listError){console.warn('Daftar draf belum dimuat ulang:',listError.message)}
  }catch(error){
   updateBundleDraftStatus('Belum tersinkron · cadangan lokal tersedia');
   console.warn('Autosave bundel:',error.message);
