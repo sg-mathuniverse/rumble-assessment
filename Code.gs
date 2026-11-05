@@ -31,7 +31,7 @@ const TABLES = {
     'startAt', 'endAt', 'passageText', 'passageImageUrl', 'status', 'createdBy', 'createdAt', 'updatedAt',
     'bundleId', 'bundleVersionId', 'bundleVersionNumber', 'classification', 'archivedAt', 'archivedBy'
   ],
-  QuestionBundles: ['bundleId','title','subject','description','tpCode','passageText','passageImageUrl','passagesJson','questionsJson','status','createdBy','createdAt','updatedAt','visibility','classification','latestVersionId','latestVersionNumber','archivedAt','archivedBy'],
+  QuestionBundles: ['bundleId','title','subject','className','description','tpCode','passageText','passageImageUrl','passagesJson','questionsJson','status','createdBy','createdAt','updatedAt','visibility','classification','latestVersionId','latestVersionNumber','archivedAt','archivedBy'],
   BundleVersions: ['versionId','bundleId','versionNumber','snapshotJson','createdBy','createdAt','changeNote'],
   SchemaMigrations: ['migrationId','version','appliedAt','appliedBy','status','detailsJson'],
   LearningObjectives: ['objectiveId','tpCode','title','subject','description','createdBy','createdAt','updatedAt','active'],
@@ -169,15 +169,15 @@ function routeAction_(action, payload) {
     studentId: user.role === 'student' ? String(user.userId || '') : String(payload.studentId || ''),
     createdBy: user.email
   });
-  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit','adminGetAiSettings','adminSaveAiSettings','adminTestAiConnection','adminListAiModels','adminListAiUsage','adminListAiPrompts','adminSaveAiPrompt','adminTestAiPrompt','adminActivateAiPrompt'];
-  if (['listAvailableLearningObjectives','listAvailableLearningIndicators'].indexOf(action) >= 0 && user.role !== 'admin' && user.role !== 'teacher') {
+  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningClassOptions','adminListLearningSubjectOptions','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit','adminGetAiSettings','adminSaveAiSettings','adminTestAiConnection','adminListAiModels','adminListAiUsage','adminListAiPrompts','adminSaveAiPrompt','adminTestAiPrompt','adminActivateAiPrompt'];
+  if (['listAvailableLearningObjectives','listAvailableLearningIndicators','listAvailableLearningClassOptions','listAvailableLearningSubjectOptions'].indexOf(action) >= 0 && user.role !== 'admin' && user.role !== 'teacher') {
     throw new Error('Repositori pembelajaran hanya dapat diakses oleh Admin dan Guru.');
   }
   if (adminOnly.indexOf(action) >= 0 && user.role !== 'admin') {
     throw new Error('Fitur ini hanya dapat digunakan oleh administrator sekolah.');
   }
   const teacherOnly = [
-    'createAssessment','deleteAssessment','requestSoloAiAssessment','saveSoloDominantVerification','saveQuestionBundle','listQuestionBundles',
+    'createAssessment','deleteAssessment','requestSoloAiAssessment','saveSoloDominantVerification','saveQuestionBundle','saveQuestionBundleDraft','listQuestionBundleDrafts','getQuestionBundleDraft','deleteQuestionBundleDraft','listQuestionBundles',
     'getQuestionBundle','deleteQuestionBundle','updateAssessment','uploadAssessmentImage','deleteAssessmentImage',
     'publishAssessment','gradeAttempt','saveSoloIndicatorVerification','listStudents','listMonitoring','getTeacherSummary'
   ];
@@ -205,6 +205,10 @@ function routeAction_(action, payload) {
       if (bundleId) assertQuestionBundleOwner_(bundleId, user);
       return saveQuestionBundle_(trusted);
     },
+    saveQuestionBundleDraft: function () { return saveQuestionBundleDraft_(trusted); },
+    listQuestionBundleDrafts: function () { return listQuestionBundleDrafts_(trusted); },
+    getQuestionBundleDraft: function () { return getQuestionBundleDraft_(trusted); },
+    deleteQuestionBundleDraft: function () { return deleteQuestionBundleDraft_(trusted); },
     listQuestionBundles: function () { return listQuestionBundles_(trusted); },
     getQuestionBundle: function () { return getQuestionBundle_(trusted); },
     updateAssessment: function () { assertAssessmentOwner_(payload.id || payload.assessmentId, user); return updateAssessment_(trusted); },
@@ -297,6 +301,8 @@ function routeAction_(action, payload) {
     adminSaveAiPrompt: function () { return adminSaveAiPrompt_(trusted); },
     adminTestAiPrompt: function () { return adminTestAiPrompt_(trusted); },
     adminActivateAiPrompt: function () { return adminActivateAiPrompt_(trusted); },
+    adminListLearningClassOptions: function () { return adminListLearningClassOptions_(); },
+    adminListLearningSubjectOptions: function () { return adminListLearningSubjectOptions_(); },
     adminListLearningObjectives: function () { return adminListLearningObjectives_(); },
     adminSaveLearningObjective: function () { return adminSaveLearningObjective_(trusted); },
     adminSetLearningObjectiveActive: function () { return adminSetLearningObjectiveActive_(trusted); },
@@ -304,6 +310,8 @@ function routeAction_(action, payload) {
     adminSaveLearningIndicator: function () { return adminSaveLearningIndicator_(trusted); },
     adminSetLearningIndicatorActive: function () { return adminSetLearningIndicatorActive_(trusted); },
     listAvailableLearningObjectives: function () { return listAvailableLearningObjectives_(); },
+    listAvailableLearningClassOptions: function () { return adminListLearningClassOptions_(); },
+    listAvailableLearningSubjectOptions: function () { return adminListLearningSubjectOptions_(); },
     listAvailableLearningIndicators: function () { return listAvailableLearningIndicators_(trusted); },
     listStudents: function () {
       return listRows_('Users').filter(function (item) {
@@ -557,7 +565,10 @@ function parseJson_(value, fallback) {
  */
 function saveQuestionBundle_(payload) {
   assertBundleVersioningReady_();
+  bundleEditorEnhancementsAssertReady_();
   const title = requiredText_(payload.title, 'Judul bundel', 180);
+  requiredText_(payload.subject, 'Mata pelajaran', 120);
+  requiredText_(payload.className, 'Kelas', 80);
   const questions = Array.isArray(payload.questions) ? payload.questions : [];
   if (!questions.length || questions.length > 200) throw new Error('Jumlah soal bundel harus antara 1 dan 200.');
   const bundleId = String(payload.bundleId || payload.id || makeId_('BND'));
@@ -577,7 +588,7 @@ function saveQuestionBundle_(payload) {
     if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot nilai tidak valid pada soal nomor '+(i+1));
   });
   const now=currentTimestamp_();
-  const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),learningObjectiveId:String(payload.learningObjectiveId||'').trim(),learningIndicatorId:String(payload.learningIndicatorId||'').trim(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
+  const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),className:String(payload.className||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),learningObjectiveId:String(payload.learningObjectiveId||'').trim(),learningIndicatorId:String(payload.learningIndicatorId||'').trim(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
   validateBundleLearningReference_(snapshot);
   snapshotBundleLearningReferences_(snapshot);
   validateBundleSnapshot_(snapshot);
@@ -588,9 +599,10 @@ function saveQuestionBundle_(payload) {
     if(prior && String(prior.snapshotJson)===snapshotJson) latest={versionId:prior.versionId,versionNumber:Number(prior.versionNumber)};
   }
     if(!latest)latest=createBundleVersion_(bundleId,snapshot,String(payload.changeNote||(existing?'Perubahan isi bundel':'Versi awal')),String(payload.createdBy||(existing&&existing.createdBy)||''));
-    const record={bundleId:bundleId,title:title,subject:snapshot.subject,description:snapshot.description,tpCode:snapshot.tpCode,passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passagesJson:JSON.stringify(snapshot.passages),questionsJson:JSON.stringify(snapshot.questions),status:'ready',classification:classification,latestVersionId:String(latest.versionId),latestVersionNumber:Number(latest.versionNumber),visibility:String(payload.visibility||(existing&&existing.visibility)||'shared')==='private'?'private':'shared',createdBy:String(payload.createdBy||(existing&&existing.createdBy)||''),createdAt:existing?String(existing.createdAt||now):now,updatedAt:now,archivedAt:'',archivedBy:''};
+    const record={bundleId:bundleId,title:title,subject:snapshot.subject,className:snapshot.className,description:snapshot.description,tpCode:snapshot.tpCode,passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passagesJson:JSON.stringify(snapshot.passages),questionsJson:JSON.stringify(snapshot.questions),status:'ready',classification:classification,latestVersionId:String(latest.versionId),latestVersionNumber:Number(latest.versionNumber),visibility:String(payload.visibility||(existing&&existing.visibility)||'shared')==='private'?'private':'shared',createdBy:String(payload.createdBy||(existing&&existing.createdBy)||''),createdAt:existing?String(existing.createdAt||now):now,updatedAt:now,archivedAt:'',archivedBy:''};
     if(rowNumber>0)headers.forEach(function(h,col){if(Object.prototype.hasOwnProperty.call(record,h))sheet.getRange(rowNumber,col+1).setValue(record[h]);});
     else appendRow_('QuestionBundles',record);
+    if(payload.draftId)deleteQuestionBundleDraftRows_(String(payload.draftId),String(payload.createdBy||''));
     return {bundleId:bundleId,title:title,questionCount:questions.length,status:'ready',classification:classification,versionId:String(latest.versionId),versionNumber:Number(latest.versionNumber)};
   } finally { lock.releaseLock(); }
 }
@@ -768,7 +780,7 @@ function getQuestionBundle_(payload) {
   if(payload.versionId||payload.versionNumber!==undefined)version=getBundleVersion_({versionId:payload.versionId,bundleId:bundleId,versionNumber:payload.versionNumber});
   else if(bundle.latestVersionId)version=getBundleVersion_({versionId:bundle.latestVersionId});
   const snapshot=version?version.snapshot:bundleSnapshotFromRecord_(bundle,bundle.classification||'REGULER');
-  return {bundle:{bundleId:bundle.bundleId,title:snapshot.title,subject:snapshot.subject,description:snapshot.description,tpCode:String(snapshot.tpCode||''),learningObjectiveId:String(snapshot.learningObjectiveId||''),learningIndicatorId:String(snapshot.learningIndicatorId||''),passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passages:snapshot.passages||[],status:bundle.status,visibility:String(bundle.visibility||'shared').toLowerCase(),isOwner:isOwner,classification:String(snapshot.classification||bundle.classification||'REGULER'),versionId:version?version.versionId:String(bundle.latestVersionId||''),versionNumber:version?version.versionNumber:Number(bundle.latestVersionNumber||0)},questions:snapshot.questions||[]};
+  return {bundle:{bundleId:bundle.bundleId,title:snapshot.title,subject:snapshot.subject,className:String(snapshot.className||''),description:snapshot.description,tpCode:String(snapshot.tpCode||''),learningObjectiveId:String(snapshot.learningObjectiveId||''),learningIndicatorId:String(snapshot.learningIndicatorId||''),passageText:snapshot.passageText,passageImageUrl:snapshot.passageImageUrl,passages:snapshot.passages||[],status:bundle.status,visibility:String(bundle.visibility||'shared').toLowerCase(),isOwner:isOwner,classification:String(snapshot.classification||bundle.classification||'REGULER'),versionId:version?version.versionId:String(bundle.latestVersionId||''),versionNumber:version?version.versionNumber:Number(bundle.latestVersionNumber||0)},questions:snapshot.questions||[]};
 }
 function createAssessment_(payload) {
   const title=requiredText_(payload.title,'Judul',180);
@@ -3067,7 +3079,7 @@ function updateRowByKey_(tableName, keyHeader, keyValue, fields) {
   rowRange.setValues([updatedRow]);
 }
 function bundleSnapshotFromRecord_(bundle,classification){
-  return {schemaVersion:1,bundleId:String(bundle.bundleId),classification:String(classification||'REGULER').toUpperCase(),title:String(bundle.title||''),subject:String(bundle.subject||''),description:String(bundle.description||''),tpCode:String(bundle.tpCode||''),learningObjectiveId:String(bundle.learningObjectiveId||''),learningIndicatorId:String(bundle.learningIndicatorId||''),passageText:String(bundle.passageText||''),passageImageUrl:String(bundle.passageImageUrl||''),passages:parseJson_(bundle.passagesJson,[]),questions:parseJson_(bundle.questionsJson,[])};
+  return {schemaVersion:1,bundleId:String(bundle.bundleId),classification:String(classification||'REGULER').toUpperCase(),title:String(bundle.title||''),subject:String(bundle.subject||''),className:String(bundle.className||''),description:String(bundle.description||''),tpCode:String(bundle.tpCode||''),learningObjectiveId:String(bundle.learningObjectiveId||''),learningIndicatorId:String(bundle.learningIndicatorId||''),passageText:String(bundle.passageText||''),passageImageUrl:String(bundle.passageImageUrl||''),passages:parseJson_(bundle.passagesJson,[]),questions:parseJson_(bundle.questionsJson,[])};
 }
 
 function snapshotBundleLearningReferences_(snapshot) {
@@ -3082,6 +3094,7 @@ function snapshotBundleLearningReferences_(snapshot) {
     tpCode: String(objective.tpCode || snapshot.tpCode || ''),
     title: String(objective.title || ''),
     subject: String(objective.subject || snapshot.subject || ''),
+    className: String(objective.className || snapshot.className || ''),
     description: String(objective.description || '')
   };
   const indicators = listRows_('LearningIndicators');
@@ -3114,6 +3127,7 @@ function validateBundleLearningReference_(snapshot){
   const objective=listRows_('LearningObjectives').find(function(row){return String(row.objectiveId)===objectiveId&&learningActive_(row.active);});
   if(!objective)throw new Error('Tujuan pembelajaran yang dipilih tidak tersedia atau tidak aktif.');
   if(String(objective.subject||'').trim().toLowerCase()!==String(snapshot.subject||'').trim().toLowerCase())throw new Error('Mata pelajaran bundel harus sama dengan mata pelajaran tujuan pembelajaran.');
+  if(String(objective.className||'').trim().toLowerCase()!==String(snapshot.className||'').trim().toLowerCase())throw new Error('Kelas bundel harus sama dengan kelas tujuan pembelajaran.');
   indicatorIds.forEach(function(indicatorId){
     const indicator=listRows_('LearningIndicators').find(function(row){return String(row.indicatorId)===indicatorId&&String(row.objectiveId)===objectiveId&&learningActive_(row.active);});
     if(!indicator)throw new Error('Indikator tidak aktif atau tidak terhubung dengan tujuan pembelajaran yang dipilih.');
@@ -3402,7 +3416,7 @@ function adminReconcileLearningAudit_(payload, user) {
 function learningObjectivePublic_(row) {
   return {
     objectiveId: String(row.objectiveId || ''), tpCode: String(row.tpCode || ''),
-    title: String(row.title || ''), subject: String(row.subject || ''),
+    title: String(row.title || ''), subject: String(row.subject || ''), className: String(row.className || ''),
     description: String(row.description || ''), active: learningActive_(row.active),
     createdAt: String(row.createdAt || ''), updatedAt: String(row.updatedAt || '')
   };
@@ -3419,15 +3433,40 @@ function adminListLearningObjectives_() {
   learningRepositoryAssertReady_();
   return listRows_('LearningObjectives').map(learningObjectivePublic_);
 }
+function adminListLearningClassOptions_() {
+  learningRepositoryAssertReady_();
+  const names = {};
+  ['Users','LearningObjectives','Assessments','QuestionBundles'].forEach(function (tableName) {
+    listRows_(tableName).forEach(function (row) {
+      if (tableName === 'Users' && String(row.role || '').toLowerCase() !== 'student') return;
+      const name = String(row.className || '').trim();
+      if (name) names[name] = true;
+    });
+  });
+  return Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'id'); });
+}
+function adminListLearningSubjectOptions_() {
+  learningRepositoryAssertReady_();
+  const names = {};
+  ['LearningObjectives','QuestionBundles','Assessments'].forEach(function (tableName) {
+    listRows_(tableName).forEach(function (row) {
+      const name = String(row.subject || '').trim();
+      if (name) names[name] = true;
+    });
+  });
+  return Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'id'); });
+}
 function listAvailableLearningObjectives_() {
   learningRepositoryAssertReady_();
   return listRows_('LearningObjectives').filter(function (r) { return learningActive_(r.active); }).map(learningObjectivePublic_);
 }
 function adminSaveLearningObjective_(payload) {
   learningRepositoryAssertReady_();
+  bundleEditorEnhancementsAssertReady_();
   const code = requiredText_(payload.tpCode, 'Kode TP', 60).toUpperCase();
   const title = requiredText_(payload.title, 'Judul TP', 240);
   const subject = requiredText_(payload.subject, 'Mata pelajaran', 120);
+  const className = requiredText_(payload.className, 'Kelas', 80);
   const description = String(payload.description || '').trim();
   if (description.length > 3000) throw new Error('Deskripsi TP terlalu panjang.');
   const lock = LockService.getScriptLock(); lock.waitLock(10000);
@@ -3439,12 +3478,13 @@ function adminSaveLearningObjective_(payload) {
     const duplicate = rows.some(function (r) {
       return String(r.objectiveId) !== id &&
         String(r.tpCode).trim().toUpperCase() === code &&
-        String(r.subject).trim().toLowerCase() === subject.toLowerCase();
+        String(r.subject).trim().toLowerCase() === subject.toLowerCase() &&
+        String(r.className || '').trim().toLowerCase() === className.toLowerCase();
     });
-    if (duplicate) throw new Error('Kode TP sudah digunakan pada mata pelajaran tersebut.');
+    if (duplicate) throw new Error('Kode TP sudah digunakan pada mata pelajaran dan kelas tersebut.');
     const now = currentTimestamp_();
     const after = {
-      objectiveId: id || makeId_('TP'), tpCode: code, title: title, subject: subject,
+      objectiveId: id || makeId_('TP'), tpCode: code, title: title, subject: subject, className: className,
       description: description, createdBy: before ? String(before.createdBy || '') : String(payload.currentUser.email || ''),
       createdAt: before ? String(before.createdAt || now) : now, updatedAt: now,
       active: before ? learningActive_(before.active) : true
@@ -3538,3 +3578,243 @@ function adminSetLearningIndicatorActive_(payload) {
   } finally { lock.releaseLock(); }
 }
 
+
+
+/* -------------------------------------------------------------------------
+ * Bundle editor enhancements: TP class mapping and resumable autosave drafts.
+ * Run once after BUNDLE_VERSIONING_V1 and LEARNING_REPOSITORY_V1.
+ * ------------------------------------------------------------------------- */
+const BUNDLE_EDITOR_ENHANCEMENT_MIGRATION_ = 'BUNDLE_EDITOR_ENHANCEMENTS_V1';
+const QUESTION_BUNDLE_DRAFT_HEADERS_ = [
+  'draftId','revisionId','chunkIndex','chunkCount','draftChunk','bundleId',
+  'title','subject','className','classification','visibility','questionCount','createdBy','createdAt','updatedAt'
+];
+
+/** Public Apps Script menu entry point for the private migration helper. */
+function runBundleEditorEnhancementsMigration() {
+  return migrateBundleEditorEnhancementsV1_();
+}
+
+function migrateBundleEditorEnhancementsV1_() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    assertBundleVersioningReady_();
+    learningRepositoryAssertReady_();
+    const spreadsheet = getSpreadsheet_();
+    const migrations = listRows_('SchemaMigrations');
+    if (migrations.some(function (row) {
+      return String(row.migrationId) === BUNDLE_EDITOR_ENHANCEMENT_MIGRATION_ && String(row.status) === 'completed';
+    })) {
+      bundleEditorEnhancementsAssertReady_();
+      return { success: true, alreadyApplied: true, migrationId: BUNDLE_EDITOR_ENHANCEMENT_MIGRATION_ };
+    }
+    const changes = {};
+    ['LearningObjectives','QuestionBundles'].forEach(function (name) {
+      const sheet = spreadsheet.getSheetByName(name);
+      if (!sheet || sheet.getLastRow() < 1 || sheet.getLastColumn() < 1) {
+        throw new Error('Sheet ' + name + ' belum memiliki header. Migrasi dihentikan.');
+      }
+      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+      if (headers.indexOf('className') < 0) {
+        sheet.getRange(1, sheet.getLastColumn() + 1).setValue('className');
+        changes[name] = ['className'];
+      } else changes[name] = [];
+    });
+    let draftSheet = spreadsheet.getSheetByName('QuestionBundleDrafts');
+    if (!draftSheet) {
+      draftSheet = spreadsheet.insertSheet('QuestionBundleDrafts');
+      draftSheet.getRange(1, 1, 1, QUESTION_BUNDLE_DRAFT_HEADERS_.length).setValues([QUESTION_BUNDLE_DRAFT_HEADERS_]);
+      draftSheet.setFrozenRows(1);
+      draftSheet.getRange(1, 1, 1, QUESTION_BUNDLE_DRAFT_HEADERS_.length)
+        .setFontWeight('bold').setBackground('#142d4e').setFontColor('#ffffff');
+      draftSheet.autoResizeColumns(1, QUESTION_BUNDLE_DRAFT_HEADERS_.length);
+      changes.QuestionBundleDrafts = { created: true };
+    } else {
+      const current = draftSheet.getLastColumn() ? draftSheet.getRange(1, 1, 1, draftSheet.getLastColumn()).getValues()[0].map(String) : [];
+      QUESTION_BUNDLE_DRAFT_HEADERS_.forEach(function (header) {
+        if (current.indexOf(header) < 0) {
+          draftSheet.getRange(1, draftSheet.getLastColumn() + 1).setValue(header);
+          current.push(header);
+        }
+      });
+      changes.QuestionBundleDrafts = { created: false };
+    }
+    appendRow_('SchemaMigrations', {
+      migrationId: BUNDLE_EDITOR_ENHANCEMENT_MIGRATION_, version: 1,
+      appliedAt: currentTimestamp_(), appliedBy: Session.getActiveUser().getEmail() || 'Apps Script editor',
+      status: 'completed', detailsJson: JSON.stringify(changes)
+    });
+    bundleEditorEnhancementsAssertReady_();
+    return { success: true, migrationId: BUNDLE_EDITOR_ENHANCEMENT_MIGRATION_, changes: changes };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function bundleEditorEnhancementsAssertReady_() {
+  const rows = listRows_('SchemaMigrations');
+  if (!rows.some(function (row) {
+    return String(row.migrationId) === BUNDLE_EDITOR_ENHANCEMENT_MIGRATION_ && String(row.status) === 'completed';
+  })) throw new Error('Migrasi BUNDLE_EDITOR_ENHANCEMENTS_V1 belum selesai. Jalankan migrateBundleEditorEnhancementsV1_() terlebih dahulu.');
+  validateRepositorySheetHeaders_(getSheet_('LearningObjectives'), 'LearningObjectives', ['className']);
+  validateRepositorySheetHeaders_(getSheet_('QuestionBundles'), 'QuestionBundles', ['className']);
+  validateRepositorySheetHeaders_(getSheet_('QuestionBundleDrafts'), 'QuestionBundleDrafts', QUESTION_BUNDLE_DRAFT_HEADERS_);
+}
+
+function saveQuestionBundleDraft_(payload) {
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+  bundleEditorEnhancementsAssertReady_();
+  const user = payload.currentUser;
+  if (!user || user.role !== 'teacher') throw new Error('Akun guru terverifikasi diperlukan.');
+  const draftId = String(payload.draftId || '').trim() || makeId_('DRF');
+  const sheet = getSheet_('QuestionBundleDrafts');
+  const allRows = listRows_('QuestionBundleDrafts');
+  const previous = allRows.filter(function (row) { return String(row.draftId) === draftId; });
+  if (previous.some(function (row) {
+    return String(row.createdBy || '').trim().toLowerCase() !== String(user.email || '').trim().toLowerCase();
+  })) throw new Error('Draft ini bukan milik akun guru yang sedang masuk.');
+  const source = payload.snapshot && typeof payload.snapshot === 'object' ? payload.snapshot : {};
+  const snapshot = {
+    title: String(source.title || ''),
+    subject: String(source.subject || ''),
+    className: String(source.className || ''),
+    description: String(source.description || ''),
+    classification: String(source.classification || 'REGULER').toUpperCase(),
+    visibility: String(source.visibility || 'shared') === 'private' ? 'private' : 'shared',
+    learningObjectiveId: String(source.learningObjectiveId || ''),
+    learningIndicatorId: String(source.learningIndicatorId || ''),
+    tpCode: String(source.tpCode || ''),
+    passageText: String(source.passageText || ''),
+    passageImageUrl: String(source.passageImageUrl || ''),
+    passages: Array.isArray(source.passages) ? source.passages : [],
+    questions: Array.isArray(source.questions) ? source.questions : []
+  };
+  if (['REGULER','SOLO_TAX'].indexOf(snapshot.classification) < 0) throw new Error('Klasifikasi draft tidak valid.');
+  if (snapshot.questions.length > 200) throw new Error('Draft tidak boleh melebihi 200 soal.');
+  const json = JSON.stringify(snapshot);
+  if (json.length > 2000000) throw new Error('Draft terlalu besar untuk disimpan. Kurangi ukuran teks atau gambar.');
+  const chunkSize = 40000;
+  const chunkCount = Math.max(1, Math.ceil(json.length / chunkSize));
+  const revisionId = makeId_('REV');
+  const now = currentTimestamp_();
+  const createdAt = previous.length ? String(previous[0].createdAt || now) : now;
+  const bundleId = String(payload.bundleId || (previous[0] && previous[0].bundleId) || '');
+  for (let index = 0; index < chunkCount; index++) {
+    appendRow_('QuestionBundleDrafts', {
+      draftId: draftId, revisionId: revisionId, chunkIndex: index,
+      chunkCount: chunkCount, draftChunk: json.slice(index * chunkSize, (index + 1) * chunkSize),
+      bundleId: bundleId, title: snapshot.title, subject: snapshot.subject,
+      className: snapshot.className, classification: snapshot.classification,
+      visibility: snapshot.visibility, questionCount: snapshot.questions.length, createdBy: String(user.email || ''),
+      createdAt: createdAt, updatedAt: now
+    });
+  }
+  // Keep the previous complete revision until every chunk of the new revision is stored.
+  deleteQuestionBundleDraftOldRevisions_(draftId, revisionId);
+  return { draftId: draftId, updatedAt: now, questionCount: snapshot.questions.length };
+  } finally { lock.releaseLock(); }
+}
+
+function deleteQuestionBundleDraftOldRevisions_(draftId, keepRevisionId) {
+  const sheet = getSheet_('QuestionBundleDrafts');
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return;
+  const headers = values[0].map(String);
+  const idCol = headers.indexOf('draftId'), revisionCol = headers.indexOf('revisionId');
+  for (let row = values.length - 1; row >= 1; row--) {
+    if (String(values[row][idCol]) === String(draftId) && String(values[row][revisionCol]) !== String(keepRevisionId)) {
+      sheet.deleteRow(row + 1);
+    }
+  }
+}
+
+function listQuestionBundleDrafts_(payload) {
+  bundleEditorEnhancementsAssertReady_();
+  const email = String(payload.currentUser && payload.currentUser.email || '').trim().toLowerCase();
+  const rows = listRows_('QuestionBundleDrafts').filter(function (row) {
+    return String(row.createdBy || '').trim().toLowerCase() === email;
+  });
+  const grouped = {};
+  rows.forEach(function (row) { (grouped[row.draftId] || (grouped[row.draftId] = [])).push(row); });
+  return Object.keys(grouped).map(function (id) {
+    const revision = latestCompleteQuestionBundleDraftRevision_(grouped[id]);
+    if (!revision) return null;
+    const row = revision.rows[0];
+    return {
+      draftId: String(row.draftId), bundleId: String(row.bundleId || ''),
+      title: String(row.title || ''), subject: String(row.subject || ''),
+      className: String(row.className || ''), classification: String(row.classification || 'REGULER'),
+      questionCount: Number(row.questionCount) || 0, updatedAt: String(row.updatedAt || '')
+    };
+  }).filter(Boolean).sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
+}
+
+function latestCompleteQuestionBundleDraftRevision_(rows) {
+  const groups = {};
+  (rows || []).forEach(function (row) {
+    const id = String(row.revisionId || '');
+    if (!id) return;
+    (groups[id] || (groups[id] = [])).push(row);
+  });
+  const complete = Object.keys(groups).map(function (id) {
+    const items = groups[id].slice().sort(function (a, b) { return Number(a.chunkIndex) - Number(b.chunkIndex); });
+    const expected = Number(items[0].chunkCount) || 0;
+    if (!expected || items.length !== expected) return null;
+    for (let i = 0; i < expected; i++) if (Number(items[i].chunkIndex) !== i) return null;
+    return { revisionId: id, rows: items, updatedAt: String(items[0].updatedAt || '') };
+  }).filter(Boolean);
+  complete.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
+  return complete[0] || null;
+}
+
+function getQuestionBundleDraft_(payload) {
+  bundleEditorEnhancementsAssertReady_();
+  const draftId = requiredText_(payload.draftId, 'ID draft', 100);
+  const email = String(payload.currentUser && payload.currentUser.email || '').trim().toLowerCase();
+  const rows = listRows_('QuestionBundleDrafts').filter(function (row) {
+    return String(row.draftId) === draftId && String(row.createdBy || '').trim().toLowerCase() === email;
+  });
+  if (!rows.length) throw new Error('Draft bundel tidak ditemukan atau bukan milik akun ini.');
+  const revision = latestCompleteQuestionBundleDraftRevision_(rows);
+  if (!revision) throw new Error('Draf belum memiliki versi tersimpan yang lengkap. Coba muat ulang setelah koneksi stabil.');
+  const revisionRows = revision.rows;
+  const json = revisionRows.map(function (row) { return String(row.draftChunk || ''); }).join('');
+  return {
+    draftId: draftId, bundleId: String(revisionRows[0].bundleId || ''),
+    snapshot: JSON.parse(json), updatedAt: String(revisionRows[0].updatedAt || '')
+  };
+}
+
+function deleteQuestionBundleDraft_(payload) {
+  bundleEditorEnhancementsAssertReady_();
+  const draftId = requiredText_(payload.draftId, 'ID draft', 100);
+  const email = String(payload.currentUser && payload.currentUser.email || '').trim().toLowerCase();
+  const rows = listRows_('QuestionBundleDrafts').filter(function (row) {
+    return String(row.draftId) === draftId;
+  });
+  if (rows.some(function (row) { return String(row.createdBy || '').trim().toLowerCase() !== email; })) {
+    throw new Error('Draft ini bukan milik akun guru yang sedang masuk.');
+  }
+  deleteQuestionBundleDraftRows_(draftId, email);
+  return { success: true, draftId: draftId };
+}
+
+function deleteQuestionBundleDraftRows_(draftId, ownerEmail) {
+  if (!draftId) return;
+  const sheet = getSheet_('QuestionBundleDrafts');
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return;
+  const headers = values[0].map(String);
+  const idCol = headers.indexOf('draftId'), ownerCol = headers.indexOf('createdBy');
+  const email = String(ownerEmail || '').trim().toLowerCase();
+  for (let row = values.length - 1; row >= 1; row--) {
+    if (String(values[row][idCol]) === String(draftId)) {
+      if (email && String(values[row][ownerCol] || '').trim().toLowerCase() !== email) {
+        throw new Error('Draft ini bukan milik akun guru yang sedang masuk.');
+      }
+      sheet.deleteRow(row + 1);
+    }
+  }
+}
