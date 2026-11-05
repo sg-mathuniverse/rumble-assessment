@@ -858,7 +858,98 @@ async function loadBundles(){try{const r=await api('listQuestionBundles');if(!r|
 async function useBundle(id){try{const r=await api('getQuestionBundle',{id:id});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Bundel tidak tersedia');const b=r.data.bundle||{};s.editorMode='assessment';s.bundleEditorOpen=false;s.assessmentEditorOpen=true;s.assessmentFromBundle=true;s.sourceBundleId=b.bundleId||id;s.sourceBundleTitle=b.title||'';s.editingBundleId=null;s.editingId=null;s.meta={title:b.title||'',subject:b.subject||'Matematika',className:'',duration:60,startAt:'',endAt:'',passageText:b.passageText||'',passageImageUrl:b.passageImageUrl||'',sourceBundleId:b.bundleId||id,sourceBundleTitle:b.title||''};s.passages=normalizeBundlePassages(b,r.data.questions||[]);s.qs=(r.data.questions||[]).map(function(q){return Object.assign({},q,{options:q.options||[],optionImages:q.optionImages||[],subquestions:q.subquestions||[],rubricLevels:q.rubricLevels||[],passageId:q.passageId||''})}).map(resolveQuestionPassage);s.page='assessments';s.assessmentEditorOpen=true;render();setTimeout(function(){document.getElementById('editor')?.scrollIntoView({behavior:'smooth'})},0);toast('Bundel dimuat sebagai salinan asesmen baru.')}catch(e){toast('Gagal menggunakan bundel: '+e.message)}}
 async function deleteBundle(id){if(!id)return;if(!confirm('Hapus bundel soal ini dari Bank Soal? Asesmen yang sudah dibuat dari bundel tetap tersimpan.'))return;try{const r=await api('deleteQuestionBundle',{id:id});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Bundel gagal dihapus');toast('Bundel soal berhasil dihapus.');await loadBundles()}catch(e){toast('Gagal menghapus bundel: '+e.message)}}
 async function editBundle(id){try{const r=await api('getQuestionBundle',{id:id});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Bundel tidak tersedia');const b=r.data.bundle||{};s.assessmentFromBundle=false;s.sourceBundleId='';s.sourceBundleTitle='';s.editorMode='bundle';s.bundleEditorOpen=true;s.assessmentEditorOpen=false;s.bundleVisibility=b.visibility||'shared';s.bundleClassification=b.classification||'REGULER';s.editingBundleId=b.bundleId;s.editingId=null;s.meta={title:b.title||'',subject:b.subject||'Matematika',description:b.description||'',tpCode:b.tpCode||'',learningObjectiveId:b.learningObjectiveId||'',learningIndicatorId:b.learningIndicatorId||'',passageText:b.passageText||'',passageImageUrl:b.passageImageUrl||''};loadBundleLearningReferences(s.meta.learningObjectiveId,s.meta.learningIndicatorId);s.passages=normalizeBundlePassages(b,r.data.questions||[]);s.qs=(r.data.questions||[]).map(function(q){return Object.assign({},q,{options:q.options||[],optionImages:q.optionImages||[],subquestions:q.subquestions||[],rubricLevels:q.rubricLevels||[],passageId:q.passageId||''})});s.page='bundles';render();setTimeout(function(){document.getElementById('editor')?.scrollIntoView({behavior:'smooth'})},0)}catch(e){toast('Gagal membuka bundel: '+e.message)}}
-async function saveBundle(){const title=document.getElementById('title').value.trim();if(!title||!s.qs.length){toast('Isi nama bundel dan minimal satu soal.');return}if(s.bundleClassification==='SOLO_TAX'){for(let i=0;i<s.qs.length;i++){const q=s.qs[i];if(q.type!=='essay'||!String(q.text||'').trim()||!q.soloLevel||!q.subquestions.length||q.subquestions.some(x=>!String(x).trim())||!String(q.answerGuide||'').trim()||!String(q.rubric||'').trim()||!Array.isArray(q.learningIndicatorIds)||!q.learningIndicatorIds.length||!Array.isArray(q.rubricLevels)||!q.rubricLevels.length){toast('Lengkapi pertanyaan utama, level SOLO, subpertanyaan, panduan jawaban, rubrik, indikator TP, dan kriteria pada soal '+(i+1)+'.');return}}}const payload={bundleId:s.editingBundleId||undefined,title:title,subject:document.getElementById('subject').value,description:document.getElementById('className').value,classification:s.bundleClassification||'REGULER',visibility:s.bundleVisibility||'shared',tpCode:(s.meta||{}).tpCode||'',learningObjectiveId:(s.meta||{}).learningObjectiveId||'',learningIndicatorId:(s.meta||{}).learningIndicatorId||'',passageText:(s.meta||{}).passageText||'',passageImageUrl:(s.meta||{}).passageImageUrl||'',passages:s.passages||[],questions:s.qs.map(function(q){const copy=Object.assign({},q);delete copy.passageText;delete copy.passageImageUrl;return copy})};try{const r=await api('saveQuestionBundle',payload);if(!r||!r.ok)throw Error(r&&r.error?r.error:'Bundel gagal disimpan');await processPendingImageDeletes();toast('Bundel soal tersimpan di bank soal.');s.pendingImageDeletes=[];s.qs=[];s.passages=[];s.meta={};s.editingBundleId=null;s.bundleEditorOpen=false;s.editorMode='bundle';s.page='bundles';await loadBundles();render()}catch(e){toast('Gagal menyimpan bundel: '+e.message)}}
+let bundleDraftTimer=null;
+let bundleDraftAutosaveBound=false;
+function bundleDraftStorageKey(){const email=String(s.currentUser&&s.currentUser.email||'teacher');return 'rumbleBundleDraftBackup:'+email.toLowerCase()}
+function bundleDraftSnapshot(){
+ const meta=s.meta||{};
+ const title=document.getElementById('title')?.value;
+ const subject=document.getElementById('subject')?.value;
+ const className=document.getElementById('className')?.value;
+ const description=document.getElementById('bundleDescription')?.value;
+ return {
+  title:title===undefined?String(meta.title||''):String(title),
+  subject:subject===undefined?String(meta.subject||''):String(subject),
+  className:className===undefined?String(meta.className||''):String(className),
+  description:description===undefined?String(meta.description||''):String(description),
+  classification:s.bundleClassification||'REGULER',visibility:s.bundleVisibility||'shared',
+  tpCode:String(meta.tpCode||''),learningObjectiveId:String(meta.learningObjectiveId||''),
+  learningIndicatorId:String(meta.learningIndicatorId||''),passageText:String(meta.passageText||''),
+  passageImageUrl:String(meta.passageImageUrl||''),
+  passages:JSON.parse(JSON.stringify(s.passages||[])),
+  questions:JSON.parse(JSON.stringify(s.qs||[]))
+ };
+}
+function saveLocalBundleDraftBackup(){
+ if(!s.bundleEditorOpen||s.editorMode!=='bundle'||!s.bundleDraftId)return;
+ try{localStorage.setItem(bundleDraftStorageKey(),JSON.stringify({draftId:s.bundleDraftId,bundleId:s.editingBundleId||'',snapshot:bundleDraftSnapshot(),updatedAt:new Date().toISOString()}))}catch(e){console.warn('Cadangan lokal draf tidak tersedia:',e)}
+}
+function clearLocalBundleDraftBackup(){
+ try{const raw=localStorage.getItem(bundleDraftStorageKey());const item=raw?JSON.parse(raw):null;if(!item||!s.bundleDraftId||String(item.draftId)===String(s.bundleDraftId))localStorage.removeItem(bundleDraftStorageKey())}catch(e){}
+}
+function updateBundleDraftStatus(text){
+ s.bundleDraftStatus=text;
+ const el=document.getElementById('bundleDraftStatus');if(el)el.textContent=text;
+}
+function scheduleBundleDraftAutosave(){
+ if(!s.bundleEditorOpen||s.editorMode!=='bundle'||!s.bundleDraftId)return;
+ saveLocalBundleDraftBackup();
+ updateBundleDraftStatus('Perubahan terdeteksi · menyimpan otomatis...');
+ if(bundleDraftTimer)clearTimeout(bundleDraftTimer);
+ bundleDraftTimer=setTimeout(saveBundleDraftNow,1200);
+}
+async function saveBundleDraftNow(){
+ if(!s.bundleEditorOpen||s.editorMode!=='bundle'||!s.bundleDraftId||s.bundleDraftSaving)return;
+ s.bundleDraftSaving=true;updateBundleDraftStatus('Menyimpan draf...');
+ try{
+  const result=await api('saveQuestionBundleDraft',{draftId:s.bundleDraftId,bundleId:s.editingBundleId||'',snapshot:bundleDraftSnapshot()});
+  if(!result||!result.ok)throw Error(result&&result.error?result.error:'Draf belum tersimpan');
+  s.bundleDraftUpdatedAt=result.data.updatedAt||'';
+  updateBundleDraftStatus('Tersimpan otomatis · '+(s.bundleDraftUpdatedAt||''));
+  const list=await api('listQuestionBundleDrafts');
+  if(list&&list.ok){s.bundleDrafts=Array.isArray(list.data)?list.data:[];s.bundleDraftsLoaded=true}
+ }catch(error){
+  updateBundleDraftStatus('Belum tersinkron · cadangan lokal tersedia');
+  console.warn('Autosave bundel:',error.message);
+ }finally{s.bundleDraftSaving=false}
+}
+function bindBundleDraftAutosave(){
+ if(bundleDraftAutosaveBound)return;
+ bundleDraftAutosaveBound=true;
+ document.addEventListener('input',function(event){if(event.target&&event.target.closest&&event.target.closest('#editor'))scheduleBundleDraftAutosave()});
+ document.addEventListener('change',function(event){if(event.target&&event.target.closest&&event.target.closest('#editor'))scheduleBundleDraftAutosave()});
+}
+async function resumeBundleDraft(draftId){
+ try{
+  const r=await api('getQuestionBundleDraft',{draftId:draftId});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Draf tidak dapat dibuka');
+  const d=r.data,snap=d.snapshot||{};
+  s.editorMode='bundle';s.bundleEditorOpen=true;s.assessmentEditorOpen=false;s.assessmentFromBundle=false;
+  s.editingBundleId=d.bundleId||null;s.bundleDraftId=d.draftId;s.bundleDraftStatus='Draf dipulihkan';
+  s.bundleClassification=snap.classification||'REGULER';s.bundleVisibility=snap.visibility||'shared';
+  s.meta={title:snap.title||'',subject:snap.subject||'',className:snap.className||'',description:snap.description||'',tpCode:snap.tpCode||'',learningObjectiveId:snap.learningObjectiveId||'',learningIndicatorId:snap.learningIndicatorId||'',passageText:snap.passageText||'',passageImageUrl:snap.passageImageUrl||''};
+  s.passages=Array.isArray(snap.passages)?snap.passages:[];s.qs=Array.isArray(snap.questions)?snap.questions:[makeNewBundleQuestion(s.bundleClassification)];
+  s.page='bundles';await loadBundleLearningReferences(s.meta.learningObjectiveId,s.meta.learningIndicatorId);render();
+  setTimeout(function(){document.getElementById('editor')?.scrollIntoView({behavior:'smooth'})},0);
+ }catch(e){toast('Gagal memulihkan draf: '+e.message)}
+}
+function resumeLocalBundleDraft(){
+ try{
+  const raw=localStorage.getItem(bundleDraftStorageKey());if(!raw)throw Error('Cadangan lokal tidak ditemukan');
+  const d=JSON.parse(raw),snap=d.snapshot||{};
+  s.editorMode='bundle';s.bundleEditorOpen=true;s.assessmentEditorOpen=false;s.assessmentFromBundle=false;
+  s.editingBundleId=d.bundleId||null;s.bundleDraftId=d.draftId||('DRF-'+Date.now());
+  s.bundleDraftStatus='Cadangan lokal dipulihkan';s.bundleClassification=snap.classification||'REGULER';s.bundleVisibility=snap.visibility||'shared';
+  s.meta={title:snap.title||'',subject:snap.subject||'',className:snap.className||'',description:snap.description||'',tpCode:snap.tpCode||'',learningObjectiveId:snap.learningObjectiveId||'',learningIndicatorId:snap.learningIndicatorId||'',passageText:snap.passageText||'',passageImageUrl:snap.passageImageUrl||''};
+  s.passages=Array.isArray(snap.passages)?snap.passages:[];s.qs=Array.isArray(snap.questions)?snap.questions:[makeNewBundleQuestion(s.bundleClassification)];
+  s.page='bundles';loadBundleLearningReferences(s.meta.learningObjectiveId,s.meta.learningIndicatorId);render();scheduleBundleDraftAutosave();
+  setTimeout(function(){document.getElementById('editor')?.scrollIntoView({behavior:'smooth'})},0);
+ }catch(e){toast('Cadangan lokal tidak dapat dipulihkan: '+e.message)}
+}
+async function discardBundleDraft(draftId){
+ if(!confirm('Hapus draf ini secara permanen?'))return;
+ try{const r=await api('deleteQuestionBundleDraft',{draftId:draftId});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Draf gagal dihapus');if(String(s.bundleDraftId)===String(draftId))clearLocalBundleDraftBackup();toast('Draf dihapus.');await loadBundles();render()}catch(e){toast('Gagal menghapus draf: '+e.message)}
+}
+async function saveBundle(){if(bundleDraftTimer){clearTimeout(bundleDraftTimer);bundleDraftTimer=null}const title=document.getElementById('title').value.trim();if(!title||!s.qs.length){toast('Isi nama bundel dan minimal satu soal.');return}if(s.bundleClassification==='SOLO_TAX'){for(let i=0;i<s.qs.length;i++){const q=s.qs[i];if(q.type!=='essay'||!String(q.text||'').trim()||!q.soloLevel||!q.subquestions.length||q.subquestions.some(x=>!String(x).trim())||!String(q.answerGuide||'').trim()||!String(q.rubric||'').trim()||!Array.isArray(q.learningIndicatorIds)||!q.learningIndicatorIds.length||!Array.isArray(q.rubricLevels)||!q.rubricLevels.length){toast('Lengkapi pertanyaan utama, level SOLO, subpertanyaan, panduan jawaban, rubrik, indikator TP, dan kriteria pada soal '+(i+1)+'.');return}}}const payload={bundleId:s.editingBundleId||undefined,draftId:s.bundleDraftId||'',title:title,subject:document.getElementById('subject').value,className:document.getElementById('className').value,description:document.getElementById('bundleDescription')?.value||'',classification:s.bundleClassification||'REGULER',visibility:s.bundleVisibility||'shared',tpCode:(s.meta||{}).tpCode||'',learningObjectiveId:(s.meta||{}).learningObjectiveId||'',learningIndicatorId:(s.meta||{}).learningIndicatorId||'',passageText:(s.meta||{}).passageText||'',passageImageUrl:(s.meta||{}).passageImageUrl||'',passages:s.passages||[],questions:s.qs.map(function(q){const copy=Object.assign({},q);delete copy.passageText;delete copy.passageImageUrl;return copy})};try{const r=await api('saveQuestionBundle',payload);if(!r||!r.ok)throw Error(r&&r.error?r.error:'Bundel gagal disimpan');await processPendingImageDeletes();toast('Bundel soal tersimpan di bank soal.');s.pendingImageDeletes=[];s.qs=[];s.passages=[];s.meta={};s.editingBundleId=null;s.bundleDraftId='';s.bundleDraftStatus='';clearLocalBundleDraftBackup();s.bundleEditorOpen=false;s.editorMode='bundle';s.page='bundles';await loadBundles();render()}catch(e){toast('Gagal menyimpan bundel: '+e.message)}}
 function newA(){s.assessmentFromBundle=false;s.sourceBundleId='';s.sourceBundleTitle='';s.passages=[];s.page='assessments';s.editorMode='assessment';s.bundleEditorOpen=false;s.assessmentEditorOpen=true;s.editingBundleId=null;s.pendingImageDeletes=[];s.editingId=null;s.meta={title:'',subject:'Matematika',className:'',duration:60,startAt:'',endAt:'',passageText:'',passageImageUrl:''};s.qs=[];render();loadBundles();setTimeout(()=>document.getElementById('editor')?.scrollIntoView({behavior:'smooth'}),0)}
 async function chooseAssessmentBundle(id){if(!id){s.sourceBundleId='';s.sourceBundleTitle='';s.assessmentFromBundle=false;s.qs=[];s.passages=[];render();return}try{const r=await api('getQuestionBundle',{id:id});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Bundel tidak tersedia');const b=r.data.bundle||{};s.assessmentFromBundle=true;s.sourceBundleId=b.bundleId||id;s.sourceBundleTitle=b.title||'';s.meta.subject=b.subject||s.meta.subject||'Matematika';s.meta.sourceBundleId=s.sourceBundleId;s.meta.sourceBundleTitle=s.sourceBundleTitle;s.passages=normalizeBundlePassages(b,r.data.questions||[]);s.qs=(r.data.questions||[]).map(function(q){return Object.assign({},q,{options:q.options||[],optionImages:q.optionImages||[],subquestions:q.subquestions||[],rubricLevels:q.rubricLevels||[],passageId:q.passageId||''})}).map(resolveQuestionPassage);render();toast('Bundel soal dimuat. Lengkapi jadwal dan kelas murid.')}catch(e){toast('Gagal memuat bundel: '+e.message)}}
 function normalizeBundlePassages(bundle,questions){let ps=Array.isArray(bundle.passages)?bundle.passages.map(p=>Object.assign({},p)):[];if(!ps.length){(questions||[]).forEach((q,i)=>{if(q.passageText||q.passageImageUrl){const id='legacy-'+i;ps.push({id,title:'Bacaan '+(ps.length+1),text:q.passageText||'',imageUrl:q.passageImageUrl||''});q.passageId=id}})}return ps.map((p,i)=>({id:p.id||('passage-'+(i+1)),title:p.title||('Bacaan '+(i+1)),text:p.text||'',imageUrl:p.imageUrl||''}))}
@@ -1234,7 +1325,7 @@ async function hydrateAssessmentImages(){
  }
 }
 
-function render(){if(!s.authChecked||!s.authenticated||!s.currentUser){document.getElementById('app').innerHTML=renderAccessGate();return}let p=s.page,c=p==='adminUsers'?adminUsersPage():p==='learningRepository'?learningRepositoryPage():p==='overview'?overview():p==='bundles'?bundlesPage():p==='assessments'?assessments():p==='monitoring'?monitoringPage():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='gradebook'?gradebook():p==='progress'?progress():settings();const isStudentExam=s.page==='detail'&&s.role==='student';if(isStudentExam){document.getElementById('app').innerHTML='<div class="layout exam-layout"><main class="main"><div class="content">'+c+'</div></main></div>';}else{document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Belajar, ukur, tumbuh.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Aman · Terukur · Inklusif</footer></aside><main class="main"><header class="top"><span class="muted">Ruang kerja / '+esc(p)+'</span><span class="account-chip"><span class="account-dot"></span>'+((s.currentUser&&s.currentUser.name)?esc(s.currentUser.name)+' · ':'')+(s.role==='teacher'?'Guru':s.role==='admin'?'Administrator':'Siswa')+' <span class="role-lock" title="Peran ditentukan akun sekolah">Terverifikasi</span></span></header><div class="content">'+c+'</div></main></div>';}document.querySelectorAll('.question p,.question label,.question li,.math-content,.passage-content,.report-question-text p,.report-question-text li,.report-answer-text').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));if(s.page==='detail'&&s.role==='student')updateAnswerProgress();hydrateAssessmentImages();}
+function render(){bindBundleDraftAutosave();if(!s.authChecked||!s.authenticated||!s.currentUser){document.getElementById('app').innerHTML=renderAccessGate();return}let p=s.page,c=p==='adminUsers'?adminUsersPage():p==='learningRepository'?learningRepositoryPage():p==='overview'?overview():p==='bundles'?bundlesPage():p==='assessments'?assessments():p==='monitoring'?monitoringPage():p==='detail'?detailPage():p==='students'?students():p==='reports'?reports():p==='gradebook'?gradebook():p==='progress'?progress():settings();const isStudentExam=s.page==='detail'&&s.role==='student';if(isStudentExam){document.getElementById('app').innerHTML='<div class="layout exam-layout"><main class="main"><div class="content">'+c+'</div></main></div>';}else{document.getElementById('app').innerHTML='<div class="layout"><aside class="side"><div class="brand"><span class="logo">R</span><span>Rumble Assessment<br><small>Belajar, ukur, tumbuh.</small></span></div><nav class="nav">'+nav()+'</nav><footer>Platform asesmen digital<br>Aman · Terukur · Inklusif</footer></aside><main class="main"><header class="top"><span class="muted">Ruang kerja / '+esc(p)+'</span><span class="account-chip"><span class="account-dot"></span>'+((s.currentUser&&s.currentUser.name)?esc(s.currentUser.name)+' · ':'')+(s.role==='teacher'?'Guru':s.role==='admin'?'Administrator':'Siswa')+' <span class="role-lock" title="Peran ditentukan akun sekolah">Terverifikasi</span></span></header><div class="content">'+c+'</div></main></div>';}document.querySelectorAll('.question p,.question label,.question li,.math-content,.passage-content,.report-question-text p,.report-question-text li,.report-answer-text').forEach(el=>renderMath(el));document.querySelectorAll('.math-preview').forEach(el=>{if(!el.textContent.trim()&&el.previousElementSibling)el.textContent=el.previousElementSibling.value||'';renderMath(el)});document.querySelectorAll('.question textarea').forEach((el,i)=>el.setAttribute('data-question-index',i));if(s.page==='detail'&&s.role==='student')updateAnswerProgress();hydrateAssessmentImages();if(s.bundleEditorOpen&&s.editorMode==='bundle')scheduleBundleDraftAutosave();}
 render();
 loadCurrentUser();
 
@@ -1256,11 +1347,13 @@ async function toggleStudentActive(userId,active){try{const r=await api('adminSe
 async function loadLearningRepository(){
  s.learningRepositoryLoaded=false;s.learningRepositoryError='';render();
  try{
-  const results=await Promise.all([api('adminListLearningObjectives'),api('adminListLearningIndicators'),api('adminListPendingLearningAudits')]);
+  const results=await Promise.all([api('adminListLearningObjectives'),api('adminListLearningIndicators'),api('adminListPendingLearningAudits'),api('adminListLearningClassOptions'),api('adminListLearningSubjectOptions')]);
   results.forEach(function(r){if(!r||!r.ok)throw Error(r&&r.error?r.error:'Repositori belum dapat dimuat')});
   s.learningObjectives=Array.isArray(results[0].data)?results[0].data:[];
   s.learningIndicators=Array.isArray(results[1].data)?results[1].data:[];
   s.learningPendingAudits=Array.isArray(results[2].data)?results[2].data:[];
+  s.learningClassOptions=Array.isArray(results[3].data)?results[3].data:[];
+  s.learningSubjectOptions=Array.isArray(results[4].data)?results[4].data:[];
   s.learningRepositoryLoaded=true;
  }catch(error){s.learningRepositoryLoaded=true;s.learningRepositoryError=error.message||String(error)}
  render();
@@ -1278,7 +1371,7 @@ function editLearningObjective(id){
 }
 function cancelLearningObjectiveEdit(){s.learningObjectiveEdit=null;render()}
 async function saveLearningObjective(){
- const data={objectiveId:s.learningObjectiveEdit&&s.learningObjectiveEdit.objectiveId||'',tpCode:document.getElementById('learningTpCode').value,title:document.getElementById('learningTpTitle').value,subject:document.getElementById('learningTpSubject').value,description:document.getElementById('learningTpDescription').value};
+ const data={objectiveId:s.learningObjectiveEdit&&s.learningObjectiveEdit.objectiveId||'',tpCode:document.getElementById('learningTpCode').value,title:document.getElementById('learningTpTitle').value,subject:document.getElementById('learningTpSubject').value,className:document.getElementById('learningTpClass').value,description:document.getElementById('learningTpDescription').value};
  try{const r=await api('adminSaveLearningObjective',data);if(!r||!r.ok)throw Error(r&&r.error?r.error:'TP gagal disimpan');s.learningObjectiveEdit=null;toast('Tujuan pembelajaran tersimpan.');await loadLearningRepository()}catch(e){toast('Gagal menyimpan TP: '+e.message)}
 }
 async function toggleLearningObjective(id,active){
