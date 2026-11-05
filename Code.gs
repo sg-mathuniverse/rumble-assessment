@@ -3436,24 +3436,23 @@ function adminListLearningObjectives_() {
 function adminListLearningClassOptions_() {
   learningRepositoryAssertReady_();
   const names = {};
-  listRows_('Users').forEach(function (row) {
-    if (String(row.role || '').toLowerCase() === 'student') {
+  ['Users','LearningObjectives','Assessments','QuestionBundles'].forEach(function (tableName) {
+    listRows_(tableName).forEach(function (row) {
+      if (tableName === 'Users' && String(row.role || '').toLowerCase() !== 'student') return;
       const name = String(row.className || '').trim();
       if (name) names[name] = true;
-    }
-  });
-  listRows_('LearningObjectives').forEach(function (row) {
-    const name = String(row.className || '').trim();
-    if (name) names[name] = true;
+    });
   });
   return Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'id'); });
 }
 function adminListLearningSubjectOptions_() {
   learningRepositoryAssertReady_();
   const names = {};
-  listRows_('LearningObjectives').forEach(function (row) {
-    const name = String(row.subject || '').trim();
-    if (name) names[name] = true;
+  ['LearningObjectives','QuestionBundles','Assessments'].forEach(function (tableName) {
+    listRows_(tableName).forEach(function (row) {
+      const name = String(row.subject || '').trim();
+      if (name) names[name] = true;
+    });
   });
   return Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'id'); });
 }
