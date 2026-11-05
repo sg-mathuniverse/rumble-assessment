@@ -1150,7 +1150,7 @@ async function openAssessment(id){
   // sebelum operasi jaringan/await agar browser masih memberi izin.
   if(s.role==='student')requestExamFullscreen();
   const listed=(s.items||[]).find(item=>String(item.assessmentId||item.id)===String(id));if(s.role==='student'&&listed&&listed.attemptStatus&&listed.attemptStatus!=='in_progress'){toast('Asesmen ini sudah pernah dikerjakan.');return}
-  const r=await api('getAssessment',{id});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Detail tidak tersedia');
+  const r=await api('getAssessment',{id,includeAnswers:s.role==='teacher'});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Detail tidak tersedia');
   s.currentAssessment=r.data;s.answers={};s.activeAttempt=null;
   if(s.role==='student'){
    const a=r.data.assessment||{};const started=await api('startAttempt',{assessmentId:a.assessmentId||a.id||id});
