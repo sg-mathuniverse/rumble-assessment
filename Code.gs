@@ -169,7 +169,7 @@ function routeAction_(action, payload) {
     studentId: user.role === 'student' ? String(user.userId || '') : String(payload.studentId || ''),
     createdBy: user.email
   });
-  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningClassOptions','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit','adminGetAiSettings','adminSaveAiSettings','adminTestAiConnection','adminListAiModels','adminListAiUsage','adminListAiPrompts','adminSaveAiPrompt','adminTestAiPrompt','adminActivateAiPrompt'];
+  const adminOnly = ['adminListStudents','adminImportStudents','adminResetStudentPassword','adminSetStudentActive','adminListLearningClassOptions','adminListLearningSubjectOptions','adminListLearningObjectives','adminSaveLearningObjective','adminSetLearningObjectiveActive','adminListLearningIndicators','adminSaveLearningIndicator','adminSetLearningIndicatorActive','adminListPendingLearningAudits','adminReconcileLearningAudit','adminGetAiSettings','adminSaveAiSettings','adminTestAiConnection','adminListAiModels','adminListAiUsage','adminListAiPrompts','adminSaveAiPrompt','adminTestAiPrompt','adminActivateAiPrompt'];
   if (['listAvailableLearningObjectives','listAvailableLearningIndicators'].indexOf(action) >= 0 && user.role !== 'admin' && user.role !== 'teacher') {
     throw new Error('Repositori pembelajaran hanya dapat diakses oleh Admin dan Guru.');
   }
@@ -302,6 +302,7 @@ function routeAction_(action, payload) {
     adminTestAiPrompt: function () { return adminTestAiPrompt_(trusted); },
     adminActivateAiPrompt: function () { return adminActivateAiPrompt_(trusted); },
     adminListLearningClassOptions: function () { return adminListLearningClassOptions_(); },
+    adminListLearningSubjectOptions: function () { return adminListLearningSubjectOptions_(); },
     adminListLearningObjectives: function () { return adminListLearningObjectives_(); },
     adminSaveLearningObjective: function () { return adminSaveLearningObjective_(trusted); },
     adminSetLearningObjectiveActive: function () { return adminSetLearningObjectiveActive_(trusted); },
@@ -3443,6 +3444,15 @@ function adminListLearningClassOptions_() {
   });
   return Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'id'); });
 }
+function adminListLearningSubjectOptions_() {
+  learningRepositoryAssertReady_();
+  const names = {};
+  listRows_('LearningObjectives').forEach(function (row) {
+    const name = String(row.subject || '').trim();
+    if (name) names[name] = true;
+  });
+  return Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'id'); });
+}
 function listAvailableLearningObjectives_() {
   learningRepositoryAssertReady_();
   return listRows_('LearningObjectives').filter(function (r) { return learningActive_(r.active); }).map(learningObjectivePublic_);
@@ -3574,7 +3584,7 @@ function adminSetLearningIndicatorActive_(payload) {
 const BUNDLE_EDITOR_ENHANCEMENT_MIGRATION_ = 'BUNDLE_EDITOR_ENHANCEMENTS_V1';
 const QUESTION_BUNDLE_DRAFT_HEADERS_ = [
   'draftId','revisionId','chunkIndex','chunkCount','draftChunk','bundleId',
-  'title','subject','className','classification','visibility','createdBy','createdAt','updatedAt'
+  'title','subject','className','classification','visibility','questionCount','createdBy','createdAt','updatedAt'
 ];
 
 function migrateBundleEditorEnhancementsV1_() {
@@ -3687,7 +3697,7 @@ function saveQuestionBundleDraft_(payload) {
       chunkCount: chunkCount, draftChunk: json.slice(index * chunkSize, (index + 1) * chunkSize),
       bundleId: bundleId, title: snapshot.title, subject: snapshot.subject,
       className: snapshot.className, classification: snapshot.classification,
-      visibility: snapshot.visibility, createdBy: String(user.email || ''),
+      visibility: snapshot.visibility, questionCount: snapshot.questions.length, createdBy: String(user.email || ''),
       createdAt: createdAt, updatedAt: now
     });
   }
@@ -3725,7 +3735,7 @@ function listQuestionBundleDrafts_(payload) {
       draftId: String(row.draftId), bundleId: String(row.bundleId || ''),
       title: String(row.title || ''), subject: String(row.subject || ''),
       className: String(row.className || ''), classification: String(row.classification || 'REGULER'),
-      questionCount: Number(row.chunkCount) || 0, updatedAt: String(row.updatedAt || '')
+      questionCount: Number(row.questionCount) || 0, updatedAt: String(row.updatedAt || '')
     };
   }).sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
 }
