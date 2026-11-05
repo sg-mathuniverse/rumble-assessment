@@ -309,8 +309,8 @@ function routeAction_(action, payload) {
     adminSaveLearningIndicator: function () { return adminSaveLearningIndicator_(trusted); },
     adminSetLearningIndicatorActive: function () { return adminSetLearningIndicatorActive_(trusted); },
     listAvailableLearningObjectives: function () { return listAvailableLearningObjectives_(); },
-    listAvailableLearningClassOptions: function () { return adminListLearningClassOptions_(); },
-    listAvailableLearningSubjectOptions: function () { return adminListLearningSubjectOptions_(); },
+    listAvailableLearningClassOptions: function () { return listAvailableLearningClassOptions_(); },
+    listAvailableLearningSubjectOptions: function () { return listAvailableLearningSubjectOptions_(); },
     listAvailableLearningIndicators: function () { return listAvailableLearningIndicators_(trusted); },
     listStudents: function () {
       return listRows_('Users').filter(function (item) {
@@ -3452,6 +3452,24 @@ function adminListLearningSubjectOptions_() {
       const name = String(row.subject || '').trim();
       if (name) names[name] = true;
     });
+  });
+  return Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'id'); });
+}
+function listAvailableLearningClassOptions_() {
+  learningRepositoryAssertReady_();
+  const names = {};
+  listRows_('LearningObjectives').filter(function (row) { return learningActive_(row.active); }).forEach(function (row) {
+    const name = String(row.className || '').trim();
+    if (name) names[name] = true;
+  });
+  return Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'id'); });
+}
+function listAvailableLearningSubjectOptions_() {
+  learningRepositoryAssertReady_();
+  const names = {};
+  listRows_('LearningObjectives').filter(function (row) { return learningActive_(row.active); }).forEach(function (row) {
+    const name = String(row.subject || '').trim();
+    if (name) names[name] = true;
   });
   return Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'id'); });
 }
