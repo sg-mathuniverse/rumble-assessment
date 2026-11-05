@@ -794,7 +794,13 @@ function createAssessment_(payload) {
     if(!owner&&!shared)throw new Error('Akses ke Bundel Soal sumber ditolak.');
     if(!bundle.latestVersionId)throw new Error('Bundel sumber belum memiliki versi. Jalankan migrasi versioning terlebih dahulu.');
     sourceVersion=getBundleVersion_({versionId:bundle.latestVersionId});
-    questions=sourceVersion.snapshot.questions;
+    const bundlePassages=Array.isArray(sourceVersion.snapshot.passages)?sourceVersion.snapshot.passages:[];
+    questions=(sourceVersion.snapshot.questions||[]).map(function(question){
+      const copy=Object.assign({},question);
+      const passage=bundlePassages.find(function(item){return String(item.id||'')===String(copy.passageId||'');});
+      if(passage){copy.passageText=String(passage.text||'');copy.passageImageUrl=String(passage.imageUrl||'');}
+      return copy;
+    });
   }
   if(!questions.length||questions.length>200)throw new Error('Versi Bundel Soal harus memiliki 1 sampai 200 soal.');
   questions.forEach(function(question,index){
@@ -1542,6 +1548,8 @@ function listAttempts_(payload) {
             rubricLevels: canViewInternal ? parseJson_(question.rubricLevelsJson, []) : [],
             soloMeta: canViewInternal ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta:null;})() : undefined,
             subquestions: parseJson_(question.subquestionsJson, []),
+            passageText: String(question.passageText || ''),
+            passageImageUrl: String(question.passageImageUrl || ''),
             options: parseJson_(question.optionsJson, []),
             pairs: parseJson_(question.pairsJson, []),
             answer: canViewInternal ? parseJson_(question.answerJson, null) : undefined,
