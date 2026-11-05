@@ -3659,6 +3659,8 @@ function bundleEditorEnhancementsAssertReady_() {
 }
 
 function saveQuestionBundleDraft_(payload) {
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
   bundleEditorEnhancementsAssertReady_();
   const user = payload.currentUser;
   if (!user || user.role !== 'teacher') throw new Error('Akun guru terverifikasi diperlukan.');
@@ -3708,6 +3710,7 @@ function saveQuestionBundleDraft_(payload) {
   // Keep the previous complete revision until every chunk of the new revision is stored.
   deleteQuestionBundleDraftOldRevisions_(draftId, revisionId);
   return { draftId: draftId, updatedAt: now, questionCount: snapshot.questions.length };
+  } finally { lock.releaseLock(); }
 }
 
 function deleteQuestionBundleDraftOldRevisions_(draftId, keepRevisionId) {
@@ -3729,19 +3732,37 @@ function listQuestionBundleDrafts_(payload) {
   const rows = listRows_('QuestionBundleDrafts').filter(function (row) {
     return String(row.createdBy || '').trim().toLowerCase() === email;
   });
-  const latest = {};
-  rows.forEach(function (row) {
-    if (!latest[row.draftId] || String(row.updatedAt) > String(latest[row.draftId].updatedAt)) latest[row.draftId] = row;
-  });
-  return Object.keys(latest).map(function (id) {
-    const row = latest[id];
+  const grouped = {};
+  rows.forEach(function (row) { (grouped[row.draftId] || (grouped[row.draftId] = [])).push(row); });
+  return Object.keys(grouped).map(function (id) {
+    const revision = latestCompleteQuestionBundleDraftRevision_(grouped[id]);
+    if (!revision) return null;
+    const row = revision.rows[0];
     return {
       draftId: String(row.draftId), bundleId: String(row.bundleId || ''),
       title: String(row.title || ''), subject: String(row.subject || ''),
       className: String(row.className || ''), classification: String(row.classification || 'REGULER'),
       questionCount: Number(row.questionCount) || 0, updatedAt: String(row.updatedAt || '')
     };
-  }).sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
+  }).filter(Boolean).sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
+}
+
+function latestCompleteQuestionBundleDraftRevision_(rows) {
+  const groups = {};
+  (rows || []).forEach(function (row) {
+    const id = String(row.revisionId || '');
+    if (!id) return;
+    (groups[id] || (groups[id] = [])).push(row);
+  });
+  const complete = Object.keys(groups).map(function (id) {
+    const items = groups[id].slice().sort(function (a, b) { return Number(a.chunkIndex) - Number(b.chunkIndex); });
+    const expected = Number(items[0].chunkCount) || 0;
+    if (!expected || items.length !== expected) return null;
+    for (let i = 0; i < expected; i++) if (Number(items[i].chunkIndex) !== i) return null;
+    return { revisionId: id, rows: items, updatedAt: String(items[0].updatedAt || '') };
+  }).filter(Boolean);
+  complete.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
+  return complete[0] || null;
 }
 
 function getQuestionBundleDraft_(payload) {
@@ -3752,11 +3773,9 @@ function getQuestionBundleDraft_(payload) {
     return String(row.draftId) === draftId && String(row.createdBy || '').trim().toLowerCase() === email;
   });
   if (!rows.length) throw new Error('Draft bundel tidak ditemukan atau bukan milik akun ini.');
-  const revisionId = rows.reduce(function (latest, row) {
-    return !latest || String(row.updatedAt) > String(latest.updatedAt) ? row : latest;
-  }, null).revisionId;
-  const revisionRows = rows.filter(function (row) { return String(row.revisionId) === String(revisionId); })
-    .sort(function (a, b) { return Number(a.chunkIndex) - Number(b.chunkIndex); });
+  const revision = latestCompleteQuestionBundleDraftRevision_(rows);
+  if (!revision) throw new Error('Draf belum memiliki versi tersimpan yang lengkap. Coba muat ulang setelah koneksi stabil.');
+  const revisionRows = revision.rows;
   const json = revisionRows.map(function (row) { return String(row.draftChunk || ''); }).join('');
   return {
     draftId: draftId, bundleId: String(revisionRows[0].bundleId || ''),
