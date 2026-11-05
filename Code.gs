@@ -58,8 +58,7 @@ const TABLES = {
  * Cache singkat mengurangi permintaan berulang ke raw.githubusercontent.com.
  */
 function doGet() {
-  const html = getFrontendHtml_();
-  return HtmlService.createHtmlOutput(html)
+  return HtmlService.createHtmlOutputFromFile('index')
     .setTitle(CONFIG.APP_NAME)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
