@@ -3590,6 +3590,11 @@ const QUESTION_BUNDLE_DRAFT_HEADERS_ = [
   'title','subject','className','classification','visibility','questionCount','createdBy','createdAt','updatedAt'
 ];
 
+/** Public Apps Script menu entry point for the private migration helper. */
+function runBundleEditorEnhancementsMigration() {
+  return migrateBundleEditorEnhancementsV1_();
+}
+
 function migrateBundleEditorEnhancementsV1_() {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
