@@ -1866,8 +1866,8 @@ function requestSoloAiAssessment_(payload) {
   }).sort(function (a, b) { return Number(b.version) - Number(a.version); })[0];
   if (!prompt) throw new Error('Belum ada prompt AI Penilaian aktif.');
   const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
-  if (!attempt || String(attempt.status || '').toLowerCase() !== 'needs_review') {
-    throw new Error('AI Penilaian hanya dapat diminta untuk jawaban yang sudah dikirim dan belum dinilai.');
+  if (!attempt || ['needs_review', 'graded'].indexOf(String(attempt.status || '').toLowerCase()) < 0) {
+    throw new Error('AI Penilaian hanya dapat diminta untuk jawaban yang sudah dikirim.');
   }
   const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
   if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') {
