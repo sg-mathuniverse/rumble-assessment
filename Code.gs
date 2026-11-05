@@ -567,6 +567,8 @@ function saveQuestionBundle_(payload) {
   assertBundleVersioningReady_();
   bundleEditorEnhancementsAssertReady_();
   const title = requiredText_(payload.title, 'Judul bundel', 180);
+  requiredText_(payload.subject, 'Mata pelajaran', 120);
+  requiredText_(payload.className, 'Kelas', 80);
   const questions = Array.isArray(payload.questions) ? payload.questions : [];
   if (!questions.length || questions.length > 200) throw new Error('Jumlah soal bundel harus antara 1 dan 200.');
   const bundleId = String(payload.bundleId || payload.id || makeId_('BND'));
