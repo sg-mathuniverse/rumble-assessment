@@ -21,6 +21,10 @@ const CONFIG = {
   APP_NAME: 'Rumble Assessment'
 };
 
+// Script Properties keys for the TokenPortal AI integration.
+const RUMBLE_AI_SETTINGS_KEY_ = 'RUMBLE_AI_SETTINGS';
+const RUMBLE_AI_API_KEY_ = 'RUMBLE_AI_API_KEY';
+
 const TABLES = {
   Users: [
     'userId', 'name', 'email', 'role', 'className', 'active', 'createdAt',
