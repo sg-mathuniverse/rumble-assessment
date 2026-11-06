@@ -1961,10 +1961,21 @@ function requestSoloAiAssessment_(payload) {
       usage = response.usage;
       let parsed;
       try {
-        const clean = response.content.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim();
+        let clean = String(response.content || '').trim()
+          .replace(/^\s*```(?:json)?\s*/i, '')
+          .replace(/\s*```\s*$/, '').trim();
+        // Beberapa model menambahkan kalimat pembuka/penutup di luar JSON.
+        // Ambil objek JSON terluar sebelum parsing; jangan mengubah isi JSON.
+        const firstBrace = clean.indexOf('{');
+        const lastBrace = clean.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) clean = clean.slice(firstBrace, lastBrace + 1);
         parsed = JSON.parse(clean);
       } catch (error) {
-        throw new Error('AI tidak mengembalikan JSON valid sesuai format penilaian.');
+        const finish = String(response.finishReason || 'tidak tersedia');
+        const tail = String(response.content || '').slice(-180).replace(/\s+/g, ' ');
+        throw new Error('Format jawaban AI tidak valid (finish_reason: ' + finish + '). ' +
+          'Kemungkinan keluaran terpotong atau model menambahkan format yang tidak sesuai. ' +
+          'Akhir respons: ' + tail);
       }
       if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length !== questionInputs.length) {
         throw new Error('Hasil AI tidak mencakup seluruh soal uraian yang dapat dianalisis.');
@@ -2265,6 +2276,7 @@ function tokenPortalChatCompletion_(messages, model, maxTokens) {
     content: content,
     model: String(data.model || selectedModel),
     requestId: String(data.id || ''),
+    finishReason: String(data.choices[0].finish_reason || ''),
     usage: {
       promptTokens: Number(usage.prompt_tokens) || 0,
       completionTokens: Number(usage.completion_tokens) || 0,
