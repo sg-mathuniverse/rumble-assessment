@@ -1660,10 +1660,7 @@ function listAttempts_(payload) {
               }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
               const latest = history.length ? history[history.length - 1] : null;
               const details = latest ? parseJson_(latest.detailsJson, {}) : {};
-              const aiHistory = listRows_('Events').filter(function (event) {
-                return String(event.attemptId) === String(attempt.attemptId) && String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION';
-              }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
-              const latestAi = aiHistory.length ? aiHistory[aiHistory.length - 1] : null;
+              const latestAi = latestSoloAiRecommendationEvent_(attempt.attemptId);
               const aiDetails = latestAi ? parseJson_(latestAi.detailsJson, {}) : {};
               return {
                 status: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? 'verified' : 'pending',
@@ -1696,6 +1693,7 @@ function listAttempts_(payload) {
                     aiLevel: isCurrent ? String(detail.aiLevel || '') : '',
                     teacherLevel: isCurrent ? String(detail.teacherLevel || '') : '',
                     aiEvidenceSummary: isCurrent ? String(detail.aiEvidenceSummary || '') : '',
+                    aiKeterangan: isCurrent ? String(detail.aiKeterangan || '') : '',
                     teacherReason: isCurrent ? String(detail.teacherReason || '') : '',
                     verifiedAt: isCurrent ? String(latestDominant.eventAt || '') : '',
                     verifiedBy: isCurrent ? String(detail.verifiedBy || '') : '',
@@ -1710,12 +1708,8 @@ function listAttempts_(payload) {
           : undefined,
         soloAiAssessment: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
           ? (function () {
-              const events = listRows_('Events').filter(function (event) {
-                return String(event.attemptId) === String(attempt.attemptId) &&
-                  String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION';
-              }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
-              if (!events.length) return null;
-              const latest = events[events.length - 1];
+              const latest = latestSoloAiRecommendationEvent_(attempt.attemptId);
+              if (!latest) return null;
               const detail = parseJson_(latest.detailsJson, {});
               return {
                 promptId: String(detail.promptId || ''),
@@ -1844,6 +1838,11 @@ function gradeAttempt_(payload) {
             eventType: 'SOLO_DOMINANT_LEVEL_INVALIDATED', eventAt: currentTimestamp_(),
             detailsJson: JSON.stringify({ reason: 'Nilai soal berubah; level SOLO dominan perlu ditinjau ulang.' })
           });
+          appendRow_('Events', {
+            eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+            eventType: 'AI_SOLO_SCORING_RECOMMENDATION_INVALIDATED', eventAt: currentTimestamp_(),
+            detailsJson: JSON.stringify({ reason: 'Skor guru berubah; analisis AI harus dijalankan ulang agar membaca skor terbaru.' })
+          });
         }
 
         return {
@@ -1887,6 +1886,7 @@ function requestSoloAiAssessment_(payload) {
     throw new Error('Struktur soal asesmen SOLO Tax tidak valid.');
   }
   const answers = parseJson_(attempt.answersJson, {});
+  const teacherQuestionScores = parseJson_(attempt.questionScoresJson, {});
   const questionInputs = [], deterministic = [];
   questions.forEach(function (question) {
     const answer = answers[String(question.questionId)] || {};
@@ -1938,6 +1938,7 @@ function requestSoloAiAssessment_(payload) {
       mainQuestion: String(question.text || ''),
       soloLevel: String(soloMeta.soloLevel || ''),
       maximumScore: Number(question.points),
+      teacherScore: Object.prototype.hasOwnProperty.call(teacherQuestionScores, String(question.questionId)) ? Number(teacherQuestionScores[String(question.questionId)]) : null,
       subquestions: subquestions,
       textResponses: textResponses,
       hasPhotoAttachment: photos.length > 0,
@@ -1951,7 +1952,7 @@ function requestSoloAiAssessment_(payload) {
   });
   let aiResults = [], dominantRecommendation = null, usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, model = '';
   if (questionInputs.length) {
-    const systemPrompt = prompt.content + '\n\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown dengan bentuk {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["kutipan/parafrasa bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","evidence":"alasan berbasis jawaban"}]}],"dominantLevel":{"level":"PRESTRUCTURAL|UNISTRUCTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT","evidenceSummary":"ringkasan bukti kualitatif lintas jawaban","questionEvidence":[{"questionId":"...","evidence":"bukti spesifik dari jawaban pada soal ini"}]}}. Nilai rekomendasi per soal harus berada pada rentang 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup. Jika bukti tidak cukup, recommendedScore harus null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban yang berisi teks. Jangan mengarang bukti. Analisis setiap indikator yang tercantum. Foto tidak disertakan dalam data; jika hasPhotoAttachment true, tandai bahwa guru harus memeriksa foto secara manual. Rekomendasi level dominan harus berdasarkan pola kualitas berpikir secara holistik dari bukti kualitatif seluruh soal yang diberikan, bukan dari skor, persentase, atau perhitungan ambang. questionEvidence harus mencakup setiap questionId yang dianalisis tepat satu kali. Jika bukti kualitatif tidak cukup, dominantLevel harus null. Jangan membuat nilai persentase indikator atau TP.';
+    const systemPrompt = prompt.content + '\\n\\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown dengan bentuk {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","recommendedPercentage":80,"evidence":"alasan berbasis jawaban"}]}],"dominantLevel":{"level":"PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT","evidenceSummary":"ringkasan bukti kualitatif lintas jawaban","keterangan":"narasi singkat yang menghubungkan level SOLO dengan ketercapaian indikator TP","questionEvidence":[{"questionId":"...","evidence":"bukti spesifik dari jawaban"}]}}. Nilai rekomendasi per soal harus 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup; jika tidak cukup, recommendedScore null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban teks. Cocokkan makna dan penalaran dengan panduan jawaban guru serta rubrik; terima cara penyelesaian setara, jangan hanya mencocokkan kata. teacherScore adalah skor sementara dari guru: bandingkan secara independen, jangan otomatis menyalinnya dan jelaskan alasan jika berbeda. Analisis setiap indikator. Untuk setiap indikator dengan bukti cukup, berikan recommendedPercentage 0-100 sebagai estimasi kualitatif berdasarkan bukti dan deskripsi indikator, bukan hasil perhitungan skor; jika bukti tidak cukup, gunakan null dan status insufficient_evidence. Persentase adalah rekomendasi untuk ditinjau guru. Foto tidak dikirim ke AI; foto wajib diperiksa manual. Level SOLO dominan ditentukan secara holistik dari kualitas berpikir, bukan skor atau persentase. Keterangan harus menjelaskan hubungan level SOLO dengan pola ketercapaian indikator tanpa mengarang fakta. questionEvidence harus memuat setiap soal yang dianalisis tepat satu kali. Jika bukti level tidak cukup, dominantLevel harus null.';
     try {
       const response = tokenPortalChatCompletion_([
         { role: 'system', content: systemPrompt },
@@ -2009,7 +2010,11 @@ function requestSoloAiAssessment_(payload) {
           const status = String(indicator.status || '');
           const indicatorEvidence = String(indicator.evidence || '').trim();
           if (statuses.indexOf(status) < 0 || !indicatorEvidence) throw new Error('Analisis indikator AI tidak valid atau tanpa bukti.');
-          return { indicatorId: String(indicator.indicatorId), status: status, evidence: indicatorEvidence };
+          const rawPercentage = indicator.recommendedPercentage;
+          const recommendedPercentage = rawPercentage === null || rawPercentage === undefined || rawPercentage === '' ? null : Number(rawPercentage);
+          if (status === 'insufficient_evidence' && recommendedPercentage !== null) throw new Error('Persentase rekomendasi harus kosong jika bukti indikator belum cukup.');
+          if (status !== 'insufficient_evidence' && (!isFinite(recommendedPercentage) || recommendedPercentage < 0 || recommendedPercentage > 100)) throw new Error('Persentase rekomendasi indikator AI harus berada pada rentang 0–100%.');
+          return { indicatorId: String(indicator.indicatorId), status: status, recommendedPercentage: recommendedPercentage, evidence: indicatorEvidence };
         });
         return {
           questionId: id, order: input.order,
@@ -2038,9 +2043,12 @@ function requestSoloAiAssessment_(payload) {
               expectedIds.some(function (id, index) { return id !== receivedIds[index]; })) {
             throw new Error('Rekomendasi level dominan harus memuat level dan bukti dari setiap soal yang dianalisis.');
           }
+          const keterangan = String(dominant.keterangan || '').trim();
+          if (!keterangan || keterangan.length > 3000) throw new Error('AI harus memberikan keterangan yang menghubungkan level SOLO dengan ketercapaian indikator TP.');
           dominantRecommendation = {
             level: level,
             evidenceSummary: evidenceSummary,
+            keterangan: keterangan,
             questionEvidence: questionEvidence.map(function (item) {
               const evidence = String(item.evidence || '').trim();
               if (!evidence || evidence.length > 3000) throw new Error('Bukti level dominan pada setiap soal wajib diisi.');
@@ -2061,7 +2069,7 @@ function requestSoloAiAssessment_(payload) {
   const results = deterministic.concat(aiResults).sort(function (a, b) { return a.order - b.order; });
   const now = currentTimestamp_();
   const record = {
-    version: 1, assessmentId: String(attempt.assessmentId), promptId: prompt.promptId,
+    version: 2, assessmentId: String(attempt.assessmentId), promptId: prompt.promptId,
     promptVersion: Number(prompt.version), provider: 'TOKENPORTAL', model: model || settings.model,
     usage: usage, requestedBy: String(payload.currentUser && payload.currentUser.email || ''),
     analyzedQuestionIds: questionInputs.map(function (item) { return item.questionId; }).sort(),
@@ -2074,6 +2082,15 @@ function requestSoloAiAssessment_(payload) {
     detailsJson: JSON.stringify(record)
   });
   return { attemptId: attemptId, status: 'completed', promptId: prompt.promptId, promptVersion: prompt.version, provider: 'TOKENPORTAL', model: record.model, usage: usage, dominantRecommendation: dominantRecommendation, results: results };
+}
+
+function latestSoloAiRecommendationEvent_(attemptId) {
+  const events = listRows_('Events').filter(function (event) {
+    return String(event.attemptId) === String(attemptId) &&
+      (String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION' || String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION_INVALIDATED');
+  }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+  if (!events.length || String(events[events.length - 1].eventType) !== 'AI_SOLO_SCORING_RECOMMENDATION') return null;
+  return events[events.length - 1];
 }
 
 function soloAchievementCategory_(percentage) {
@@ -2691,7 +2708,7 @@ function saveSoloDominantVerification_(payload) {
       detailsJson: JSON.stringify({
         version: 2, assessmentId: String(attempt.assessmentId),
         verifiedBy: String(user.email || ''), aiLevel: aiLevel, teacherLevel: teacherLevel,
-        aiEvidenceSummary: aiEvidence, questionEvidence: checkedEvidence,
+        aiEvidenceSummary: aiEvidence, aiKeterangan: String(recommendation.keterangan || ''), questionEvidence: checkedEvidence,
         teacherReason: teacherReason, aiProvider: String(aiDetails.provider || ''),
         aiModel: String(aiDetails.model || ''), promptVersion: String(aiDetails.promptVersion || '')
       })
