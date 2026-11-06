@@ -812,7 +812,7 @@ async function loadAdminAiUsage(){
 async function saveAdminAiSettings(){
  const model=document.getElementById('aiModel')?.value||'',apiKey=document.getElementById('aiApiKey')?.value||'';
  const payload={model:model,apiKey:apiKey,scoringEnabled:!!document.getElementById('aiScoringEnabled')?.checked,reflectionEnabled:!!document.getElementById('aiReflectionEnabled')?.checked,dailyTokenLimit:document.getElementById('aiDailyTokenLimit')?.value,maxOutputTokens:document.getElementById('aiMaxOutputTokens')?.value,clearApiKey:!!document.getElementById('aiClearApiKey')?.checked};
- try{const result=await api('adminSaveAiSettings',payload);if(!result||!result.ok)throw Error(result&&result.error?result.error:'Pengaturan AI gagal disimpan');s.aiSettings=result.data||{};s.aiTestResult=null;toast('Pengaturan AI tersimpan di sisi server.');await loadAdminAiSettings()}
+ try{const result=await api('adminSaveAiSettings',payload);if(!result||!result.ok)throw Error(result&&result.error?result.error:'Pengaturan AI gagal disimpan');s.aiSettings=result.data||{};s.aiTestResult=null;const warnings=Array.isArray(result.data&&result.data.promptWarnings)?result.data.promptWarnings:[];toast(warnings.length?'Provider dan API key tersimpan. '+warnings.join(' '):'Pengaturan AI tersimpan di sisi server.');await loadAdminAiSettings()}
  catch(error){toast('Gagal menyimpan pengaturan AI: '+error.message)}
 }
 async function testAdminAiConnection(){
