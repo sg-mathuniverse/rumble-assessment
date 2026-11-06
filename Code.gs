@@ -74,14 +74,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v8';
+  const cacheKey = 'rumble_frontend_html_v9';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/abf40578c520cae6526659da4f2980b58814b0f8/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/1d778e6ff66420b6c5155a94db3e38c2c6d7b858/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -2272,6 +2272,8 @@ function generateEssayAnswerGuide_(payload) {
     'Jika ada subpertanyaan, jawab setiap subpertanyaan secara berurutan.',
     'Untuk SOLO Tax, sesuaikan kedalaman penalaran dengan level SOLO dan hubungkan jawaban dengan indikator TP yang diberikan; jangan mengubah indikator.',
     'Untuk Reguler, berikan jawaban inti dan langkah penyelesaian yang diperlukan.',
+    'Jika panduan lama tersedia, gunakan sebagai konteks untuk mempertahankan bagian yang benar dan memperbaiki bagian yang kurang tepat.',
+    'Sesuaikan rincian penjelasan secara wajar dengan bobot maksimum soal; jangan mengubah bobot atau membuat skor.',
     'Gunakan LaTeX untuk notasi matematika dengan delimiters \\( ... \\) atau \\[ ... \\].',
     'Jika informasi soal tidak cukup untuk menetapkan satu jawaban pasti, nyatakan asumsi atau bagian yang perlu dilengkapi guru.',
     'Keluaran hanya berupa teks panduan jawaban berbahasa Indonesia, terstruktur dengan judul singkat dan langkah/uraian. Jangan mengeluarkan JSON.'
