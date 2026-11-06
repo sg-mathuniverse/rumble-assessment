@@ -74,14 +74,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v9';
+  const cacheKey = 'rumble_frontend_html_v10';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/1f0aec25d5c77889b402efc8be7fa49019629b6e/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/4f9dc5c92912d092be625f573fbe7c533f8a3c3e/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
