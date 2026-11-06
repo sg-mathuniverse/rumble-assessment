@@ -24,6 +24,7 @@ const CONFIG = {
 // Script Properties keys for the TokenPortal AI integration.
 const RUMBLE_AI_SETTINGS_KEY_ = 'RUMBLE_AI_SETTINGS';
 const RUMBLE_AI_API_KEY_ = 'RUMBLE_AI_API_KEY';
+const RUMBLE_AI_ENDPOINT_ = 'https://tokenportal.id/v1';
 
 const TABLES = {
   Users: [
@@ -2300,13 +2301,26 @@ function adminTestAiConnection_(payload) {
   }
 }
 function adminListAiModels_() {
-  const response = UrlFetchApp.fetch(RUMBLE_AI_ENDPOINT_ + '/models', { method: 'get', muteHttpExceptions: true });
-  const status = response.getResponseCode();
-  if (status < 200 || status >= 300) throw new Error('Daftar model TokenPortal tidak dapat dimuat (HTTP ' + status + ').');
-  const data = JSON.parse(response.getContentText() || '{}');
-  const models = Array.isArray(data.data) ? data.data : [];
-  return models.map(function (item) { return { id: String(item.id || ''), name: String(item.name || item.id || '') }; })
-    .filter(function (item) { return !!item.id; });
+  // API key is optional here so the Admin can select a model before saving a new key.
+  const apiKey = aiScriptProperties_().getProperty(RUMBLE_AI_API_KEY_);
+  const options = { method: 'get', muteHttpExceptions: true };
+  if (apiKey) options.headers = { Authorization: 'Bearer ' + apiKey };
+  try {
+    const response = UrlFetchApp.fetch(RUMBLE_AI_ENDPOINT_ + '/models', options);
+    const status = response.getResponseCode();
+    if (status >= 200 && status < 300) {
+      const data = JSON.parse(response.getContentText() || '{}');
+      const models = Array.isArray(data.data) ? data.data : [];
+      const normalized = models.map(function (item) {
+        return { id: String(item.id || ''), name: String(item.name || item.id || '') };
+      }).filter(function (item) { return !!item.id; });
+      if (normalized.length) return normalized;
+    }
+  } catch (error) {
+    // Use the documented starter model below when the catalog endpoint is unavailable.
+  }
+  // Fallback avoids a dead-end: Admin can save the API key and model, then refresh the catalog.
+  return [{ id: 'glm-53-flash', name: 'GLM-5.3 Flash (TokenPortal - pilihan awal)' }];
 }
 
 const RUMBLE_AI_PROMPTS_KEY_ = 'RUMBLE_AI_PROMPT_INDEX_V1';
