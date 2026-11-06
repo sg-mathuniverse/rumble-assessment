@@ -81,7 +81,7 @@ function getFrontendHtml_() {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/da44df77ba91169f9a35a6bce51c5965488a4ea2/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/79f25da0e7f2e21799f9f30cbfdebd0b058edfff/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -1557,6 +1557,8 @@ function listAttempts_(payload) {
             rubric: canViewInternal ? question.rubric : '',
             rubricLevels: canViewInternal ? parseJson_(question.rubricLevelsJson, []) : [],
             soloMeta: canViewInternal ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?stored.__soloTaxMeta:null;})() : undefined,
+            soloLevel: canViewInternal ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?String(stored.__soloTaxMeta.soloLevel||''):'';})() : undefined,
+            answerGuide: canViewInternal ? (function(){const stored=parseJson_(question.answerJson,null);return stored&&stored.__soloTaxMeta?String(stored.__soloTaxMeta.answerGuide||''):'';})() : undefined,
             subquestions: parseJson_(question.subquestionsJson, []),
             passageText: String(question.passageText || ''),
             passageImageUrl: String(question.passageImageUrl || ''),
