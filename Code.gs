@@ -2190,26 +2190,27 @@ function adminSaveAiSettings_(payload) {
   if (key && !/^tp-[A-Za-z0-9_-]{12,}$/.test(key)) throw new Error('Format API key TokenPortal tidak sesuai.');
   if (key && payload.clearApiKey === true) throw new Error('Pilih untuk menyimpan API key baru atau menghapus API key lama, bukan keduanya.');
   const activePrompts = aiPrompts_();
-  if (payload.scoringEnabled === true && !activePrompts.some(function (item) { return item.service === 'SCORING' && item.active === true; })) {
-    throw new Error('Aktifkan prompt AI Penilaian yang sudah lulus uji simulasi terlebih dahulu.');
-  }
-  if (payload.reflectionEnabled === true && !activePrompts.some(function (item) { return item.service === 'REFLECTION' && item.active === true; })) {
-    throw new Error('Aktifkan prompt AI Refleksi yang sudah lulus uji simulasi terlebih dahulu.');
-  }
+  const scoringPromptReady = activePrompts.some(function (item) { return item.service === 'SCORING' && item.active === true && !!item.testedAt; });
+  const reflectionPromptReady = activePrompts.some(function (item) { return item.service === 'REFLECTION' && item.active === true && !!item.testedAt; });
+  // Simpan kredensial dan konfigurasi provider terlebih dahulu agar Admin dapat
+  // menguji koneksi serta prompt sebelum mengaktifkan layanan AI.
   if (key) properties.setProperty(RUMBLE_AI_API_KEY_, key);
   if (payload.clearApiKey === true) properties.deleteProperty(RUMBLE_AI_API_KEY_);
   const current = aiSettings_();
+  const promptWarnings = [];
+  if (payload.scoringEnabled === true && !scoringPromptReady) promptWarnings.push('AI Penilaian tetap nonaktif sampai prompt Penilaian lulus uji simulasi dan diaktifkan.');
+  if (payload.reflectionEnabled === true && !reflectionPromptReady) promptWarnings.push('AI Refleksi tetap nonaktif sampai prompt Refleksi lulus uji simulasi dan diaktifkan.');
   const saved = {
     model: model,
-    scoringEnabled: payload.scoringEnabled === true,
-    reflectionEnabled: payload.reflectionEnabled === true,
+    scoringEnabled: payload.scoringEnabled === true && scoringPromptReady,
+    reflectionEnabled: payload.reflectionEnabled === true && reflectionPromptReady,
     dailyTokenLimit: Math.floor(dailyTokenLimit),
     maxOutputTokens: Math.floor(maxOutputTokens),
     updatedAt: currentTimestamp_(),
     updatedBy: String(payload.currentUser && payload.currentUser.email || '')
   };
   properties.setProperty(RUMBLE_AI_SETTINGS_KEY_, JSON.stringify(saved));
-  return adminGetAiSettings_();
+  return Object.assign(adminGetAiSettings_(), { promptWarnings: promptWarnings });
 }
 
 function aiTokensUsedToday_() {
