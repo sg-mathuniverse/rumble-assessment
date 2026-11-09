@@ -2264,22 +2264,19 @@ function likelyEnglishGuideText_(text) {
     .replace(new RegExp(tick.repeat(3) + '[\\s\\S]*?' + tick.repeat(3), 'g'), ' ')
     .replace(new RegExp(tick + '[^' + tick + ']*' + tick, 'g'), ' ')
     .replace(/\b(?:PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT)\b/g, ' ');
-  const words = sample.toLowerCase().match(/[a-z]+/g) || [];
-  if (words.length < 18) return false;
-  const englishWords = {
-    the:1, and:1, or:1, but:1, with:1, without:1, from:1, into:1, onto:1,
-    this:1, that:1, these:1, those:1, it:1, its:1, they:1, them:1, their:1,
-    is:1, are:1, was:1, were:1, be:1, been:1, being:1, have:1, has:1, had:1,
-    do:1, does:1, did:1, can:1, could:1, should:1, would:1, will:1, may:1,
-    might:1, must:1, for:1, to:1, of:1, in:1, on:1, at:1, by:1, as:1,
-    if:1, then:1, than:1, when:1, where:1, which:1, who:1, what:1, how:1,
-    because:1, therefore:1, thus:1, hence:1, first:1, next:1, finally:1,
-    answer:1, solution:1, explain:1, explanation:1, calculate:1, determine:1,
-    show:1, prove:1, find:1, given:1, let:1, step:1, steps:1
-  };
+  const signals = [
+    /\b(?:the|this|these|those)\s+[a-z]{2,}\b/gi,
+    /\b(?:is|are|was|were|has|have|had|will|would|should|could|must)\s+(?:be|been|being|the|a|an|[a-z]+ing|[a-z]+ed)\b/gi,
+    /\b(?:therefore|because|however|although|moreover|firstly|secondly|finally|in conclusion|for example|as a result)\b/gi,
+    /\b(?:we|you|they|it)\s+(?:can|should|must|need|are|is|will|would)\b/gi,
+    /\b(?:given that|let us|the answer|the result|the solution|to calculate|to determine|this means)\b/gi
+  ];
   let hits = 0;
-  words.forEach(function (word) { if (englishWords[word]) hits++; });
-  return hits >= 5 && hits / words.length >= 0.045;
+  signals.forEach(function (pattern) {
+    const matches = sample.match(pattern);
+    if (matches) hits += matches.length;
+  });
+  return hits >= 2;
 }
 
 function generateEssayAnswerGuide_(payload) {
@@ -2338,9 +2335,8 @@ function generateEssayAnswerGuide_(payload) {
     finalGuide = retry.content.trim();
     retryUsage = retry.usage || retryUsage;
   }
-  if (likelyEnglishGuideText_(finalGuide)) {
-    throw new Error('Panduan AI masih memuat banyak kalimat bahasa Inggris. Coba lagi; jika berulang, Admin perlu memilih model yang lebih baik dalam bahasa Indonesia.');
-  }
+  // Jangan gagalkan pembuatan hanya karena pemeriksa bahasa menemukan pola yang meragukan;
+  // hasil tetap diberikan agar guru dapat meninjau dan mengeditnya.
 
   const combinedUsage = {
     promptTokens: (Number(result.usage.promptTokens)||0) + (Number(languageResult.usage.promptTokens)||0) + (Number(retryUsage.promptTokens)||0),
