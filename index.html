@@ -315,6 +315,10 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 .gradebook-class-card small,.gradebook-assessment-card small{font-size:11px;color:#6d7890}
 .detail-edit-actions{margin:14px 0;justify-content:flex-start}
 @media(max-width:760px){.summary-class-content{grid-template-columns:1fr}.assessment-class-toggle,.summary-class-toggle{padding:12px}.assessment-class-children{padding:0 9px}.assessment-class-item{flex-wrap:wrap}.section-refresh-button{font-size:12px}}
+
+/* Keep notifications above the autosave status chip in the bundle editor. */
+.toast{bottom:76px!important;right:18px!important;z-index:20001!important;max-width:min(420px,calc(100vw - 36px));line-height:1.5}
+@media(max-width:600px){.toast{left:12px!important;right:12px!important;bottom:76px!important;max-width:none}}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script></head><body><div id="app"></div><div class="toast" id="toast"></div><script>
 async function saveSoloDominantVerification(attemptId){
  const attempt=(s.attempts||[]).find(function(item){return String(item.attemptId)===String(attemptId)});
