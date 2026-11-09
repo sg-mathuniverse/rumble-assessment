@@ -2343,25 +2343,6 @@ function translateAnswerGuideToIndonesian_(text, userData) {
   return String(translated).trim();
 }
 
-function generateEssayAnswerGuide_(payload) {');
-      output = output.replace(new RegExp(escaped, 'g'), function (match) { return protect(match); });
-    }
-  });
-  let translated = '';
-  try {
-    translated = LanguageApp.translate(output, '', 'id');
-  } catch (error) {
-    throw new Error('Panduan AI sudah dibuat, tetapi penerjemahan otomatis ke bahasa Indonesia gagal. Periksa izin layanan terjemahan pada Apps Script lalu coba lagi. Detail: ' + String(error && error.message || error).slice(0, 180));
-  }
-  if (!translated || !String(translated).trim()) {
-    throw new Error('Layanan penerjemahan tidak menghasilkan teks. Silakan coba kembali.');
-  }
-  protectedValues.forEach(function (item) {
-    translated = translated.split(item.token).join(item.value);
-  });
-  return String(translated).trim();
-}
-
 function generateEssayAnswerGuide_(payload) {
   const questionText = requiredText_(payload.questionText, 'Teks soal', 8000);
   const classification = String(payload.classification || 'REGULER').toUpperCase();
