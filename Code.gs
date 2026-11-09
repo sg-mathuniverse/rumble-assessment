@@ -2261,14 +2261,14 @@ function likelyEnglishGuideText_(text) {
   sample = sample
     .replace(/\\\[[\s\S]*?\\\]/g, ' ')
     .replace(/\\\([\s\S]*?\\\)/g, ' ')
-    .replace(new RegExp(tick.repeat(3) + '[\\s\\S]*?' + tick.repeat(3), 'g'), ' ')
+    .replace(new RegExp(tick.repeat(3) + '[\s\\S]*?' + tick.repeat(3), 'g'), ' ')
     .replace(new RegExp(tick + '[^' + tick + ']*' + tick, 'g'), ' ')
     .replace(/\b(?:PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT)\b/g, ' ');
   const signals = [
-    /\b(?:the|this|these|those)\\s+[a-z]{2,}\b/gi,
-    /\b(?:is|are|was|were|has|have|had|will|would|should|could|must)\\s+(?:be|been|being|the|a|an|[a-z]+ing|[a-z]+ed)\b/gi,
+    /\b(?:the|this|these|those)\s+[a-z]{2,}\b/gi,
+    /\b(?:is|are|was|were|has|have|had|will|would|should|could|must)\s+(?:be|been|being|the|a|an|[a-z]+ing|[a-z]+ed)\b/gi,
     /\b(?:therefore|because|however|although|moreover|firstly|secondly|finally|in conclusion|for example|as a result)\b/gi,
-    /\b(?:we|you|they|it)\\s+(?:can|should|must|need|are|is|will|would)\b/gi,
+    /\b(?:we|you|they|it)\s+(?:can|should|must|need|are|is|will|would)\b/gi,
     /\b(?:given that|let us|the answer|the result|the solution|to calculate|to determine|this means)\b/gi
   ];
   let hits = 0;
