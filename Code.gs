@@ -2307,17 +2307,17 @@ function translateAnswerGuideToIndonesian_(text, userData) {
     protectedValues.push({token:token,value:value});
     return token;
   };
-  // Lindungi notasi LaTeX, kode, dan ekspresi matematika sebelum penerjemahan.
+  const tick = String.fromCharCode(96);
   const patterns = [
-    /\\\\\\[[\\s\\S]*?\\\\\\]/g,
-    /\\\\\\([\\s\\S]*?\\\\\\)/g,
-    /\$\$[\\s\\S]*?\$\$/g,
-    /\$[^$\\n]+\$/g,
-    /`{3}[\\s\\S]*?`{3}/g,
-    /`[^`\\n]+`/g,
-    /\\b(?:PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT)\\b/g,
-    /\\b[A-Z]{2,}(?:[-_][A-Z0-9]+)+\\b/g,
-    /\\b\\d+(?:[.,]\\d+)?(?:\\s*[×x*^/]\\s*\\d+)?\\b/g
+    /\\\[[\s\S]*?\\\]/g,
+    /\\\([\s\S]*?\\\)/g,
+    /\$\$[\s\S]*?\$\$/g,
+    /\$[^$\n]+\$/g,
+    new RegExp(tick + '{3}[\\s\\S]*?' + tick + '{3}', 'g'),
+    new RegExp(tick + '[^' + tick + '\\n]+' + tick, 'g'),
+    /\b(?:PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT)\b/g,
+    /\b[A-Z]{2,}(?:[-_][A-Z0-9]+)+\b/g,
+    /\b\d+(?:[.,]\d+)?(?:\s*[×x*^/]\s*\d+)?\b/g
   ];
   patterns.forEach(function (pattern) {
     output = output.replace(pattern, function (match) { return protect(match); });
@@ -2325,7 +2325,24 @@ function translateAnswerGuideToIndonesian_(text, userData) {
   (userData && Array.isArray(userData.learningIndicators) ? userData.learningIndicators : []).forEach(function (item) {
     if (item && item.code) {
       const code = String(item.code);
-      const escaped = code.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\
+      if (code && output.indexOf(code) >= 0) output = output.split(code).join(protect(code));
+    }
+  });
+  let translated = '';
+  try {
+    translated = LanguageApp.translate(output, '', 'id');
+  } catch (error) {
+    throw new Error('Panduan AI sudah dibuat, tetapi penerjemahan otomatis ke bahasa Indonesia gagal. Periksa izin layanan terjemahan pada Apps Script lalu coba lagi. Detail: ' + String(error && error.message || error).slice(0, 180));
+  }
+  if (!translated || !String(translated).trim()) {
+    throw new Error('Layanan penerjemahan tidak menghasilkan teks. Silakan coba kembali.');
+  }
+  protectedValues.forEach(function (item) {
+    translated = translated.split(item.token).join(item.value);
+  });
+  return String(translated).trim();
+}
+
 function generateEssayAnswerGuide_(payload) {');
       output = output.replace(new RegExp(escaped, 'g'), function (match) { return protect(match); });
     }
