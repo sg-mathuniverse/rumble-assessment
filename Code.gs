@@ -2297,6 +2297,54 @@ function isMetaAnswerGuideText_(text) {
   return patterns.some(function (pattern) { return pattern.test(sample); });
 }
 
+
+function translateAnswerGuideToIndonesian_(text, userData) {
+  let output = String(text || '').trim();
+  if (!output) return output;
+  const protectedValues = [];
+  const protect = function (value) {
+    const token = 'ZXQKEEP' + String(protectedValues.length).padStart(3, '0') + 'QXZ';
+    protectedValues.push({token:token,value:value});
+    return token;
+  };
+  // Lindungi notasi LaTeX, kode, dan ekspresi matematika sebelum penerjemahan.
+  const patterns = [
+    /\\\\\\[[\\s\\S]*?\\\\\\]/g,
+    /\\\\\\([\\s\\S]*?\\\\\\)/g,
+    /\$\$[\\s\\S]*?\$\$/g,
+    /\$[^$\\n]+\$/g,
+    /`{3}[\\s\\S]*?`{3}/g,
+    /`[^`\\n]+`/g,
+    /\\b(?:PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT)\\b/g,
+    /\\b[A-Z]{2,}(?:[-_][A-Z0-9]+)+\\b/g,
+    /\\b\\d+(?:[.,]\\d+)?(?:\\s*[×x*^/]\\s*\\d+)?\\b/g
+  ];
+  patterns.forEach(function (pattern) {
+    output = output.replace(pattern, function (match) { return protect(match); });
+  });
+  (userData && Array.isArray(userData.learningIndicators) ? userData.learningIndicators : []).forEach(function (item) {
+    if (item && item.code) {
+      const code = String(item.code);
+      const escaped = code.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\
+function generateEssayAnswerGuide_(payload) {');
+      output = output.replace(new RegExp(escaped, 'g'), function (match) { return protect(match); });
+    }
+  });
+  let translated = '';
+  try {
+    translated = LanguageApp.translate(output, '', 'id');
+  } catch (error) {
+    throw new Error('Panduan AI sudah dibuat, tetapi penerjemahan otomatis ke bahasa Indonesia gagal. Periksa izin layanan terjemahan pada Apps Script lalu coba lagi. Detail: ' + String(error && error.message || error).slice(0, 180));
+  }
+  if (!translated || !String(translated).trim()) {
+    throw new Error('Layanan penerjemahan tidak menghasilkan teks. Silakan coba kembali.');
+  }
+  protectedValues.forEach(function (item) {
+    translated = translated.split(item.token).join(item.value);
+  });
+  return String(translated).trim();
+}
+
 function generateEssayAnswerGuide_(payload) {
   const questionText = requiredText_(payload.questionText, 'Teks soal', 8000);
   const classification = String(payload.classification || 'REGULER').toUpperCase();
@@ -2355,6 +2403,8 @@ function generateEssayAnswerGuide_(payload) {
     finalModel = repaired.model || finalModel;
     repairUsage = repaired.usage || repairUsage;
   }
+  finalGuide = translateAnswerGuideToIndonesian_(finalGuide, userData);
+
   if (!finalGuide || isMetaAnswerGuideText_(finalGuide) || likelyEnglishGuideText_(finalGuide)) {
     throw new Error('Model AI belum menghasilkan panduan jawaban berbahasa Indonesia; respons terdeteksi sebagai komentar meta atau masih banyak berbahasa Inggris. Admin perlu mencoba model AI lain.');
   }
