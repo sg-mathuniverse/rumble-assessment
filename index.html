@@ -822,12 +822,40 @@ function progress(){
  const history=!s.attemptsLoaded?'<p class="muted">Memuat riwayat…</p>':!attempts.length?'<p class="muted">Belum ada pengerjaan yang tercatat pada akun ini.</p>':Object.keys(groups).sort().map(subject=>'<section class="subject-history"><h3>'+esc(subject)+'</h3>'+groups[subject].map(a=>{const score=a.status==='graded'&&Number(a.maxScore)>0?String(Math.round(Number(a.score)/Number(a.maxScore)*100)):'—';return '<div class="listitem"><div class="symbol">✓</div><div class="grow"><b>'+esc(a.assessmentTitle||a.assessmentId||'Asesmen')+'</b><small>'+esc(formatLocalDateTime(a.submittedAt))+'</small>'+(a.status==='graded'&&a.teacherFeedback?'<p class="teacher-feedback"><b>Umpan balik guru:</b> '+esc(a.teacherFeedback)+'</p>':'')+'</div><span class="pill '+(a.status==='graded'?'live':'')+'">'+(a.status==='graded'?'Sudah dinilai':'Menunggu koreksi')+'</span><strong>'+score+'</strong></div>'}).join('')+'</section>').join('');
  return head('RUANG SISWA','Perkembangan belajarku','Lihat riwayat pengerjaan dan nilai yang sudah dinilai.')+statsHtml+'<div class="card"><div class="actions"><h3>Riwayat asesmen</h3><button class="btn" onclick="loadAttempts()">Muat ulang</button></div>'+history+'</div>';
 }
+function downloadGradebookXls(){
+ const table=document.querySelector('.gradebook-table');if(!table){toast('Tabel rekap belum tersedia.');return}
+ const title=(document.querySelector('.head h2')?.textContent||'Rekap_Nilai').replace(/[\\/:*?"<>|]/g,'-');
+ const documentHtml='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:6px}th{font-weight:bold;background:#e8eefb}</style></head><body>'+table.outerHTML+'</body></html>';
+ const blob=new Blob(['\uFEFF',documentHtml],{type:'application/vnd.ms-excel;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=title+'.xls';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
+async function exportReflectionDocx(assessmentId,assessmentTitle){
+ const attempt=(s.attempts||[]).find(function(a){return String(a.assessmentId)===String(assessmentId)}),reflection=attempt&&attempt.soloClassReflection,r=reflection&&reflection.reflection;
+ if(!r){toast('Refleksi belum tersedia untuk diekspor.');return}
+ if(!window.docx||!window.docx.Document||!window.docx.Packer){toast('Komponen DOCX belum termuat. Periksa koneksi internet lalu coba lagi.');return}
+ try{
+  const D=window.docx,children=[];
+  children.push(new D.Paragraph({text:'Refleksi Pembelajaran',heading:D.HeadingLevel.TITLE}));
+  children.push(new D.Paragraph({text:'Asesmen: '+String(assessmentTitle||'Asesmen SOLO Tax')}));
+  children.push(new D.Paragraph({text:'Dibuat: '+String(reflection.generatedAt||'')}));
+  function section(title,content){children.push(new D.Paragraph({text:title,heading:D.HeadingLevel.HEADING_1}));children.push(new D.Paragraph({text:String(content||'-')}))}
+  section('1. Ketercapaian tujuan pembelajaran',r.tpAchievement);
+  section('2. Capaian berdasarkan jenis kemampuan',r.abilityAnalysis);
+  section('3. Analisis kesalahan dan kualitas soal',r.errorAndItemQuality);
+  section('4. Refleksi pembelajaran',r.learningReflection);
+  children.push(new D.Paragraph({text:'5. Rekomendasi tindak lanjut untuk guru',heading:D.HeadingLevel.HEADING_1}));
+  (r.teacherRecommendations||[]).forEach(function(item){children.push(new D.Paragraph({text:String(item),bullet:{indent:360,hanging:180}}))});
+  section('Keterbatasan analisis',r.limitations);
+  children.push(new D.Paragraph({text:'Dokumen ini merupakan hasil refleksi berbantuan AI dan perlu ditinjau oleh guru.'}));
+  const doc=new D.Document({sections:[{children:children}]}),blob=await D.Packer.toBlob(doc),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download='Refleksi_Pembelajaran.docx';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('Ekspor DOCX selesai.');
+ }catch(error){toast('Gagal mengekspor DOCX: '+(error.message||error))}
+}
 function soloClassReflectionPanel(attempt){
  const reflection=attempt&&attempt.soloClassReflection;
  const r=reflection&&reflection.reflection;
  if(!r)return '<div class="card"><div class="actions"><h3>Refleksi pembelajaran kelas</h3><button class="btn primary" onclick="requestSoloClassReflection(\''+esc(attempt.assessmentId)+'\')">Buat Refleksi AI</button></div><p class="muted">Refleksi dibuat atas permintaan guru setelah hasil akhir murid dinilai. AI menggunakan data agregat dan indikator yang sudah diverifikasi.</p></div>';
  const recommendations=(r.teacherRecommendations||[]).map(function(x){return '<li>'+esc(x)+'</li>'}).join('');
- return '<div class="card"><div class="actions"><h3>Refleksi pembelajaran kelas</h3><button class="btn" onclick="requestSoloClassReflection(\''+esc(attempt.assessmentId)+'\')">Buat ulang Refleksi AI</button></div><p class="muted">Dibuat '+esc(formatLocalDateTime(reflection.generatedAt))+' · '+esc(reflection.model||'')+' · '+esc(reflection.promptId||'')+'</p><h4>1. Ketercapaian tujuan pembelajaran</h4><p>'+esc(r.tpAchievement)+'</p><h4>2. Capaian berdasarkan jenis kemampuan</h4><p>'+esc(r.abilityAnalysis)+'</p><h4>3. Analisis kesalahan dan kualitas soal</h4><p>'+esc(r.errorAndItemQuality)+'</p><h4>4. Refleksi pembelajaran</h4><p>'+esc(r.learningReflection)+'</p><h4>5. Rekomendasi tindak lanjut untuk guru</h4><ol>'+recommendations+'</ol><p><b>Keterbatasan analisis:</b> '+esc(r.limitations)+'</p></div>';
+ return '<div class="card"><div class="actions"><h3>Refleksi pembelajaran kelas</h3><button class="btn" onclick="requestSoloClassReflection(\''+esc(attempt.assessmentId)+'\')">Buat ulang Refleksi AI</button><button class="btn primary" onclick="exportReflectionDocx(\''+esc(attempt.assessmentId)+'\',\''+esc(attempt.assessmentTitle||'Asesmen SOLO Tax')+'\')">Ekspor .docx</button></div><p class="muted">Dibuat '+esc(formatLocalDateTime(reflection.generatedAt))+' · '+esc(reflection.model||'')+' · '+esc(reflection.promptId||'')+'</p><h4>1. Ketercapaian tujuan pembelajaran</h4><p>'+esc(r.tpAchievement)+'</p><h4>2. Capaian berdasarkan jenis kemampuan</h4><p>'+esc(r.abilityAnalysis)+'</p><h4>3. Analisis kesalahan dan kualitas soal</h4><p>'+esc(r.errorAndItemQuality)+'</p><h4>4. Refleksi pembelajaran</h4><p>'+esc(r.learningReflection)+'</p><h4>5. Rekomendasi tindak lanjut untuk guru</h4><ol>'+recommendations+'</ol><p><b>Keterbatasan analisis:</b> '+esc(r.limitations)+'</p></div>';
 }
 async function requestSoloClassReflection(assessmentId){
  if(!confirm('Buat refleksi AI menggunakan rekap nilai akhir dan verifikasi indikator kelas? Data yang dikirim berupa statistik agregat tanpa nama atau identitas siswa.'))return;
@@ -884,7 +912,7 @@ function gradebook(){
  const list=group.items,qs=list[0].questionDetails||[];
  const isSoloTax=String((list[0]||{}).assessmentClassification||'').toUpperCase()==='SOLO_TAX';
  const table='<div class="table-scroll"><table class="gradebook-table"><thead><tr><th>Nama murid</th>'+qs.map((q,i)=>'<th>Soal '+(i+1)+'<small>'+Number(q.points||0)+' poin</small></th>').join('')+'<th>Nilai akhir</th>'+(isSoloTax?'<th>Level SOLO Murid</th><th>Keterangan</th>':'')+'</tr></thead><tbody>'+list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),scores=a.questionScores||{},solo= isSoloTax?soloGradebookSummary(a):null;return '<tr><td>'+esc(user?user.name:a.studentId)+'</td>'+qs.map(q=>'<td>'+((a.status==='graded'||a.status==='needs_review')&&scores[q.id]!==undefined?esc(scores[q.id]):'—')+'</td>').join('')+'<td><b>'+(a.status==='graded'&&Number(a.maxScore)>0?Math.round(Number(a.score)/Number(a.maxScore)*100):'—')+'</b></td>'+(isSoloTax?'<td>'+esc(solo.level)+'</td><td>'+esc(solo.note)+'</td>':'')+'</tr>'}).join('')+'</tbody></table></div>';
- return head('REKAP NILAI',esc(group.title),esc(cls)+' · '+esc(group.subject))+breadcrumb+'<div class="card"><div class="actions"><h3>Nilai siswa</h3><span class="muted">'+list.length+' sesi</span></div>'+table+'</div>'+(isSoloTax?soloClassReflectionPanel(list[0]):'');
+ return head('REKAP NILAI',esc(group.title),esc(cls)+' · '+esc(group.subject))+breadcrumb+'<div class="card"><div class="actions"><h3>Nilai siswa</h3><span class="muted">'+list.length+' sesi</span><button class="btn primary" onclick="downloadGradebookXls()">Ekspor .xls</button></div>'+table+'</div>'+(isSoloTax?soloClassReflectionPanel(list[0]):'');
 }
 function selectGradebookClass(name){s.selectedGradebookClass=String(name||'');s.selectedGradebookAssessmentId='';render()}
 function selectGradebookAssessment(id){s.selectedGradebookAssessmentId=String(id||'');render()}
