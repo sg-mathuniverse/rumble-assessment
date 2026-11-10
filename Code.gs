@@ -74,14 +74,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v19';
+  const cacheKey = 'rumble_frontend_html_v20';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/8e195fa9f613281682d502ab9fb1b7ee16690e88/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/e4c9dbae044201eacfd72db085fd84b7f72c23d9/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -2065,7 +2065,7 @@ function requestSoloAiAssessment_(payload) {
           indicatorAnalysis: normalizedIndicators
         };
       });
-      if (!deterministic.length) {
+      {
         const dominant = parsed.dominantLevel;
         if (dominant !== null) {
           if (!dominant || typeof dominant !== 'object' || Array.isArray(dominant)) {
