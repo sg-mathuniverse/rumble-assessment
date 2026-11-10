@@ -831,7 +831,7 @@ function downloadGradebookXlsx(){
   const sourceRows=Array.from(table.querySelectorAll('tr'));
   if(!sourceRows.length)throw new Error('Tabel rekap kosong.');
   const headerCells=Array.from(sourceRows[0].children);
-  const expandedHeaders=[],questionIndexes=[];
+  const headers=[],questionIndexes=[];
   headerCells.forEach(function(cell,index){
    const small=cell.querySelector('small');
    if(small){
@@ -839,31 +839,23 @@ function downloadGradebookXlsx(){
     if(smallClone)smallClone.remove();
     const questionTitle=(clone.textContent||'').trim();
     const weight=(small.textContent||'').trim();
-    expandedHeaders.push(questionTitle+' (skor)', 'Bobot '+questionTitle+' ('+weight.replace(/\s*poin\s*/i,'').trim()+' poin)');
-    questionIndexes.push({index:index,weight:weight});
+    headers.push(questionTitle+' ('+weight+')');
+    questionIndexes.push(index);
    }else{
-    expandedHeaders.push((cell.innerText||cell.textContent||'').trim());
+    headers.push((cell.innerText||cell.textContent||'').trim());
    }
   });
-  const output=[expandedHeaders];
+  const output=[headers];
   sourceRows.slice(1).forEach(function(row){
-   const cells=Array.from(row.children),expanded=[];
-   cells.forEach(function(cell,index){
-    const q=questionIndexes.find(function(item){return item.index===index});
-    const value=(cell.innerText||cell.textContent||'').trim();
-    if(q){
-     expanded.push(value);
-     expanded.push(q.weight.replace(/\s*poin\s*/i,'').trim());
-    }else expanded.push(value);
-   });
-   output.push(expanded);
+   const cells=Array.from(row.children);
+   output.push(cells.map(function(cell){return (cell.innerText||cell.textContent||'').trim()}));
   });
   const worksheet=XLSX.utils.aoa_to_sheet(output);
-  worksheet['!cols']=expandedHeaders.map(function(label){return {wch:Math.min(48,Math.max(14,String(label).length+3))}});
+  worksheet['!cols']=headers.map(function(label){return {wch:Math.min(48,Math.max(14,String(label).length+3))}});
   const workbook=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook,worksheet,'Rekap Nilai');
   XLSX.writeFile(workbook,title+'.xlsx',{bookType:'xlsx',compression:true});
-  toast('Ekspor XLSX berhasil dibuat. Kolom skor dan bobot soal sudah dipisahkan.');
+  toast('Ekspor XLSX berhasil dibuat. Bobot dicantumkan pada judul kolom soal.');
  }catch(error){toast('Gagal mengekspor XLSX: '+(error.message||error))}
 }
 async function exportReflectionDocx(assessmentId,assessmentTitle){
