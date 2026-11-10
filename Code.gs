@@ -74,14 +74,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v24';
+  const cacheKey = 'rumble_frontend_html_v25';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/7d22729a6ea713341eadc85a29aab053d5a74e16/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/3b621a65fa6ada79c0e9ab3a72d1c1c7405ff1dc/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -2323,7 +2323,7 @@ function adminSaveAiSettings_(payload) {
 }
 
 function aiTokensUsedToday_() {
-  const timezone = Session.getScriptTimeZone();
+  const timezone = 'Asia/Jakarta';
   const today = Utilities.formatDate(new Date(), timezone, 'yyyy-MM-dd');
   return listRows_('Events').filter(function (event) {
     return String(event.eventType || '').indexOf('AI_') === 0 &&
