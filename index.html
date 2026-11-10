@@ -351,6 +351,7 @@ async function saveSoloVerification(attemptId){
  try{
   const response=await api('saveSoloIndicatorVerification',{attemptId:attemptId,results:results});
   if(!response||!response.ok)throw Error(response&&response.error?response.error:'Verifikasi indikator gagal disimpan');
+  const savedResult=response.data&&typeof response.data==='object'?response.data:response;
   const recommendation=(attempt.soloReview||{}).recommendation;
   if(recommendation){
    const level=document.getElementById('solo_dominant_level_'+attemptId),reason=document.getElementById('solo_dominant_reason_'+attemptId);
@@ -359,7 +360,12 @@ async function saveSoloVerification(attemptId){
    const levelResponse=await api('saveSoloDominantVerification',{attemptId:attemptId,teacherLevel:level.value,teacherReason:reason?reason.value:''});
    if(!levelResponse||!levelResponse.ok)throw Error(levelResponse&&levelResponse.error?levelResponse.error:'Verifikasi indikator tersimpan, tetapi verifikasi level gagal. Tekan tombol simpan kembali untuk melanjutkan.');
   }
-  toast('Verifikasi tersimpan. Rata-rata ketercapaian TP: '+Number(response.tpAchievement.averagePercentage).toFixed(2)+'% ('+(response.tpAchievement.category==='exceeds'?'Melampaui':response.tpAchievement.category==='achieved'?'Tercapai':'Belum Tercapai')+').');
+  const achievement=savedResult.tpAchievement;
+  if(achievement&&achievement.averagePercentage!==undefined&&achievement.averagePercentage!==null){
+   toast('Verifikasi tersimpan. Rata-rata ketercapaian TP: '+Number(achievement.averagePercentage).toFixed(2)+'% ('+(achievement.category==='exceeds'?'Melampaui':achievement.category==='achieved'?'Tercapai':'Belum Tercapai')+').');
+  }else{
+   toast('Verifikasi indikator berhasil disimpan.');
+  }
   await loadAttempts();
  }catch(error){toast('Gagal menyimpan verifikasi: '+error.message)}
 }
@@ -646,13 +652,23 @@ function soloAiPanel(attempt){
  if(String(attempt.assessmentClassification||'').toUpperCase()!=='SOLO_TAX')return '';
  const ai=attempt.soloAiAssessment,results=ai&&Array.isArray(ai.results)?ai.results:[];
  const labels={mastered:'Dikuasai',developing:'Berkembang',needs_improvement:'Perlu ditingkatkan',insufficient_evidence:'Bukti belum cukup'};
+ const indicatorLookup={};
+ (Array.isArray(attempt.soloIndicators)?attempt.soloIndicators:[]).forEach(function(indicator){
+  indicatorLookup[String(indicator.indicatorId)]=indicator;
+ });
  const rows=results.map(function(item){
   const evidence=(item.evidence||[]).map(function(value){return '<li>'+esc(value)+'</li>'}).join('');
-  const indicators=(item.indicatorAnalysis||[]).map(function(value){const percentage=value.recommendedPercentage===null||value.recommendedPercentage===undefined?'':' · rekomendasi '+Number(value.recommendedPercentage).toLocaleString('id-ID')+'%';return '<li>'+esc(value.indicatorId)+': '+esc(labels[value.status]||value.status)+percentage+' — '+esc(value.evidence||'')+'</li>'}).join('');
+  const indicators=(item.indicatorAnalysis||[]).map(function(value){
+   const meta=indicatorLookup[String(value.indicatorId)]||{};
+   const code=String(meta.indicatorCode||'Indikator TP');
+   const description=String(meta.description||'');
+   const percentage=value.recommendedPercentage===null||value.recommendedPercentage===undefined?'':' · rekomendasi '+Number(value.recommendedPercentage).toLocaleString('id-ID')+'%';
+   return '<li><b>'+esc(code)+'</b>'+(description?' — '+esc(description):'')+': '+esc(labels[value.status]||value.status)+percentage+' — '+esc(value.evidence||'')+'</li>';
+  }).join('');
   const score=item.recommendedScore===null||item.recommendedScore===undefined?'Belum ada rekomendasi nilai':Number(item.recommendedScore)+' / '+Number(item.maximumScore)+' poin';
   return '<section class="report-question"><b>Soal '+Number(item.order)+'</b><p><b>Rekomendasi:</b> '+esc(score)+'</p><p>'+esc(item.reason||'')+'</p>'+(evidence?'<b>Bukti jawaban</b><ul>'+evidence+'</ul>':'')+(indicators?'<b>Analisis indikator</b><ul>'+indicators+'</ul>':'')+(item.manualPhotoReviewRequired?'<div class="notice">Foto tidak dikirim ke AI. Guru wajib memeriksa foto secara langsung sebelum menetapkan nilai.</div>':'')+(!item.evidenceSufficient?'<div class="notice">Bukti belum cukup untuk rekomendasi otomatis. Guru perlu menilai secara manual.</div>':'')+'</section>';
  }).join('');
- return '<div class="card"><div class="actions"><h3>AI Penilaian SOLO Tax</h3>'+(ai?'<span class="pill live">Rekomendasi tersedia</span>':'<span class="pill">Belum dianalisis</span>')+'</div><p class="muted">AI mencocokkan jawaban teks dengan panduan jawaban, rubrik, dan indikator TP. Jika skor guru sudah disimpan, skor itu ikut dikirim sebagai konteks pembanding. Rekomendasi AI tidak otomatis menjadi nilai final.</p><p class="muted">Setelah guru mengubah atau menyimpan skor, jalankan analisis AI kembali agar rekomendasi level dan keterangannya menggunakan skor terbaru. Foto jawaban tetap diperiksa manual.</p>'+'<button class="btn primary" onclick="requestSoloAiAssessment(\''+esc(attempt.attemptId)+'\')">'+(ai?'Analisis ulang dengan AI':'Minta analisis AI')+'</button>'+(ai?'<p class="muted">Provider: '+esc(ai.provider)+' · Model: '+esc(ai.model)+' · Prompt: '+esc(ai.promptId)+' · '+Number((ai.usage||{}).totalTokens||0)+' token</p>'+rows+'<button class="btn" onclick="applySoloAiScores(\''+esc(attempt.attemptId)+'\')">Isi kolom skor dari rekomendasi (belum disimpan)</button>':'')+'</div>';
+ return '<div class="card"><div class="actions"><h3>AI Penilaian SOLO Tax</h3>'+(ai?'<span class="pill live">Rekomendasi tersedia</span>':'<span class="pill">Belum dianalisis</span>')+'</div><p class="muted">AI mencocokkan jawaban teks dengan panduan jawaban, rubrik, dan indikator TP. Jika skor guru sudah disimpan, skor itu ikut dikirim sebagai konteks pembanding. Rekomendasi AI tidak otomatis menjadi nilai final.</p><p class="muted">Rekomendasi AI tetap tersimpan sebagai pembanding setelah guru menyimpan atau menyesuaikan skor. Pilih Analisis ulang jika ingin AI mempertimbangkan skor guru yang sudah tersimpan. Foto jawaban tetap diperiksa manual.</p>'+'<button class="btn primary" onclick="requestSoloAiAssessment(\''+esc(attempt.attemptId)+'\')">'+(ai?'Analisis ulang dengan AI':'Minta analisis AI')+'</button>'+(ai?'<p class="muted">Provider: '+esc(ai.provider)+' · Model: '+esc(ai.model)+' · Prompt: '+esc(ai.promptId)+' · '+Number((ai.usage||{}).totalTokens||0)+' token</p>'+rows+'<button class="btn" onclick="applySoloAiScores(\''+esc(attempt.attemptId)+'\')">Isi kolom skor dari rekomendasi (belum disimpan)</button>':'')+'</div>';
 }
 
 function soloAiIndicatorRecommendation(attempt,indicator){
