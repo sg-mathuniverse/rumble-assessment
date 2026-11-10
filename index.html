@@ -736,8 +736,8 @@ function soloVerificationPanel(attempt){
  const history=(review.history||[]).slice().reverse().map(function(item){return '<li>'+esc(formatLocalDateTime(item.eventAt))+' · '+esc(item.verifiedBy||'Guru')+' · '+(item.eventType==='SOLO_INDICATOR_VERIFICATION'?'Verifikasi disimpan':'Verifikasi perlu diperiksa ulang setelah perubahan nilai')+'</li>'}).join('');
  const dominant=review.dominant||{},recommendation=review.recommendation||null,levelOptions=['PRESTRUCTURAL','UNISTRUCTURAL','MULTISTRUKTURAL','RELATIONAL','EXTENDED_ABSTRACT'];
  const levelLabels={PRESTRUCTURAL:'Prestruktural',UNISTRUKTURAL:'Unistruktural',MULTISTRUKTURAL:'Multistruktural',RELATIONAL:'Relasional',EXTENDED_ABSTRACT:'Abstrak Diperluas'};
- const dominantHtml=dominant.status==='verified'?'<div class="notice"><b>Level SOLO dominan terverifikasi</b><p>Rekomendasi AI: '+esc(dominant.aiLevel)+' · Hasil verifikasi guru: '+esc(dominant.teacherLevel)+'</p><p>'+esc(dominant.aiEvidenceSummary||'')+'</p>'+(dominant.teacherReason?'<p>Catatan guru: '+esc(dominant.teacherReason)+'</p>':'')+'<small>'+esc(dominant.aiProvider||'')+' / '+esc(dominant.aiModel||'')+' · Prompt '+esc(dominant.promptVersion||'')+'</small></div>':'<div class="notice"><b>Level SOLO dominan belum diverifikasi.</b><p>Rekomendasi AI mempertimbangkan analisis jawaban uraian jika tersedia, rata-rata persentase skor guru per soal, dan rata-rata ketercapaian indikator. Jika hanya tersedia foto, rekomendasi level bersifat sementara berdasarkan data skor dan indikator; AI tidak membaca foto.</p></div>'+
- (recommendation?'<div class="report-question"><b>Rekomendasi AI: '+esc(levelLabels[recommendation.level]||recommendation.level)+'</b><p>'+esc(recommendation.evidenceSummary||'')+'</p><p><b>Keterangan AI:</b> '+esc(recommendation.keterangan||'Keterangan belum tersedia.')+'</p><p><b>Dasar rekomendasi:</b> '+(recommendation.recommendationBasis==='quantitative_only_provisional'?'Skor guru dan persentase indikator (sementara)': 'Analisis jawaban dan data kuantitatif')+'</p><ul>'+((recommendation.questionEvidence||[]).map(function(item){const q=(attempt.questionDetails||[]).find(function(x){return String(x.id)===String(item.questionId)});return '<li><b>Soal '+esc(q?q.order:item.questionId)+':</b> '+esc(item.evidence)+'</li>'}).join(''))+'</ul><small>'+esc(review.recommendationProvider||'')+' / '+esc(review.recommendationModel||'')+' · Prompt '+esc(review.recommendationPromptVersion||'')+'</small><div class="field"><label for="solo_dominant_level_'+esc(attempt.attemptId)+'">Hasil verifikasi level oleh guru</label><select id="solo_dominant_level_'+esc(attempt.attemptId)+'">'+levelOptions.map(function(level){return '<option value="'+level+'" '+(level===recommendation.level?'selected':'')+'>'+levelLabels[level]+'</option>'}).join('')+'</select></div><div class="field"><label for="solo_dominant_reason_'+esc(attempt.attemptId)+'">Alasan guru (wajib jika berbeda dari rekomendasi AI)</label><textarea id="solo_dominant_reason_'+esc(attempt.attemptId)+'" rows="3" maxlength="3000" placeholder="Tuliskan alasan jika memilih level berbeda."></textarea></div></div>':'<div class="notice">Rekomendasi AI level dominan belum tersedia atau bukti belum cukup. Periksa apakah analisis AI berhasil mencakup seluruh soal uraian.</div>');
+ const dominantHtml=dominant.status==='verified'?'<div class="notice"><b>Level SOLO dominan terverifikasi</b><p>Rekomendasi AI: '+esc(soloLevelLabel(dominant.aiLevel))+' · Hasil verifikasi guru: '+esc(soloLevelLabel(dominant.teacherLevel))+'</p><p>'+esc(dominant.aiEvidenceSummary||'')+'</p>'+(dominant.teacherReason?'<p>Catatan guru: '+esc(dominant.teacherReason)+'</p>':'')+'<small>'+esc(dominant.aiProvider||'')+' / '+esc(dominant.aiModel||'')+' · Prompt '+esc(dominant.promptVersion||'')+'</small></div>':'<div class="notice"><b>Level SOLO dominan belum diverifikasi.</b><p>Rekomendasi AI mempertimbangkan analisis jawaban uraian jika tersedia, rata-rata persentase skor guru per soal, dan rata-rata ketercapaian indikator. Jika hanya tersedia foto, rekomendasi level bersifat sementara berdasarkan data skor dan indikator; AI tidak membaca foto.</p></div>'+
+ (recommendation?'<div class="report-question"><b>Rekomendasi AI: '+esc(levelLabels[normalizeSoloLevel(recommendation.level)]||soloLevelLabel(recommendation.level))+'</b><p>'+esc(recommendation.evidenceSummary||'')+'</p><p><b>Keterangan AI:</b> '+esc(recommendation.keterangan||'Keterangan belum tersedia.')+'</p><p><b>Dasar rekomendasi:</b> '+(recommendation.recommendationBasis==='quantitative_only_provisional'?'Skor guru dan persentase indikator (sementara)': 'Analisis jawaban dan data kuantitatif')+'</p><ul>'+((recommendation.questionEvidence||[]).map(function(item){const q=(attempt.questionDetails||[]).find(function(x){return String(x.id)===String(item.questionId)});return '<li><b>Soal '+esc(q?q.order:item.questionId)+':</b> '+esc(item.evidence)+'</li>'}).join(''))+'</ul><small>'+esc(review.recommendationProvider||'')+' / '+esc(review.recommendationModel||'')+' · Prompt '+esc(review.recommendationPromptVersion||'')+'</small><div class="field"><label for="solo_dominant_level_'+esc(attempt.attemptId)+'">Hasil verifikasi level oleh guru</label><select id="solo_dominant_level_'+esc(attempt.attemptId)+'">'+levelOptions.map(function(level){return '<option value="'+level+'" '+(level===normalizeSoloLevel(recommendation.level)?'selected':'')+'>'+levelLabels[level]+'</option>'}).join('')+'</select></div><div class="field"><label for="solo_dominant_reason_'+esc(attempt.attemptId)+'">Alasan guru (wajib jika berbeda dari rekomendasi AI)</label><textarea id="solo_dominant_reason_'+esc(attempt.attemptId)+'" rows="3" maxlength="3000" placeholder="Tuliskan alasan jika memilih level berbeda."></textarea></div></div>':'<div class="notice">Rekomendasi AI level dominan belum tersedia atau bukti belum cukup. Periksa apakah analisis AI berhasil mencakup seluruh soal uraian.</div>');
  return '<div class="card"><div class="actions"><h3>Verifikasi ketercapaian indikator</h3><span class="pill '+(review.status==='verified'?'live':'')+'">'+(review.status==='verified'?'Terverifikasi':'Menunggu verifikasi')+'</span></div><p class="muted">Persentase yang terisi dari AI merupakan rekomendasi estimasi berdasarkan bukti per soal; untuk indikator yang terkait beberapa soal, sistem memakai rata-rata sederhana. Guru dapat mengubah angka dan bukti sebelum menyimpan. Kategori ditentukan otomatis: lebih dari 85% = Melampaui; 70–85% = Tercapai; kurang dari 70% = Belum Tercapai. Ketercapaian TP dihitung dari rata-rata seluruh indikator dengan bobot sama.</p>'+legacyNotice+rows+achievementHtml+'<button class="btn primary" '+(attempt.status!=='graded'?'disabled':'')+' onclick="saveSoloVerification(\''+esc(attempt.attemptId)+'\')">Verifikasi rekomendasi AI dan indikator</button>'+(review.verifiedAt?'<p class="muted">Verifikasi terakhir: '+esc(formatLocalDateTime(review.verifiedAt))+' · '+esc(review.verifiedBy||'')+'</p>':'')+(history?'<details class="report-question-text"><summary>Riwayat verifikasi</summary><ol>'+history+'</ol></details>':'')+'</div><div class="card"><h3>Level SOLO dominan</h3>'+dominantHtml+'</div>';
 }
 function reports(){
@@ -835,25 +835,39 @@ async function requestSoloClassReflection(assessmentId){
  catch(error){toast('Gagal membuat Refleksi AI: '+error.message)}
 }
 
+function normalizeSoloLevel(value){
+ const raw=String(value||'').trim().toUpperCase().replace(/[ -]+/g,'_');
+ return ({UNISTRUCTURAL:'UNISTRUKTURAL',UNISTRUKTURAL:'UNISTRUKTURAL'})[raw]||raw;
+}
+function soloLevelLabel(value){
+ const labels={PRESTRUCTURAL:'Prestruktural',UNISTRUKTURAL:'Unistruktural',MULTISTRUKTURAL:'Multistruktural',RELATIONAL:'Relasional',EXTENDED_ABSTRACT:'Abstrak Diperluas'};
+ return labels[normalizeSoloLevel(value)]||'Belum diverifikasi';
+}
 function soloGradebookSummary(attempt){
  const review=attempt.soloReview||{},dominant=review.dominant||{},recommendation=review.recommendation||{};
- const labels={PRESTRUCTURAL:'Prestructural',UNISTRUKTURAL:'Unistructural',MULTISTRUKTURAL:'Multistructural',RELATIONAL:'Relational',EXTENDED_ABSTRACT:'Extended Abstract'};
- const teacherLevel=String(dominant.teacherLevel||'').toUpperCase().replace(/[ -]+/g,'_');
- const aiLevel=String(recommendation.level||'').toUpperCase().replace(/[ -]+/g,'_');
- let level=dominant.status==='verified'&&labels[teacherLevel]?labels[teacherLevel]:labels[aiLevel]?'Rekomendasi AI: '+labels[aiLevel]+' (belum diverifikasi)':'Belum diverifikasi';
- const achievement=review.tpAchievement||{};
- const categoryLabels={exceeds:'Melampaui',achieved:'Tercapai',not_achieved:'Belum tercapai'};
+ const teacherLevel=normalizeSoloLevel(dominant.teacherLevel),aiLevel=normalizeSoloLevel(recommendation.level);
+ const verified=dominant.status==='verified'&&soloLevelLabel(teacherLevel)!=='Belum diverifikasi';
+ const level=verified?soloLevelLabel(teacherLevel):soloLevelLabel(aiLevel)!=='Belum diverifikasi'?'Rekomendasi AI: '+soloLevelLabel(aiLevel)+' (belum diverifikasi)':'Belum diverifikasi';
+ const finalScore=Number(attempt.score),maxScore=Number(attempt.maxScore),finalPct=isFinite(finalScore)&&isFinite(maxScore)&&maxScore>0?Math.round(finalScore/maxScore*100):null;
+ const results=Array.isArray(review.results)?review.results:[],refs=Array.isArray(attempt.soloIndicators)?attempt.soloIndicators:[];
+ const valid=results.filter(x=>x.percentage!==undefined&&x.percentage!==null&&isFinite(Number(x.percentage)));
+ const named=function(x){const ref=refs.find(y=>String(y.indicatorId)===String(x.indicatorId));return ref?(ref.indicatorCode||ref.description||ref.indicatorId):x.indicatorId};
+ const strong=valid.filter(x=>Number(x.percentage)>=85).map(x=>named(x)+' ('+Number(x.percentage).toLocaleString('id-ID')+'%)');
+ const developing=valid.filter(x=>Number(x.percentage)<70).map(x=>named(x)+' ('+Number(x.percentage).toLocaleString('id-ID')+'%)');
+ const reinforce=valid.filter(x=>Number(x.percentage)>=70&&Number(x.percentage)<85).map(x=>named(x)+' ('+Number(x.percentage).toLocaleString('id-ID')+'%)');
  const parts=[];
- if(achievement.averagePercentage!==undefined&&achievement.averagePercentage!==null){parts.push('Ketercapaian TP '+Number(achievement.averagePercentage).toLocaleString('id-ID')+'% ('+(categoryLabels[achievement.category]||achievement.category||'')+')');}
- else parts.push('Indikator TP belum diverifikasi.');
- const indicators=Array.isArray(review.results)?review.results:[],refs=Array.isArray(attempt.soloIndicators)?attempt.soloIndicators:[];
- const details=indicators.map(function(item){const ref=refs.find(function(x){return String(x.indicatorId)===String(item.indicatorId)});return (ref?(ref.indicatorCode||ref.description||ref.indicatorId):item.indicatorId)+': '+Number(item.percentage||0).toLocaleString('id-ID')+'%';});
- if(details.length)parts.push(details.join('; '));
- if(dominant.teacherReason)parts.push('Catatan guru: '+dominant.teacherReason);
- if(recommendation.keterangan)parts.push((dominant.status==='verified'?'Keterangan: ':'Rekomendasi AI (belum diverifikasi): ')+recommendation.keterangan);
- return {level:level,note:parts.join(' · ')};
+ if(finalPct!==null)parts.push('Nilai akhir '+finalPct+'%'+(finalPct>=85?' menunjukkan capaian umum yang kuat.':finalPct>=70?' menunjukkan capaian umum yang cukup dan masih dapat ditingkatkan.':' menunjukkan perlunya penguatan materi.'));
+ if(verified){
+  const desc={PRESTRUCTURAL:'Perlu menguatkan pemahaman dasar dan mengenali informasi relevan.',UNISTRUKTURAL:'Telah mengenali satu aspek penting; perlu mengembangkan pemahaman ke beberapa aspek.',MULTISTRUKTURAL:'Telah memahami beberapa aspek; perlu berlatih menghubungkan aspek-aspek tersebut.',RELATIONAL:'Mampu menghubungkan konsep; berikutnya perlu menerapkan pemahaman pada konteks yang lebih beragam.',EXTENDED_ABSTRACT:'Mampu menggeneralisasi atau menerapkan pemahaman pada situasi baru.'};
+  parts.push('Level SOLO terverifikasi '+soloLevelLabel(teacherLevel)+': '+desc[teacherLevel]);
+ }else if(aiLevel)parts.push('Level '+soloLevelLabel(aiLevel)+' masih berupa rekomendasi AI dan belum diverifikasi guru.');
+ else parts.push('Level SOLO belum diverifikasi.');
+ if(strong.length)parts.push('Kekuatan indikator: '+strong.join('; ')+'.');
+ if(reinforce.length)parts.push('Indikator yang perlu dimantapkan: '+reinforce.join('; ')+'.');
+ if(developing.length)parts.push('Prioritas pengembangan: '+developing.join('; ')+'.');
+ if(!valid.length)parts.push('Persentase indikator belum diverifikasi guru; kekuatan dan kebutuhan pengembangan indikator belum dapat disimpulkan.');
+ return {level:level,note:parts.join(' '),finalPercentage:finalPct};
 }
-
 function gradebook(){
  const attempts=Array.isArray(s.attempts)?s.attempts:[],students=Array.isArray(s.students)?s.students:[];
  if(!s.attemptsLoaded)return head('REKAP NILAI','Rekap nilai per kelas','Memuat hasil pengerjaan...')+'<div class="card">Memuat data...</div>';
