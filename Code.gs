@@ -1971,11 +1971,52 @@ function requestSoloAiAssessment_(payload) {
       })
     });
   });
+  // Ringkasan kuantitatif dari skor guru tersimpan; tidak menggunakan atau membaca foto.
+  const quantitativeQuestions = [], quantitativeIndicators = {};
+  questions.forEach(function (question) {
+    const questionId = String(question.questionId);
+    const maximum = Number(question.points);
+    if (String(attempt.status || '').toLowerCase() !== 'graded' ||
+        !Object.prototype.hasOwnProperty.call(teacherQuestionScores, questionId) ||
+        !isFinite(maximum) || maximum <= 0) return;
+    const score = Number(teacherQuestionScores[questionId]);
+    if (!isFinite(score) || score < 0 || score > maximum) return;
+    const percentage = Math.round((score / maximum) * 100);
+    const meta = parseJson_(question.answerJson, {}) || {};
+    const solo = meta.__soloTaxMeta || {};
+    const indicators = Array.isArray(solo.learningIndicators) ? solo.learningIndicators : [];
+    quantitativeQuestions.push({
+      questionId: questionId, order: Number(question.order),
+      teacherScore: score, maximumScore: maximum, percentage: percentage,
+      indicatorIds: indicators.map(function (item) { return String(item.indicatorId || ''); }).filter(Boolean)
+    });
+    indicators.forEach(function (indicator) {
+      const id = String(indicator.indicatorId || '');
+      if (!id) return;
+      if (!quantitativeIndicators[id]) quantitativeIndicators[id] = [];
+      quantitativeIndicators[id].push(percentage);
+    });
+  });
+  const quantitativeSummary = {
+    method: 'Rata-rata sederhana persentase per soal; persentase tiap soal dibulatkan ke bilangan bulat terdekat sebelum dirata-ratakan.',
+    questions: quantitativeQuestions,
+    indicators: Object.keys(quantitativeIndicators).map(function (id) {
+      const values = quantitativeIndicators[id];
+      return {
+        indicatorId: id,
+        averagePercentage: Math.round((values.reduce(function (sum, value) { return sum + value; }, 0) / values.length) * 100) / 100,
+        questionCount: values.length
+      };
+    }),
+    overallAverageQuestionPercentage: quantitativeQuestions.length
+      ? Math.round((quantitativeQuestions.reduce(function (sum, item) { return sum + item.percentage; }, 0) / quantitativeQuestions.length) * 100) / 100
+      : null
+  };
   let aiResults = [], dominantRecommendation = null, usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, model = '';
-  if (questionInputs.length) {
-    const systemPrompt = prompt.content + '\\n\\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown dengan bentuk {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","recommendedPercentage":80,"evidence":"alasan berbasis jawaban"}]}],"dominantLevel":{"level":"PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT","evidenceSummary":"ringkasan bukti kualitatif lintas jawaban","keterangan":"narasi singkat yang menghubungkan level SOLO dengan ketercapaian indikator TP","questionEvidence":[{"questionId":"...","evidence":"bukti spesifik dari jawaban"}]}}. Nilai rekomendasi per soal harus 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup; jika tidak cukup, recommendedScore null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban teks. Cocokkan makna dan penalaran dengan panduan jawaban guru serta rubrik; terima cara penyelesaian setara, jangan hanya mencocokkan kata. teacherScore adalah skor sementara dari guru: bandingkan secara independen, jangan otomatis menyalinnya dan jelaskan alasan jika berbeda. Analisis setiap indikator. Untuk setiap indikator dengan bukti cukup, berikan recommendedPercentage 0-100 sebagai estimasi kualitatif berdasarkan bukti dan deskripsi indikator, bukan hasil perhitungan skor; jika bukti tidak cukup, gunakan null dan status insufficient_evidence. Persentase adalah rekomendasi untuk ditinjau guru. Foto tidak dikirim ke AI; foto wajib diperiksa manual. Level SOLO dominan ditentukan secara holistik dari kualitas berpikir, bukan skor atau persentase. Keterangan harus menjelaskan hubungan level SOLO dengan pola ketercapaian indikator tanpa mengarang fakta. questionEvidence harus memuat setiap soal yang dianalisis tepat satu kali. Jika bukti level tidak cukup, dominantLevel harus null.';
+  if (questionInputs.length || quantitativeQuestions.length) {
+    const systemPrompt = prompt.content + '\\n\\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown dengan bentuk {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","recommendedPercentage":80,"evidence":"alasan berbasis jawaban"}]}],"dominantLevel":{"level":"PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT","evidenceSummary":"ringkasan bukti kualitatif lintas jawaban","keterangan":"narasi singkat yang menghubungkan level SOLO dengan ketercapaian indikator TP","questionEvidence":[{"questionId":"...","evidence":"bukti spesifik dari jawaban"}]}}. Nilai rekomendasi per soal harus 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup; jika tidak cukup, recommendedScore null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban teks. Cocokkan makna dan penalaran dengan panduan jawaban guru serta rubrik; terima cara penyelesaian setara, jangan hanya mencocokkan kata. teacherScore adalah skor sementara dari guru: bandingkan secara independen, jangan otomatis menyalinnya dan jelaskan alasan jika berbeda. Analisis setiap indikator. Untuk setiap indikator dengan bukti cukup, berikan recommendedPercentage 0-100 sebagai estimasi kualitatif berdasarkan bukti dan deskripsi indikator, bukan hasil perhitungan skor; jika bukti tidak cukup, gunakan null dan status insufficient_evidence. Persentase adalah rekomendasi untuk ditinjau guru. Foto tidak dikirim ke AI; foto wajib diperiksa manual. Rekomendasi level SOLO harus mempertimbangkan gabungan analisis kualitatif jawaban teks jika tersedia, rata-rata persentase skor guru per soal, dan rata-rata persentase ketercapaian tiap indikator dalam quantitativeSummary. Data angka boleh menjadi dasar rekomendasi, bukan diabaikan, tetapi jangan menyatakan angka saja membuktikan proses berpikir. Jika jawaban hanya foto atau tidak ada teks yang dapat dibaca AI, berikan rekomendasi level sementara dari pola rata-rata skor dan indikator bila data kuantitatif tersedia; jelaskan bahwa rekomendasi sementara berbasis skor guru dan indikator, bukan pembacaan foto atau bukti kualitatif. Jika data kualitatif dan kuantitatif sama-sama tersedia, pertimbangkan keduanya dan jelaskan bila tidak selaras. Isi recommendationBasis dengan 'qualitative_and_quantitative' atau 'quantitative_only_provisional'. questionEvidence harus memuat setiap soal teks yang dianalisis tepat satu kali; jika tidak ada jawaban teks, gunakan array kosong. Jika tidak ada bukti kualitatif maupun data skor guru yang memadai, dominantLevel harus null.';
     try {
-      const aiInput = 'Nilai data jawaban anonim berikut. Tidak ada identitas siswa. Data: ' + JSON.stringify({ questions: questionInputs });
+      const aiInput = 'Nilai data jawaban anonim berikut. Tidak ada identitas siswa. quantitativeSummary berisi rata-rata persentase dari skor guru yang sudah disimpan; gunakan sesuai aturan sistem. Data: ' + JSON.stringify({ questions: questionInputs, quantitativeSummary: quantitativeSummary });
       let response = tokenPortalChatCompletion_([
         { role: 'system', content: systemPrompt },
         { role: 'user', content: aiInput }
@@ -2088,6 +2129,7 @@ function requestSoloAiAssessment_(payload) {
             level: level,
             evidenceSummary: evidenceSummary,
             keterangan: keterangan,
+            recommendationBasis: String(dominant.recommendationBasis || (questionInputs.length ? 'qualitative_and_quantitative' : 'quantitative_only_provisional')),
             questionEvidence: questionEvidence.map(function (item) {
               const evidence = String(item.evidence || '').trim();
               if (!evidence || evidence.length > 3000) throw new Error('Bukti level dominan pada setiap soal wajib diisi.');
