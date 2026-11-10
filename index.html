@@ -1108,7 +1108,7 @@ function detailPage(){
    }else if(q.type==='matching'){
     control=renderMatchingStudent(id,q);
    }else if(q.type==='essay'&&Array.isArray(q.subquestions)&&q.subquestions.length){
-    control=q.subquestions.map((sub,j)=>'<div class="field"><label class="math-content">'+esc(sub)+'</label><textarea data-essay-sub-index="'+j+'" placeholder="Tulis jawaban untuk subpertanyaan ini" oninput="setSubAnswer(\\''+id+'\\','+j+',this.value)"></textarea><div class="math-preview student-answer-math-preview" id="studentAnswerPreview_'+id+'_'+j+'" style="display:none"></div></div>').join('');
+    control=q.subquestions.map((sub,j)=>'<div class="field"><label class="math-content">'+esc(sub)+'</label><textarea data-essay-sub-index="'+j+'" placeholder="Tulis jawaban untuk subpertanyaan ini" oninput="setSubAnswer(\''+id+'\','+j+',this.value)"></textarea><div class="math-preview student-answer-math-preview" id="studentAnswerPreview_'+id+'_'+j+'" style="display:none"></div></div>').join('');
    }else{
     control='<textarea class=\"essay-answer-field\" placeholder="Tulis jawaban di sini" oninput="setEssayText(\''+id+'\',this.value)"></textarea>';control+='<div class="math-preview student-answer-math-preview" id="studentAnswerPreview_'+id+'" style="display:none"></div>';
    }
