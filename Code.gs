@@ -74,14 +74,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v13';
+  const cacheKey = 'rumble_frontend_html_v14';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/be2debf87808f2c40f9ec3addacfb8696663b22c/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/5b8bd10e758b2822bc8c18db3ff3eec26f93d1de/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -1839,11 +1839,6 @@ function gradeAttempt_(payload) {
             eventType: 'SOLO_DOMINANT_LEVEL_INVALIDATED', eventAt: currentTimestamp_(),
             detailsJson: JSON.stringify({ reason: 'Nilai soal berubah; level SOLO dominan perlu ditinjau ulang.' })
           });
-          appendRow_('Events', {
-            eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
-            eventType: 'AI_SOLO_SCORING_RECOMMENDATION_INVALIDATED', eventAt: currentTimestamp_(),
-            detailsJson: JSON.stringify({ reason: 'Skor guru berubah; analisis AI harus dijalankan ulang agar membaca skor terbaru.' })
-          });
         }
 
         return {
@@ -2104,12 +2099,12 @@ function requestSoloAiAssessment_(payload) {
 }
 
 function latestSoloAiRecommendationEvent_(attemptId) {
+  // Rekomendasi AI tetap menjadi pembanding setelah guru menyimpan atau menyesuaikan skor.
   const events = listRows_('Events').filter(function (event) {
     return String(event.attemptId) === String(attemptId) &&
-      (String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION' || String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION_INVALIDATED');
+      String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION';
   }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
-  if (!events.length || String(events[events.length - 1].eventType) !== 'AI_SOLO_SCORING_RECOMMENDATION') return null;
-  return events[events.length - 1];
+  return events.length ? events[events.length - 1] : null;
 }
 
 function soloAchievementCategory_(percentage) {
