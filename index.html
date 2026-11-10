@@ -839,7 +839,7 @@ function downloadGradebookXlsx(){
     if(smallClone)smallClone.remove();
     const questionTitle=(clone.textContent||'').trim();
     const weight=(small.textContent||'').trim();
-    expandedHeaders.push(questionTitle+' (skor)', 'Bobot '+questionTitle+' ('+weight.replace(/\\s*poin\\s*/i,'').trim()+' poin)');
+    expandedHeaders.push(questionTitle+' (skor)', 'Bobot '+questionTitle+' ('+weight.replace(/\s*poin\s*/i,'').trim()+' poin)');
     questionIndexes.push({index:index,weight:weight});
    }else{
     expandedHeaders.push((cell.innerText||cell.textContent||'').trim());
@@ -853,7 +853,7 @@ function downloadGradebookXlsx(){
     const value=(cell.innerText||cell.textContent||'').trim();
     if(q){
      expanded.push(value);
-     expanded.push(q.weight.replace(/\\s*poin\\s*/i,'').trim());
+     expanded.push(q.weight.replace(/\s*poin\s*/i,'').trim());
     }else expanded.push(value);
    });
    output.push(expanded);
@@ -1382,8 +1382,8 @@ function localDateTimeToIso(value){
  if(!value)return '';
  const raw=String(value).trim();
  if(!raw)return '';
- if(/[zZ]$|[+-]\\d{2}:?\\d{2}$/.test(raw))return new Date(raw).toISOString();
- const match=raw.match(/^(\\d{4}-\\d{2}-\\d{2})T(\\d{2}:\\d{2})(?::(\\d{2}))?$/);
+ if(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(raw))return new Date(raw).toISOString();
+ const match=raw.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::(\d{2}))?$/);
  if(!match)return '';
  const date=new Date(match[1]+'T'+match[2]+':'+(match[3]||'00')+'+07:00');
  return isNaN(date.getTime())?'':date.toISOString();
