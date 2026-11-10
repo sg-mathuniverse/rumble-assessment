@@ -74,14 +74,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v14';
+  const cacheKey = 'rumble_frontend_html_v15';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/5b8bd10e758b2822bc8c18db3ff3eec26f93d1de/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/b0d21699d2fae1b9fd5d3a7e6de8a9d1042026eb/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -1917,13 +1917,38 @@ function requestSoloAiAssessment_(payload) {
       return;
     }
     if (!textResponses.length && photos.length) {
+      const maximumScore = Number(question.points);
+      const hasSavedTeacherScore = String(attempt.status || '').toLowerCase() === 'graded' &&
+        Object.prototype.hasOwnProperty.call(teacherQuestionScores, String(question.questionId)) &&
+        isFinite(Number(teacherQuestionScores[String(question.questionId)])) &&
+        isFinite(maximumScore) && maximumScore > 0;
+      const teacherScore = hasSavedTeacherScore ? Number(teacherQuestionScores[String(question.questionId)]) : null;
+      const scorePercentage = hasSavedTeacherScore
+        ? Math.round((teacherScore / maximumScore) * 10000) / 100
+        : null;
       deterministic.push({
         questionId: String(question.questionId), order: Number(question.order),
-        recommendedScore: null, maximumScore: Number(question.points),
-        reason: 'Jawaban hanya berupa foto. Foto tidak dikirim ke AI dan wajib diperiksa manual oleh guru.',
+        recommendedScore: null, maximumScore: maximumScore,
+        reason: hasSavedTeacherScore
+          ? 'Jawaban hanya berupa foto. Foto tidak dianalisis AI. Rekomendasi ketercapaian indikator dihitung sementara dari skor guru yang sudah disimpan (' + teacherScore + '/' + maximumScore + ').'
+          : 'Jawaban hanya berupa foto. Foto tidak dikirim ke AI dan wajib diperiksa manual oleh guru. Simpan skor guru terlebih dahulu agar sistem dapat membuat rekomendasi persentase.',
         evidence: [], evidenceSufficient: false, manualPhotoReviewRequired: true,
         indicatorAnalysis: indicators.map(function (indicator) {
-          return { indicatorId: String(indicator.indicatorId), status: 'insufficient_evidence', evidence: 'Bukti berupa foto harus diperiksa langsung oleh guru.' };
+          return hasSavedTeacherScore
+            ? {
+                indicatorId: String(indicator.indicatorId),
+                status: 'teacher_scored',
+                recommendedPercentage: scorePercentage,
+                recommendationBasis: 'teacher_score_ratio',
+                evidence: 'Estimasi sementara dari skor guru ' + teacherScore + '/' + maximumScore + ' (' + scorePercentage + '%). AI tidak membaca foto. Jika soal ini mengukur beberapa indikator, persentase yang sama dibagikan sementara kepada setiap indikator dan belum membuktikan ketercapaian masing-masing secara terpisah.'
+              }
+            : {
+                indicatorId: String(indicator.indicatorId),
+                status: 'insufficient_evidence',
+                recommendedPercentage: null,
+                recommendationBasis: 'awaiting_teacher_score',
+                evidence: 'Bukti berupa foto harus diperiksa langsung oleh guru. Belum ada skor guru tersimpan sebagai dasar estimasi.'
+              };
         })
       });
       return;
