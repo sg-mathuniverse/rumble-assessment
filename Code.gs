@@ -1886,8 +1886,8 @@ function requestSoloAiAssessment_(payload) {
   if (!questions.length || questions.some(function (q) { return String(q.type) !== 'essay'; })) {
     throw new Error('Struktur soal asesmen SOLO Tax tidak valid.');
   }
-  const answers = parseJson_(attempt.answersJson, {});
-  const teacherQuestionScores = parseJson_(attempt.questionScoresJson, {});
+  const answers = parseJson_(attempt.answersJson, {}) || {};
+  const teacherQuestionScores = parseJson_(attempt.questionScoresJson, {}) || {};
   const questionInputs = [], deterministic = [];
   questions.forEach(function (question) {
     const answer = answers[String(question.questionId)] || {};
@@ -1955,12 +1955,30 @@ function requestSoloAiAssessment_(payload) {
   if (questionInputs.length) {
     const systemPrompt = prompt.content + '\\n\\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown dengan bentuk {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","recommendedPercentage":80,"evidence":"alasan berbasis jawaban"}]}],"dominantLevel":{"level":"PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT","evidenceSummary":"ringkasan bukti kualitatif lintas jawaban","keterangan":"narasi singkat yang menghubungkan level SOLO dengan ketercapaian indikator TP","questionEvidence":[{"questionId":"...","evidence":"bukti spesifik dari jawaban"}]}}. Nilai rekomendasi per soal harus 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup; jika tidak cukup, recommendedScore null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban teks. Cocokkan makna dan penalaran dengan panduan jawaban guru serta rubrik; terima cara penyelesaian setara, jangan hanya mencocokkan kata. teacherScore adalah skor sementara dari guru: bandingkan secara independen, jangan otomatis menyalinnya dan jelaskan alasan jika berbeda. Analisis setiap indikator. Untuk setiap indikator dengan bukti cukup, berikan recommendedPercentage 0-100 sebagai estimasi kualitatif berdasarkan bukti dan deskripsi indikator, bukan hasil perhitungan skor; jika bukti tidak cukup, gunakan null dan status insufficient_evidence. Persentase adalah rekomendasi untuk ditinjau guru. Foto tidak dikirim ke AI; foto wajib diperiksa manual. Level SOLO dominan ditentukan secara holistik dari kualitas berpikir, bukan skor atau persentase. Keterangan harus menjelaskan hubungan level SOLO dengan pola ketercapaian indikator tanpa mengarang fakta. questionEvidence harus memuat setiap soal yang dianalisis tepat satu kali. Jika bukti level tidak cukup, dominantLevel harus null.';
     try {
-      const response = tokenPortalChatCompletion_([
+      const aiInput = 'Nilai data jawaban anonim berikut. Tidak ada identitas siswa. Data: ' + JSON.stringify({ questions: questionInputs });
+      let response = tokenPortalChatCompletion_([
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: 'Nilai data jawaban anonim berikut. Tidak ada identitas siswa. Data: ' + JSON.stringify({ questions: questionInputs }) }
+        { role: 'user', content: aiInput }
       ], settings.model, settings.maxOutputTokens);
       model = response.model;
       usage = response.usage;
+      if (String(response.finishReason || '').toLowerCase() === 'length') {
+        const compactPrompt = systemPrompt +
+          ' OUTPUT RINGKAS WAJIB: tetap JSON lengkap sesuai skema. Maksimal satu kalimat pendek untuk reason, satu bukti pendek per soal, satu kalimat evidence per indikator, evidenceSummary dan keterangan masing-masing maksimal dua kalimat. Jangan mengulang soal atau rubrik. Jangan menghilangkan indikator, soal, questionEvidence, atau field wajib. Gunakan frasa singkat.';
+        const retry = tokenPortalChatCompletion_([
+          { role: 'system', content: compactPrompt },
+          { role: 'user', content: aiInput }
+        ], settings.model, Math.max(settings.maxOutputTokens, 6000));
+        const firstUsage = usage || {};
+        const retryUsage = retry.usage || {};
+        usage = {
+          promptTokens: (Number(firstUsage.promptTokens)||0) + (Number(retryUsage.promptTokens)||0),
+          completionTokens: (Number(firstUsage.completionTokens)||0) + (Number(retryUsage.completionTokens)||0),
+          totalTokens: (Number(firstUsage.totalTokens)||0) + (Number(retryUsage.totalTokens)||0)
+        };
+        response = retry;
+        model = retry.model || model;
+      }
       let parsed;
       try {
         let clean = String(response.content || '').trim()
