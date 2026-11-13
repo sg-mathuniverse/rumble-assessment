@@ -1402,6 +1402,22 @@ function isoToLocalDateTime(value){
  const part={};parts.forEach(function(item){part[item.type]=item.value});
  return part.year+'-'+part.month+'-'+part.day+'T'+part.hour+':'+part.minute;
 }
+function buildEssayAnswerGuideContext(index,currentQuestion){
+ const questions=Array.isArray(s.qs)?s.qs:[];
+ const passages=Array.isArray(s.passages)?s.passages:[];
+ const passageFor=function(q){
+  const linked=passages.find(function(p){return String(p.id||'')===String(q&&q.passageId||'')});
+  return String(linked&&linked.text||q&&q.passageText||'').trim();
+ };
+ const sharedPassages=passages.map(function(p){return {title:String(p.title||'Bacaan'),text:String(p.text||'')}}).filter(function(p){return p.text});
+ const mainPassage=String(s.meta&&s.meta.passageText||'').trim();
+ if(mainPassage&&!sharedPassages.some(function(p){return p.text===mainPassage}))sharedPassages.unshift({title:'Bacaan utama bundel/asesmen',text:mainPassage});
+ const previousQuestions=questions.slice(0,index).map(function(q,i){
+  const options=Array.isArray(q.options)?q.options.filter(Boolean):[];
+  return {questionNumber:i+1,question:String(q.text||''),subquestions:normalizeBundleSubquestions(q.subquestions),options:options,passage:passageFor(q)};
+ }).filter(function(q){return q.question||q.passage||q.subquestions.length});
+ return {currentPassage:passageFor(currentQuestion)||mainPassage,sharedPassages:sharedPassages,previousQuestions:previousQuestions};
+}
 async function generateEssayAnswerGuide(index,button){
  const q=(s.qs||[])[index];if(!q||q.type!=='essay'){toast('Fitur ini hanya untuk soal uraian.');return}
  const questionText=String(q.text||'').trim();if(!questionText){toast('Isi teks soal terlebih dahulu.');return}
@@ -1411,11 +1427,12 @@ async function generateEssayAnswerGuide(index,button){
   const target=isSolo?'answerGuide':'rubric';
   const selected=(q.learningIndicatorIds||[]).map(String);
   const indicators=(s.bundleLearningIndicators||[]).filter(function(x){return selected.includes(String(x.indicatorId))}).map(function(x){return {code:x.indicatorCode,description:x.description}});
-  const result=await api('generateEssayAnswerGuide',{questionText:questionText,subquestions:normalizeBundleSubquestions(q.subquestions),points:Number(q.points)||0,classification:isSolo?'SOLO_TAX':'REGULER',soloLevel:q.soloLevel||'',learningIndicators:indicators,existingGuide:String(q[target]||'')});
+  const context=buildEssayAnswerGuideContext(index,q);
+  const result=await api('generateEssayAnswerGuide',{questionText:questionText,subquestions:normalizeBundleSubquestions(q.subquestions),points:Number(q.points)||0,classification:isSolo?'SOLO_TAX':'REGULER',soloLevel:q.soloLevel||'',learningIndicators:indicators,existingGuide:String(q[target]||''),context:context});
   if(!result||!result.ok)throw Error(result&&result.error?result.error:'AI gagal membuat panduan');
   const generated=String(result.data&&result.data.answerGuide||'').trim();if(!generated)throw Error('AI tidak menghasilkan panduan jawaban.');
   q[target]=generated;
-  render();toast('Panduan jawaban AI dimasukkan. Periksa dan edit sebelum menyimpan.');
+  render();toast('Panduan jawaban AI dimasukkan. Konteks bacaan dan soal sebelumnya telah disertakan. Periksa dan edit sebelum menyimpan.');
  }catch(error){toast('Gagal membuat panduan: '+error.message)}
  finally{if(button){button.disabled=false;button.textContent=original||'✦ Buat Panduan dengan AI'}}
 }
