@@ -2435,7 +2435,7 @@ function generateEssayAnswerGuide_(payload) {
   // Konteks bacaan dan soal terdahulu dikirim terpisah dari soal aktif agar model dapat
   // menggunakannya sebagai sumber informasi tanpa menganggapnya sebagai soal yang harus dijawab.
   const rawContext = payload.context && typeof payload.context === 'object' ? payload.context : {};
-  let contextBudget = 20000;
+  let contextBudget = 22000;
   function takeContextText(value, max) {
     const text = String(value || '').trim();
     if (!text || contextBudget <= 0) return '';
@@ -2444,19 +2444,20 @@ function generateEssayAnswerGuide_(payload) {
     return text.slice(0, length);
   }
   const context = {
-    currentPassage: takeContextText(rawContext.currentPassage, 6500),
-    sharedPassages: (Array.isArray(rawContext.sharedPassages) ? rawContext.sharedPassages : []).slice(0, 12).map(function (p, i) {
-      return { title: takeContextText(p && p.title, 120) || ('Bacaan ' + (i + 1)), text: takeContextText(p && p.text, 4500) };
-    }).filter(function (p) { return !!p.text; }),
-    previousQuestions: (Array.isArray(rawContext.previousQuestions) ? rawContext.previousQuestions : []).slice(-12).map(function (q, i) {
+    currentPassage: takeContextText(rawContext.currentPassage, 6000),
+    previousQuestions: (Array.isArray(rawContext.previousQuestions) ? rawContext.previousQuestions : []).slice(-10).map(function (q, i) {
       const item = {
         questionNumber: Math.max(1, Number(q && q.questionNumber) || i + 1),
-        question: takeContextText(q && q.question, 2200),
-        subquestions: (Array.isArray(q && q.subquestions) ? q.subquestions : []).slice(0, 8).map(function (x) { return takeContextText(x, 500); }).filter(Boolean),
-        passage: takeContextText(q && q.passage, 2800)
+        question: takeContextText(q && q.question, 1400),
+        subquestions: (Array.isArray(q && q.subquestions) ? q.subquestions : []).slice(0, 6).map(function (x) { return takeContextText(x, 350); }).filter(Boolean),
+        options: (Array.isArray(q && q.options) ? q.options : []).slice(0, 6).map(function (x) { return takeContextText(x, 250); }).filter(Boolean),
+        passage: takeContextText(q && q.passage, 2500)
       };
       return item;
-    }).filter(function (q) { return q.question || q.passage || q.subquestions.length; })
+    }).filter(function (q) { return q.question || q.passage || q.subquestions.length || q.options.length; }),
+    sharedPassages: (Array.isArray(rawContext.sharedPassages) ? rawContext.sharedPassages : []).slice(0, 12).map(function (p, i) {
+      return { title: takeContextText(p && p.title, 120) || ('Bacaan ' + (i + 1)), text: takeContextText(p && p.text, 2200) };
+    }).filter(function (p) { return !!p.text; })
   };
   const userData = {
     classification: classification,
