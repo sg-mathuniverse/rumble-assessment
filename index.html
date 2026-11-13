@@ -1412,11 +1412,12 @@ function buildEssayAnswerGuideContext(index,currentQuestion){
  const sharedPassages=passages.map(function(p){return {title:String(p.title||'Bacaan'),text:String(p.text||'')}}).filter(function(p){return p.text});
  const mainPassage=String(s.meta&&s.meta.passageText||'').trim();
  if(mainPassage&&!sharedPassages.some(function(p){return p.text===mainPassage}))sharedPassages.unshift({title:'Bacaan utama bundel/asesmen',text:mainPassage});
+ const currentPassage=passageFor(currentQuestion)||mainPassage;
  const previousQuestions=questions.slice(0,index).map(function(q,i){
   const options=Array.isArray(q.options)?q.options.filter(Boolean):[];
   return {questionNumber:i+1,question:String(q.text||''),subquestions:normalizeBundleSubquestions(q.subquestions),options:options,passage:passageFor(q)};
  }).filter(function(q){return q.question||q.passage||q.subquestions.length});
- return {currentPassage:passageFor(currentQuestion)||mainPassage,sharedPassages:sharedPassages,previousQuestions:previousQuestions};
+ return {currentPassage:currentPassage,sharedPassages:sharedPassages.filter(function(p){return p.text!==currentPassage}),previousQuestions:previousQuestions};
 }
 async function generateEssayAnswerGuide(index,button){
  const q=(s.qs||[])[index];if(!q||q.type!=='essay'){toast('Fitur ini hanya untuk soal uraian.');return}
