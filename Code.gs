@@ -4239,9 +4239,12 @@ function deleteQuestionBundleDraftOldRevisions_(draftId, keepRevisionId) {
   if (values.length < 2) return;
   const headers = values[0].map(String);
   const idCol = headers.indexOf('draftId'), revisionCol = headers.indexOf('revisionId');
+  const lastColumn = sheet.getLastColumn();
   for (let row = values.length - 1; row >= 1; row--) {
     if (String(values[row][idCol]) === String(draftId) && String(values[row][revisionCol]) !== String(keepRevisionId)) {
-      sheet.deleteRow(row + 1);
+      // Jangan hapus struktur baris: Google Sheets menolak penghapusan baris
+      // data terakhir pada sheet dengan konfigurasi baris tertentu.
+      sheet.getRange(row + 1, 1, 1, lastColumn).clearContent();
     }
   }
 }
@@ -4324,13 +4327,17 @@ function deleteQuestionBundleDraftRows_(draftId, ownerEmail) {
   if (values.length < 2) return;
   const headers = values[0].map(String);
   const idCol = headers.indexOf('draftId'), ownerCol = headers.indexOf('createdBy');
+  if (idCol < 0 || ownerCol < 0) throw new Error('Struktur sheet draf tidak sesuai.');
   const email = String(ownerEmail || '').trim().toLowerCase();
+  const lastColumn = sheet.getLastColumn();
   for (let row = values.length - 1; row >= 1; row--) {
     if (String(values[row][idCol]) === String(draftId)) {
       if (email && String(values[row][ownerCol] || '').trim().toLowerCase() !== email) {
         throw new Error('Draft ini bukan milik akun guru yang sedang masuk.');
       }
-      sheet.deleteRow(row + 1);
+      // Kosongkan seluruh data baris; jangan deleteRow() agar baris terakhir
+      // yang tidak dibekukan tetap dipertahankan.
+      sheet.getRange(row + 1, 1, 1, lastColumn).clearContent();
     }
   }
 }
