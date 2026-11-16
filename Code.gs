@@ -2138,10 +2138,10 @@ function requestSoloAiAssessment_(payload) {
                 .map(function (response) {
                   const promptText = String(response.prompt || '').trim();
                   const answerText = String(response.answer || '').trim();
-                  return (promptText ? 'Pertanyaan: ' + promptText + '\\n' : '') +
+                  return (promptText ? 'Pertanyaan: ' + promptText + '\n' : '') +
                     (answerText ? 'Jawaban murid: ' + answerText : '');
                 })
-                .filter(Boolean).join('\\n');
+                .filter(Boolean).join('\n');
               if (sourceText) {
                 evidence = 'Kutipan jawaban asli murid (pelengkap karena AI tidak mengirim bukti untuk soal ini; bukan interpretasi AI): ' +
                   sourceText.slice(0, 2600);
