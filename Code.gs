@@ -2115,13 +2115,46 @@ function requestSoloAiAssessment_(payload) {
           const allowedLevels = ['PRESTRUCTURAL', 'UNISTRUCTURAL', 'MULTISTRUKTURAL', 'RELATIONAL', 'EXTENDED_ABSTRACT'];
           const level = String(dominant.level || '').trim().toUpperCase().replace(/[ -]+/g, '_');
           const evidenceSummary = String(dominant.evidenceSummary || '').trim();
-          const questionEvidence = Array.isArray(dominant.questionEvidence) ? dominant.questionEvidence : [];
-          const expectedIds = questionInputs.map(function (item) { return item.questionId; }).sort();
-          const receivedIds = questionEvidence.map(function (item) { return String(item && item.questionId || ''); }).sort();
-          if (allowedLevels.indexOf(level) < 0 || !evidenceSummary || evidenceSummary.length > 5000 ||
-              questionEvidence.length !== expectedIds.length ||
-              expectedIds.some(function (id, index) { return id !== receivedIds[index]; })) {
-            throw new Error('Rekomendasi level dominan harus memuat level dan bukti dari setiap soal yang dianalisis.');
+          const rawQuestionEvidence = Array.isArray(dominant.questionEvidence) ? dominant.questionEvidence : [];
+          const expectedIds = questionInputs.map(function (item) { return String(item.questionId); });
+          const expectedIdSet = {};
+          expectedIds.forEach(function (id) { expectedIdSet[id] = true; });
+
+          // Beberapa model menghilangkan atau menggandakan ID bukti. Pertahankan
+          // bukti AI yang cocok, abaikan ID asing/duplikat, lalu lengkapi yang
+          // hilang hanya dengan kutipan teks asli jawaban murid.
+          const evidenceById = {};
+          rawQuestionEvidence.forEach(function (item) {
+            if (!item || typeof item !== 'object') return;
+            const id = String(item.questionId || '').trim();
+            const evidence = String(item.evidence || '').trim();
+            if (!expectedIdSet[id] || !evidence || evidence.length > 3000 || evidenceById[id]) return;
+            evidenceById[id] = evidence;
+          });
+          const normalizedQuestionEvidence = questionInputs.map(function (input) {
+            let evidence = evidenceById[input.questionId] || '';
+            if (!evidence) {
+              const sourceText = (Array.isArray(input.textResponses) ? input.textResponses : [])
+                .map(function (response) {
+                  const promptText = String(response.prompt || '').trim();
+                  const answerText = String(response.answer || '').trim();
+                  return (promptText ? 'Pertanyaan: ' + promptText + '\\n' : '') +
+                    (answerText ? 'Jawaban murid: ' + answerText : '');
+                })
+                .filter(Boolean).join('\\n');
+              if (sourceText) {
+                evidence = 'Kutipan jawaban asli murid (pelengkap karena AI tidak mengirim bukti untuk soal ini; bukan interpretasi AI): ' +
+                  sourceText.slice(0, 2600);
+              }
+            }
+            return { questionId: input.questionId, evidence: evidence };
+          });
+
+          if (allowedLevels.indexOf(level) < 0 || !evidenceSummary || evidenceSummary.length > 5000) {
+            throw new Error('Rekomendasi level dominan AI belum memuat level SOLO yang valid atau ringkasan bukti.');
+          }
+          if (normalizedQuestionEvidence.some(function (item) { return !item.evidence; })) {
+            throw new Error('Bukti jawaban teks tidak tersedia untuk melengkapi seluruh soal. Periksa data jawaban murid.');
           }
           const keterangan = String(dominant.keterangan || '').trim();
           if (!keterangan || keterangan.length > 3000) throw new Error('AI harus memberikan keterangan yang menghubungkan level SOLO dengan ketercapaian indikator TP.');
@@ -2130,11 +2163,7 @@ function requestSoloAiAssessment_(payload) {
             evidenceSummary: evidenceSummary,
             keterangan: keterangan,
             recommendationBasis: String(dominant.recommendationBasis || (questionInputs.length ? 'qualitative_and_quantitative' : 'quantitative_only_provisional')),
-            questionEvidence: questionEvidence.map(function (item) {
-              const evidence = String(item.evidence || '').trim();
-              if (!evidence || evidence.length > 3000) throw new Error('Bukti level dominan pada setiap soal wajib diisi.');
-              return { questionId: String(item.questionId), evidence: evidence };
-            })
+            questionEvidence: normalizedQuestionEvidence
           };
         }
       }
