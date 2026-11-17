@@ -400,7 +400,7 @@ async function saveSoloDominantVerification(attemptId){
   const response=await api('saveSoloDominantVerification',{attemptId:attemptId,teacherLevel:level.value,teacherReason:reason?reason.value:''});
   if(!response||!response.ok)throw Error(response&&response.error?response.error:'Verifikasi level gagal disimpan');
   toast('Verifikasi level SOLO dominan berhasil disimpan.');
-  await loadAttempts();
+  await loadAttempts({attemptId:attemptId});
  }catch(error){toast('Gagal menyimpan verifikasi level: '+error.message)}
 }
 async function saveSoloVerification(attemptId){
@@ -434,7 +434,7 @@ async function saveSoloVerification(attemptId){
   }else{
    toast('Verifikasi indikator berhasil disimpan.');
   }
-  await loadAttempts();
+  await loadAttempts({attemptId:attemptId});
  }catch(error){toast('Gagal menyimpan verifikasi: '+error.message)}
 }
 
@@ -793,7 +793,7 @@ function reportCorrectAnswer(q){
 
 async function requestSoloAiAssessment(attemptId){
  if(!confirm('Kirim teks jawaban, panduan guru, rubrik, indikator TP, dan skor sementara guru (jika ada) ke layanan AI? Foto jawaban tidak dikirim.'))return;
- try{const result=await api('requestSoloAiAssessment',{attemptId:attemptId});if(!result||!result.ok)throw Error(result&&result.error?result.error:'Analisis AI gagal');toast('Rekomendasi AI berhasil dibuat. Periksa bukti dan nilai sebelum menyimpan.');await loadAttempts()}
+ try{const result=await api('requestSoloAiAssessment',{attemptId:attemptId});if(!result||!result.ok)throw Error(result&&result.error?result.error:'Analisis AI gagal');toast('Rekomendasi AI berhasil dibuat. Periksa bukti dan nilai sebelum menyimpan.');await loadAttempts({attemptId:attemptId})}
  catch(error){toast('AI Penilaian gagal: '+error.message)}
 }
 function applySoloAiScores(attemptId){
@@ -966,7 +966,7 @@ async function saveGrade(id){
   questionScores[q.id]=value;
  }
  const feedbackEl=document.getElementById('gradeFeedback_'+id);
- try{const r=await api('gradeAttempt',{attemptId:id,questionScores,feedback:feedbackEl?feedbackEl.value:''});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Nilai gagal disimpan');toast('Skor per butir berhasil disimpan.');await loadAttempts();}
+ try{const r=await api('gradeAttempt',{attemptId:id,questionScores,feedback:feedbackEl?feedbackEl.value:''});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Nilai gagal disimpan');toast('Skor per butir berhasil disimpan.');await loadAttempts({attemptId:id});}
  catch(e){toast('Gagal menyimpan nilai: '+e.message)}
 }
 
@@ -1071,7 +1071,7 @@ function soloClassReflectionPanel(attempt){
 }
 async function requestSoloClassReflection(assessmentId){
  if(!confirm('Buat refleksi AI menggunakan rekap nilai akhir dan verifikasi indikator kelas? Data yang dikirim berupa statistik agregat tanpa nama atau identitas siswa.'))return;
- try{const result=await api('requestSoloClassReflection',{assessmentId:assessmentId});if(!result||!result.ok)throw Error(result&&result.error?result.error:'Refleksi AI gagal');toast('Refleksi pembelajaran berhasil dibuat.');await loadAttempts();}
+ try{const result=await api('requestSoloClassReflection',{assessmentId:assessmentId});if(!result||!result.ok)throw Error(result&&result.error?result.error:'Refleksi AI gagal');toast('Refleksi pembelajaran berhasil dibuat.');await loadAttempts({assessmentId:assessmentId});}
  catch(error){toast('Gagal membuat Refleksi AI: '+error.message)}
 }
 
