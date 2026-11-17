@@ -2186,7 +2186,11 @@ function requestSoloAiAssessment_(payload) {
           }
           const allowedLevels = ['PRESTRUCTURAL', 'UNISTRUCTURAL', 'MULTISTRUKTURAL', 'RELATIONAL', 'EXTENDED_ABSTRACT'];
           const levelValue = dominant.level || dominant.soloLevel || dominant.dominantLevel || dominant.levelSolo || dominant.level_solo || '';
-          const level = String(levelValue).trim().toUpperCase().replace(/[ -]+/g, '_');
+          let level = String(levelValue).trim().toUpperCase().replace(/[ -]+/g, '_');
+          // Terima ejaan Indonesia "UNISTRUKTURAL" dan normalisasi
+          // ke kode internal "UNISTRUCTURAL" agar validasi konsisten.
+          const levelAliases = { UNISTRUKTURAL: 'UNISTRUCTURAL' };
+          level = levelAliases[level] || level;
           const evidenceSummary = String(dominant.evidenceSummary || dominant.evidence_summary || dominant.summary || dominant.ringkasanBukti || dominant.ringkasan_bukti || '').trim();
           const rawQuestionEvidence = Array.isArray(dominant.questionEvidence) ? dominant.questionEvidence : [];
           const expectedIds = questionInputs.map(function (item) { return String(item.questionId); });
@@ -2223,8 +2227,14 @@ function requestSoloAiAssessment_(payload) {
             return { questionId: input.questionId, evidence: evidence };
           });
 
-          if (allowedLevels.indexOf(level) < 0 || !evidenceSummary || evidenceSummary.length > 5000) {
-            throw new Error('Format rekomendasi level dominan AI tidak lengkap. Level yang diterima: ' + (level || '(kosong)') + '; ringkasan bukti: ' + (evidenceSummary ? 'tersedia' : 'kosong') + '. Pastikan model mengisi dominantLevel.level dan dominantLevel.evidenceSummary.');
+          if (allowedLevels.indexOf(level) < 0) {
+            throw new Error('Level SOLO dari AI tidak dikenali: ' + (level || '(kosong)') + '. Level yang diterima: ' + allowedLevels.join(', ') + '.');
+          }
+          if (!evidenceSummary) {
+            throw new Error('Ringkasan bukti level SOLO dari AI kosong. Pastikan dominantLevel.evidenceSummary terisi.');
+          }
+          if (evidenceSummary.length > 5000) {
+            throw new Error('Ringkasan bukti level SOLO dari AI terlalu panjang (' + evidenceSummary.length + ' karakter; maksimal 5000).');
           }
           if (normalizedQuestionEvidence.some(function (item) { return !item.evidence; })) {
             throw new Error('Bukti jawaban teks tidak tersedia untuk melengkapi seluruh soal. Periksa data jawaban murid.');
