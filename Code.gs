@@ -230,25 +230,20 @@ function routeAction_(action, payload) {
       if (user.role === 'student') {
         trusted.studentId = String(user.userId || '');
         delete trusted.assessmentId;
-        return listAttempts_(trusted).filter(function (attempt) {
-          const assessment = listRows_('Assessments').find(function (item) {
-            return String(item.assessmentId) === String(attempt.assessmentId);
-          });
-          if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') return true;
-          // SOLO Tax result is visible to the student only after an explicit release event.
-          return listRows_('Events').some(function (event) {
-            return String(event.attemptId) === String(attempt.attemptId) &&
-              String(event.eventType) === 'SOLO_RESULT_RELEASED';
-          });
+        trusted.summaryOnly = true;
+        const attempts = listAttempts_(trusted);
+        const releasedAttemptIds = {};
+        listRows_('Events').forEach(function (event) {
+          if (String(event.eventType) === 'SOLO_RESULT_RELEASED') {
+            releasedAttemptIds[String(event.attemptId)] = true;
+          }
+        });
+        return attempts.filter(function (attempt) {
+          return String(attempt.assessmentClassification || '').toUpperCase() !== 'SOLO_TAX' ||
+            !!releasedAttemptIds[String(attempt.attemptId)];
         });
       }
-      return listAttempts_(trusted).filter(function (attempt) {
-        const assessment = listRows_('Assessments').find(function (item) {
-          return String(item.assessmentId) === String(attempt.assessmentId);
-        });
-        return assessment && assessment.createdBy &&
-          String(assessment.createdBy).trim().toLowerCase() === String(user.email).trim().toLowerCase();
-      });
+      return listAttempts_(trusted);
     },
     requestSoloClassReflection: function () {
       const assessmentId = requiredText_(trusted.assessmentId, 'ID asesmen', 100);
@@ -1547,28 +1542,84 @@ function isAttemptExpiredByClock_(attempt, assessment, nowValue) {
 }
 
 function listAttempts_(payload) {
-  const allQuestions = listRows_('Questions');
+  payload = payload || {};
   const assessments = listRows_('Assessments');
+  const assessmentById = {};
+  assessments.forEach(function (assessment) { assessmentById[String(assessment.assessmentId)] = assessment; });
+  const viewer = payload.currentUser;
+  const teacherEmail = viewer && viewer.role === 'teacher' ? String(viewer.email || '').trim().toLowerCase() : '';
+  const selectedAttempts = listRows_('Attempts').filter(function (attempt) {
+    const assessmentId = String(attempt.assessmentId || '');
+    const assessment = assessmentById[assessmentId];
+    const matchesAssessment = !payload.assessmentId || assessmentId === String(payload.assessmentId);
+    const matchesAttempt = !payload.attemptId || String(attempt.attemptId) === String(payload.attemptId);
+    const matchesStudent = !payload.studentId || String(attempt.studentId) === String(payload.studentId);
+    const ownedByTeacher = !teacherEmail || !!(assessment && String(assessment.createdBy || '').trim().toLowerCase() === teacherEmail);
+    const expired = isAttemptExpiredByClock_(attempt, assessment);
+    return matchesAssessment && matchesAttempt && matchesStudent && ownedByTeacher &&
+      (String(attempt.status) !== 'in_progress' || expired);
+  });
+  if (payload.summaryOnly === true) {
+    return selectedAttempts.map(function (attempt) {
+      const assessment = assessmentById[String(attempt.assessmentId)] || null;
+      const timeExpired = isAttemptExpiredByClock_(attempt, assessment);
+      return Object.assign({}, attempt, {
+        status: timeExpired ? 'needs_review' : String(attempt.status || ''),
+        timeExpired: timeExpired,
+        assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
+        assessmentDate: assessment ? String(assessment.startAt || assessment.createdAt || '') : '',
+        assessmentStartAt: assessment ? String(assessment.startAt || '') : '',
+        subject: assessment ? String(assessment.subject || '') : '',
+        className: assessment ? String(assessment.className || '') : '',
+        assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER'
+      });
+    });
+  }
+
+  const allQuestions = listRows_('Questions');
   const uploadedFiles = listRows_('Files');
-  return listRows_('Attempts')
-    .filter(function (attempt) {
-      const matchesAssessment = !payload.assessmentId || attempt.assessmentId === payload.assessmentId;
-      const matchesStudent = !payload.studentId || attempt.studentId === payload.studentId;
-      const assessment = assessments.find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
-      const expired = isAttemptExpiredByClock_(attempt, assessment);
-      return matchesAssessment && matchesStudent &&
-        (String(attempt.status) !== 'in_progress' || expired);
-    })
-    .map(function (attempt) {
-      const assessment = assessments.find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+  const allEvents = listRows_('Events');
+  const questionsByAssessment = {};
+  allQuestions.forEach(function (question) {
+    const key = String(question.assessmentId || '');
+    if (!questionsByAssessment[key]) questionsByAssessment[key] = [];
+    questionsByAssessment[key].push(question);
+  });
+  Object.keys(questionsByAssessment).forEach(function (key) {
+    questionsByAssessment[key].sort(function (a, b) { return Number(a.order) - Number(b.order); });
+  });
+  const filesByAttempt = {};
+  const filesByAttemptQuestion = {};
+  uploadedFiles.forEach(function (file) {
+    const attemptKey = String(file.attemptId || '');
+    const questionKey = attemptKey + '||' + String(file.studentId || '') + '||' + String(file.questionId || '');
+    if (!filesByAttempt[attemptKey]) filesByAttempt[attemptKey] = [];
+    if (!filesByAttemptQuestion[questionKey]) filesByAttemptQuestion[questionKey] = [];
+    filesByAttempt[attemptKey].push(file);
+    filesByAttemptQuestion[questionKey].push(file);
+  });
+  const eventsByAttempt = {};
+  const eventsByAssessment = {};
+  allEvents.forEach(function (event) {
+    const attemptKey = String(event.attemptId || '');
+    if (!eventsByAttempt[attemptKey]) eventsByAttempt[attemptKey] = [];
+    eventsByAttempt[attemptKey].push(event);
+    if (String(event.eventType) === 'AI_SOLO_CLASS_REFLECTION') {
+      const detail = parseJson_(event.detailsJson, {});
+      const assessmentKey = String(detail.assessmentId || '');
+      if (assessmentKey) {
+        if (!eventsByAssessment[assessmentKey]) eventsByAssessment[assessmentKey] = [];
+        eventsByAssessment[assessmentKey].push(event);
+      }
+    }
+  });
+  return selectedAttempts.map(function (attempt) {
+      const assessment = assessmentById[String(attempt.assessmentId)] || null;
       const timeExpired = isAttemptExpiredByClock_(attempt, assessment);
       const effectiveStatus = timeExpired ? 'needs_review' : String(attempt.status || '');
-      const viewer = payload.currentUser;
       const canViewInternal = !!(viewer && viewer.role === 'teacher' && assessment &&
         String(assessment.createdBy || '').trim().toLowerCase() === String(viewer.email || '').trim().toLowerCase());
-      const details = allQuestions
-        .filter(function (question) { return question.assessmentId === attempt.assessmentId; })
-        .sort(function (a, b) { return Number(a.order) - Number(b.order); })
+      const details = (questionsByAssessment[String(attempt.assessmentId)] || [])
         .map(function (question) {
           return {
             id: question.questionId,
@@ -1592,7 +1643,7 @@ function listAttempts_(payload) {
           };
         });
       if (canViewInternal) {
-        uploadedFiles.filter(function (file) { return String(file.attemptId) === String(attempt.attemptId) && file.driveFileId; }).forEach(function (file) {
+        (filesByAttempt[String(attempt.attemptId)] || []).filter(function (file) { return file.driveFileId; }).forEach(function (file) {
           try {
             const answerFile = DriveApp.getFileById(String(file.driveFileId));
             const viewerEmail = String(viewer.email || '').trim().toLowerCase();
@@ -1622,11 +1673,7 @@ function listAttempts_(payload) {
           details.forEach(function (question) {
             const saved = answers[question.id] && typeof answers[question.id] === 'object' ? answers[question.id] : {};
             const savedPhotos = Array.isArray(saved.photos) ? saved.photos : [];
-            uploadedFiles.filter(function (file) {
-              return String(file.attemptId) === String(attempt.attemptId) &&
-                String(file.studentId) === String(attempt.studentId) &&
-                String(file.questionId || '') === String(question.id);
-            }).forEach(function (file) {
+            (filesByAttemptQuestion[String(attempt.attemptId) + '||' + String(attempt.studentId) + '||' + String(question.id)] || []).forEach(function (file) {
               if (!savedPhotos.some(function (photo) { return String(photo.fileId) === String(file.fileId); })) {
                 savedPhotos.push({ fileId: file.fileId, url: file.fileUrl, imageUrl: file.driveFileId ? 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.driveFileId) + '&sz=w1200' : file.fileUrl, name: 'Foto jawaban' });
               }
@@ -1640,7 +1687,7 @@ function listAttempts_(payload) {
         assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
         soloClassReflection: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
           ? (function () {
-              const reflections = listRows_('Events').filter(function (event) {
+              const reflections = (eventsByAssessment[String(assessment.assessmentId)] || []).filter(function (event) {
                 if (String(event.eventType) !== 'AI_SOLO_CLASS_REFLECTION') return false;
                 const detail = parseJson_(event.detailsJson, {});
                 return String(detail.assessmentId || '') === String(assessment.assessmentId);
@@ -1678,13 +1725,13 @@ function listAttempts_(payload) {
           : undefined,
         soloReview: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
           ? (function () {
-              const history = listRows_('Events').filter(function (event) {
+              const history = (eventsByAttempt[String(attempt.attemptId)] || []).filter(function (event) {
                 return String(event.attemptId) === String(attempt.attemptId) &&
                   String(event.eventType).indexOf('SOLO_INDICATOR_VERIFICATION') === 0;
               }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
               const latest = history.length ? history[history.length - 1] : null;
               const details = latest ? parseJson_(latest.detailsJson, {}) : {};
-              const latestAi = latestSoloAiRecommendationEvent_(attempt.attemptId);
+              const latestAi = latestSoloAiRecommendationEventFrom_(eventsByAttempt[String(attempt.attemptId)] || []);
               const aiDetails = latestAi ? parseJson_(latestAi.detailsJson, {}) : {};
               return {
                 status: latest && latest.eventType === 'SOLO_INDICATOR_VERIFICATION' ? 'verified' : 'pending',
@@ -1701,7 +1748,7 @@ function listAttempts_(payload) {
                   return { eventType: String(event.eventType), eventAt: String(event.eventAt || ''), verifiedBy: String(detail.verifiedBy || ''), reason: String(detail.reason || '') };
                 }),
                 dominant: (function () {
-                  const dominantEvents = listRows_('Events').filter(function (event) {
+                  const dominantEvents = (eventsByAttempt[String(attempt.attemptId)] || []).filter(function (event) {
                     return String(event.attemptId) === String(attempt.attemptId) &&
                       String(event.eventType).indexOf('SOLO_DOMINANT_LEVEL_') === 0;
                   }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
@@ -1732,7 +1779,7 @@ function listAttempts_(payload) {
           : undefined,
         soloAiAssessment: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
           ? (function () {
-              const latest = latestSoloAiRecommendationEvent_(attempt.attemptId);
+              const latest = latestSoloAiRecommendationEventFrom_(eventsByAttempt[String(attempt.attemptId)] || []);
               if (!latest) return null;
               const detail = parseJson_(latest.detailsJson, {});
               return {
@@ -2220,6 +2267,13 @@ function requestSoloAiAssessment_(payload) {
     detailsJson: JSON.stringify(record)
   });
   return { attemptId: attemptId, status: 'completed', promptId: prompt.promptId, promptVersion: prompt.version, provider: 'TOKENPORTAL', model: record.model, usage: usage, dominantRecommendation: dominantRecommendation, results: results };
+}
+
+function latestSoloAiRecommendationEventFrom_(events) {
+  const matches = (Array.isArray(events) ? events : []).filter(function (event) {
+    return String(event.eventType) === 'AI_SOLO_SCORING_RECOMMENDATION';
+  }).sort(function (a, b) { return String(a.eventAt).localeCompare(String(b.eventAt)); });
+  return matches.length ? matches[matches.length - 1] : null;
 }
 
 function latestSoloAiRecommendationEvent_(attemptId) {
