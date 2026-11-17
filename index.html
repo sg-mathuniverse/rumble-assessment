@@ -438,7 +438,7 @@ async function saveSoloVerification(attemptId){
  }catch(error){toast('Gagal menyimpan verifikasi: '+error.message)}
 }
 
-const s={role:'teacher',page:'overview',adminStudents:[],adminStudentsLoaded:false,adminCredentials:[],aiSettings:null,aiSettingsLoaded:false,aiSettingsError:'',aiModels:[],aiUsage:[],aiPrompts:[],aiPromptTestResult:null,aiTestResult:null,learningObjectives:[],learningIndicators:[],learningRepositoryLoaded:false,learningRepositoryError:'',learningPendingAudits:[],learningObjectiveEdit:null,learningIndicatorEdit:null,learningIndicatorFilter:'',learningIndicatorSubject:'',learningIndicatorClass:'',learningObjectiveListSubject:'',learningObjectiveListClass:'',learningIndicatorListSubject:'',learningIndicatorListClass:'',bundleLearningObjectives:[],bundleLearningIndicators:[],bundleLearningReferencesLoaded:false,bundleLearningReferencesError:'',adminCsvText:'',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptsLoaded:false,monitoring:[],monitoringLoaded:false,monitoringUpdatedAt:'',monitoringError:'',selectedMonitoringAttemptId:'',selectedMonitoringAssessmentId:'',monitoringFilter:'all',monitoringExpandedGroups:{},monitoringLoading:false,teacherSummary:[],teacherSummaryLoaded:false,teacherSummaryError:'',selectedAssessmentClass:'',selectedGradebookClass:'',selectedGradebookAssessmentId:'',selectedSummaryClass:'',bundleVisibility:'shared',bundleClassification:'REGULER',assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
+const s={role:'teacher',page:'overview',adminStudents:[],adminStudentsLoaded:false,adminCredentials:[],aiSettings:null,aiSettingsLoaded:false,aiSettingsError:'',aiModels:[],aiUsage:[],aiPrompts:[],aiPromptTestResult:null,aiTestResult:null,learningObjectives:[],learningIndicators:[],learningRepositoryLoaded:false,learningRepositoryError:'',learningPendingAudits:[],learningObjectiveEdit:null,learningIndicatorEdit:null,learningIndicatorFilter:'',learningIndicatorSubject:'',learningIndicatorClass:'',learningObjectiveListSubject:'',learningObjectiveListClass:'',learningIndicatorListSubject:'',learningIndicatorListClass:'',bundleLearningObjectives:[],bundleLearningIndicators:[],bundleLearningReferencesLoaded:false,bundleLearningReferencesError:'',adminCsvText:'',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptSummaries:[],attemptsLoaded:false,reportDetailLoading:false,monitoring:[],monitoringLoaded:false,monitoringUpdatedAt:'',monitoringError:'',selectedMonitoringAttemptId:'',selectedMonitoringAssessmentId:'',monitoringFilter:'all',monitoringExpandedGroups:{},monitoringLoading:false,teacherSummary:[],teacherSummaryLoaded:false,teacherSummaryError:'',selectedAssessmentClass:'',selectedGradebookClass:'',selectedGradebookAssessmentId:'',selectedSummaryClass:'',bundleVisibility:'shared',bundleClassification:'REGULER',assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
 let monitoringPollInterval=null;
 let examSecurityActive=false,securityEventLastSent={},securityWarningCount=0;
 function sendSecurityEvent(eventType){
@@ -886,6 +886,9 @@ function reports(){
  let breadcrumb='<div class="report-breadcrumb"><span>Ruang kerja</span><span>›</span><button onclick="clearReportAssessment()">Daftar asesmen</button>';
  if(aid)breadcrumb+='<span>›</span><button onclick="clearReportAttempt()">'+esc(title)+'</button>';
  if(active)breadcrumb+='<span>›</span><b>Skor perbutir '+esc(studentName)+'</b>';breadcrumb+='</div>';
+ if(aid&&s.selectedReportAttemptId&&!active){
+  return head('ANALITIK','Memuat jawaban murid','Mengambil detail jawaban dan soal untuk diperiksa.')+breadcrumb+'<div class="card"><p class="muted">Memuat detail pengerjaan...</p></div>';
+ }
  if(active){
   const answers=active.answers||{},saved=active.questionScores||{},qs=active.questionDetails||[];
   const rows=qs.map((q,i)=>{
@@ -926,15 +929,30 @@ function reports(){
  return head('ANALITIK','Daftar asesmen','Pilih kelas terlebih dahulu, lalu pilih asesmen untuk melihat dan menilai jawaban murid.')+breadcrumb+'<div class="card"><div class="actions"><h3>Analitik per kelas</h3><button class="btn section-refresh-button" onclick="loadAttempts()"><span aria-hidden="true">↻</span> Muat ulang</button></div>'+(!s.attemptsLoaded?'<p class="muted">Memuat data pengerjaan...</p>':classCards||'<p class="muted">Belum ada pengerjaan siswa yang masuk.</p>')+'</div>';
 }
 function toggleReportClass(name){s.selectedReportClass=s.selectedReportClass===name?'':name;render()}
-function chooseReportAssessment(id){s.selectedReportAssessmentId=id;s.selectedReportAttemptId='';render()}
-function clearReportAssessment(){s.selectedReportAssessmentId='';s.selectedReportAttemptId='';render()}
-function clearReportAttempt(){s.selectedReportAttemptId='';render()}
-function chooseReportAttempt(id){s.selectedReportAttemptId=id;render()}
+function chooseReportAssessment(id){s.selectedReportAssessmentId=id;s.selectedReportAttemptId='';s.attempts=s.attemptSummaries||[];render()}
+function clearReportAssessment(){s.selectedReportAssessmentId='';s.selectedReportAttemptId='';s.attempts=s.attemptSummaries||[];render()}
+function clearReportAttempt(){s.selectedReportAttemptId='';s.attempts=s.attemptSummaries||[];render()}
+async function chooseReportAttempt(id){
+ s.selectedReportAttemptId=id;s.reportDetailLoading=true;render();
+ try{await loadAttempts({attemptId:id});s.reportDetailLoading=false;}
+ catch(error){s.reportDetailLoading=false;toast('Gagal memuat detail jawaban: '+error.message)}
+}
 async function loadStudents(){s.studentsLoaded=false;render();try{const r=await api('listStudents',{});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Tidak dapat memuat siswa');s.students=Array.isArray(r.data)?r.data:[];s.studentsLoaded=true;render()}catch(e){s.students=[];s.studentsLoaded=true;render();toast('Gagal memuat daftar siswa: '+e.message)}}
-async function loadAttempts(){
+async function loadAttempts(options){
+ const request=Object.assign({},options||{});
+ const isSummary=request.summaryOnly===true||(!request.assessmentId&&!request.attemptId);
+ if(isSummary)request.summaryOnly=true;
  s.attemptsLoaded=false;render();
- try{const r=await api('listAttempts',{});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Tidak dapat memuat pengerjaan');s.attempts=Array.isArray(r.data)?r.data:[];s.attemptsLoaded=true;render();}
- catch(e){s.attempts=[];s.attemptsLoaded=true;render();toast('Gagal memuat jawaban siswa: '+e.message)}
+ try{
+  const r=await api('listAttempts',request);if(!r||!r.ok)throw Error(r&&r.error?r.error:'Tidak dapat memuat pengerjaan');
+  const rows=Array.isArray(r.data)?r.data:[];
+  if(isSummary){s.attemptSummaries=rows;s.attempts=rows;}
+  else if(request.attemptId){
+   const detail=rows[0];
+   s.attempts=(s.attemptSummaries||[]).map(function(item){return String(item.attemptId)===String(request.attemptId)&&detail?detail:item});
+  }else{s.attempts=rows;}
+  s.attemptsLoaded=true;render();
+ }catch(e){if(isSummary){s.attemptSummaries=[];s.attempts=[];}s.attemptsLoaded=true;render();toast('Gagal memuat jawaban siswa: '+e.message)}
 }
 async function saveGrade(id){
  const attempt=(s.attempts||[]).find(a=>String(a.attemptId)===String(id));if(!attempt){toast('Data pengerjaan tidak ditemukan.');return}
@@ -1113,8 +1131,12 @@ function gradebook(){
  const table='<div class="table-scroll"><table class="gradebook-table"><thead><tr><th>Nama murid</th>'+qs.map((q,i)=>'<th>Soal '+(i+1)+'<small>'+Number(q.points||0)+' poin</small></th>').join('')+'<th>Nilai akhir</th>'+(isSoloTax?'<th>Level SOLO Murid</th><th>Keterangan</th>':'')+'</tr></thead><tbody>'+list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),scores=a.questionScores||{},solo= isSoloTax?soloGradebookSummary(a):null;return '<tr><td>'+esc(user?user.name:a.studentId)+'</td>'+qs.map(q=>'<td>'+((a.status==='graded'||a.status==='needs_review')&&scores[q.id]!==undefined?esc(scores[q.id]):'—')+'</td>').join('')+'<td><b>'+(a.status==='graded'&&Number(a.maxScore)>0?Math.round(Number(a.score)/Number(a.maxScore)*100):'—')+'</b></td>'+(isSoloTax?'<td>'+esc(solo.level)+'</td><td>'+esc(solo.note)+'</td>':'')+'</tr>'}).join('')+'</tbody></table></div>';
  return head('REKAP NILAI',esc(group.title),esc(cls)+' · '+esc(group.subject))+breadcrumb+'<div class="card"><div class="actions"><h3>Nilai siswa</h3><span class="muted">'+list.length+' sesi</span><button class="btn primary" onclick="downloadGradebookXlsx()">Ekspor .xlsx</button></div>'+table+'</div>'+(isSoloTax?soloClassReflectionPanel(list[0]):'');
 }
-function selectGradebookClass(name){s.selectedGradebookClass=String(name||'');s.selectedGradebookAssessmentId='';render()}
-function selectGradebookAssessment(id){s.selectedGradebookAssessmentId=String(id||'');render()}
+function selectGradebookClass(name){s.selectedGradebookClass=String(name||'');s.selectedGradebookAssessmentId='';s.attempts=s.attemptSummaries||[];render()}
+async function selectGradebookAssessment(id){
+ s.selectedGradebookAssessmentId=String(id||'');
+ if(!s.selectedGradebookAssessmentId){s.attempts=s.attemptSummaries||[];render();return}
+ await loadAttempts({assessmentId:s.selectedGradebookAssessmentId});
+}
 
 async function loadAdminAiSettings(){
  s.aiSettingsLoaded=false;s.aiSettingsError='';render();
