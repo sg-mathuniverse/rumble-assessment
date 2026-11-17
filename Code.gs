@@ -74,14 +74,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v31';
+  const cacheKey = 'rumble_frontend_html_v32';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/1e2d1ddeda926f8cc0c2db1820afac00c766757d/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/8a047dd134404632afddcf7457ca048f544cd075/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -3189,6 +3189,13 @@ function listMonitoring_(payload) {
     }).length;
     const latestEvent = attemptEvents.length ? attemptEvents[0] : null;
     const pageHiddenCount = Math.max(Number(attempt.focusLossCount) || 0, countEvent('page_hidden'));
+    const startedAtMs = new Date(attempt.startedAt).getTime();
+    const durationMs = Number(assessment.duration) * 60000;
+    const endAtMs = assessment.endAt ? new Date(assessment.endAt).getTime() : NaN;
+    const expiredByDuration = isFinite(startedAtMs) && isFinite(durationMs) && durationMs > 0 && Date.now() > startedAtMs + durationMs + 30000;
+    const expiredBySchedule = isFinite(endAtMs) && endAtMs > 0 && Date.now() > endAtMs;
+    const storedStatus = String(attempt.status || '');
+    const effectiveStatus = storedStatus === 'in_progress' && (expiredByDuration || expiredBySchedule) ? 'completed' : storedStatus;
     return {
       attemptId: String(attempt.attemptId),
       assessmentId: String(attempt.assessmentId),
@@ -3200,7 +3207,8 @@ function listMonitoring_(payload) {
       className: String(assessment.className || ''),
       studentName: String(student.name || 'Siswa'),
       studentId: String(attempt.studentId),
-      status: String(attempt.status || ''),
+      status: effectiveStatus,
+      timeExpired: storedStatus === 'in_progress' && effectiveStatus === 'completed',
       startedAt: attempt.startedAt || '',
       submittedAt: attempt.submittedAt || '',
       fullscreenExitCount: countEvent('fullscreen_exit'),
