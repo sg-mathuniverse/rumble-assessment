@@ -1840,7 +1840,6 @@ function gradeAttempt_(payload) {
     if (!questions.length) throw new Error('Soal asesmen tidak ditemukan.');
     const assessment = listRows_('Assessments').find(function(item){return String(item.assessmentId)===String(attempt.assessmentId);});
     const isSoloTax = assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX';
-    const submittedAnswers = parseJson_(attempt.answersJson, {});
 
     const scoreKeys = Object.keys(questionScores);
     if (scoreKeys.length !== questions.length) {
@@ -1869,20 +1868,9 @@ function gradeAttempt_(payload) {
           !isFinite(value) || value < 0 || value > maximum) {
         throw new Error('Skor soal nomor ' + q.order + ' tidak valid. Nilai harus antara 0 dan ' + maximum + '.');
       }
-      if (isSoloTax && String(q.type) === 'essay') {
-        const response = submittedAnswers[questionId];
-        let hasResponse = false;
-        if (typeof response === 'string') hasResponse = !!response.trim();
-        else if (response && typeof response === 'object' && !Array.isArray(response)) {
-          hasResponse = Object.keys(response).some(function(key){
-            if (key === 'photos') return false;
-            const item = response[key];
-            return item !== null && item !== undefined && String(item).trim() !== '';
-          }) || (Array.isArray(response.photos) && response.photos.length > 0);
-        }
-        if (!hasResponse && value !== 0) throw new Error('Soal SOLO Tax tanpa jawaban harus memperoleh nilai 0 (soal nomor ' + q.order + ').');
-        if (hasResponse && value < 1) throw new Error('Jawaban SOLO Tax yang dikumpulkan harus memperoleh minimal 1 poin (soal nomor ' + q.order + ').');
-      }
+      // Skor per butir sepenuhnya ditetapkan guru. Jawaban yang tidak tersimpan
+      // di aplikasi tidak selalu berarti murid tidak mengerjakan; guru dapat
+      // menilai pekerjaan pada kertas atau bukti lain di luar aplikasi.
       savedScores[questionId] = value;
       score += value;
       maxScore += maximum;
