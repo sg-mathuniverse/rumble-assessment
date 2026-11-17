@@ -1979,11 +1979,11 @@ function requestSoloAiAssessment_(payload) {
     if (!textResponses.length && !photos.length) {
       deterministic.push({
         questionId: String(question.questionId), order: Number(question.order),
-        recommendedScore: 0, maximumScore: Number(question.points),
-        reason: 'Tidak ada jawaban teks maupun foto yang dikumpulkan.',
-        evidence: [], evidenceSufficient: true, manualPhotoReviewRequired: false,
+        recommendedScore: null, maximumScore: Number(question.points),
+        reason: 'Tidak ada jawaban digital maupun foto pada sistem. Periksa apakah murid menyerahkan pekerjaan di kertas atau secara langsung; skor butir ditentukan guru setelah pemeriksaan.',
+        evidence: [], evidenceSufficient: false, manualPhotoReviewRequired: false,
         indicatorAnalysis: indicators.map(function (indicator) {
-          return { indicatorId: String(indicator.indicatorId), status: 'insufficient_evidence', evidence: 'Tidak ada jawaban yang dapat dijadikan bukti.' };
+          return { indicatorId: String(indicator.indicatorId), status: 'insufficient_evidence', evidence: 'Belum ada bukti jawaban digital. Guru perlu memeriksa kemungkinan pekerjaan yang dikumpulkan di luar aplikasi.' };
         })
       });
       return;
