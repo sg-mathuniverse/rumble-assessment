@@ -882,14 +882,16 @@ function reports(){
  const attempts=Array.isArray(s.attempts)?s.attempts:[],students=Array.isArray(s.students)?s.students:[];
  const groups={};attempts.forEach(a=>{const key=String(a.assessmentId||'');if(!groups[key])groups[key]=[];groups[key].push(a)});
  const ids=Object.keys(groups),aid=s.selectedReportAssessmentId||'',list=groups[aid]||[],active=list.find(a=>String(a.attemptId)===String(s.selectedReportAttemptId||''));
- const title=(list[0]&&list[0].assessmentTitle)||aid,studentName=active?((students.find(u=>String(u.userId)===String(active.studentId))||{}).name||active.studentId):'';
+ const activeDetail=active&&Array.isArray(active.questionDetails)?active:null;
+ const title=(list[0]&&list[0].assessmentTitle)||aid,studentName=activeDetail?((students.find(u=>String(u.userId)===String(activeDetail.studentId))||{}).name||activeDetail.studentId):'';
  let breadcrumb='<div class="report-breadcrumb"><span>Ruang kerja</span><span>›</span><button onclick="clearReportAssessment()">Daftar asesmen</button>';
  if(aid)breadcrumb+='<span>›</span><button onclick="clearReportAttempt()">'+esc(title)+'</button>';
  if(active)breadcrumb+='<span>›</span><b>Skor perbutir '+esc(studentName)+'</b>';breadcrumb+='</div>';
- if(aid&&s.selectedReportAttemptId&&!active){
+ if(aid&&s.selectedReportAttemptId&&!activeDetail){
   return head('ANALITIK','Memuat jawaban murid','Mengambil detail jawaban dan soal untuk diperiksa.')+breadcrumb+'<div class="card"><p class="muted">Memuat detail pengerjaan...</p></div>';
  }
- if(active){
+ if(activeDetail){
+  const active=activeDetail;
   const answers=active.answers||{},saved=active.questionScores||{},qs=active.questionDetails||[];
   const rows=qs.map((q,i)=>{
    const val=answers[q.id],display=reportDisplayAnswer(q,val),photos=reportAnswerPhotos(val),recommended=reportScoreRecommendation(q,val),existing=Object.prototype.hasOwnProperty.call(saved,q.id)?saved[q.id]:recommended,maximum=Number(q.points)||0,answerKey=reportCorrectAnswer(q);
