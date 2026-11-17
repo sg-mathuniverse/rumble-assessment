@@ -954,7 +954,7 @@ async function loadAttempts(options){
    s.attempts=(s.attemptSummaries||[]).map(function(item){return String(item.attemptId)===String(request.attemptId)&&detail?detail:item});
   }else{s.attempts=rows;}
   s.attemptsLoaded=true;render();
- }catch(e){if(isSummary){s.attemptSummaries=[];s.attempts=[];}s.attemptsLoaded=true;render();toast('Gagal memuat jawaban siswa: '+e.message)}
+ }catch(e){if(isSummary){s.attemptSummaries=[];s.attempts=[];}else if(request.attemptId){s.selectedReportAttemptId='';s.attempts=s.attemptSummaries||[];}s.attemptsLoaded=true;render();toast('Gagal memuat jawaban siswa: '+e.message)}
 }
 async function saveGrade(id){
  const attempt=(s.attempts||[]).find(a=>String(a.attemptId)===String(id));if(!attempt){toast('Data pengerjaan tidak ditemukan.');return}
