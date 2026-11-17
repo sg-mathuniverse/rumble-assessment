@@ -933,7 +933,7 @@ function reports(){
 function toggleReportClass(name){s.selectedReportClass=s.selectedReportClass===name?'':name;render()}
 function chooseReportAssessment(id){s.selectedReportAssessmentId=id;s.selectedReportAttemptId='';s.attempts=s.attemptSummaries||[];render()}
 function clearReportAssessment(){s.selectedReportAssessmentId='';s.selectedReportAttemptId='';s.attempts=s.attemptSummaries||[];render()}
-function clearReportAttempt(){s.selectedReportAttemptId='';s.attempts=s.attemptSummaries||[];render()}
+async function clearReportAttempt(){s.selectedReportAttemptId='';s.attempts=s.attemptSummaries||[];render();await loadAttempts({summaryOnly:true})}
 async function chooseReportAttempt(id){
  s.selectedReportAttemptId=id;s.reportDetailLoading=true;render();
  try{await loadAttempts({attemptId:id});s.reportDetailLoading=false;}
