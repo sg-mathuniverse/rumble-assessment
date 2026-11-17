@@ -74,14 +74,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v32';
+  const cacheKey = 'rumble_frontend_html_v33';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/74a10d51fe0010a709caef54a92169b538077426/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/9592dc601672181056d5c6649536cf3fc7e6e40e/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -1530,6 +1530,22 @@ function submitAttempt_(payload) {
 /**
  * Mengambil hasil pengerjaan dengan filter opsional.
  */
+/**
+ * Menentukan apakah sesi yang masih tersimpan sebagai in_progress sebenarnya
+ * sudah melewati durasi atau batas jadwal. Status fisik tidak diubah saat dibaca.
+ */
+function isAttemptExpiredByClock_(attempt, assessment, nowValue) {
+  if (!attempt || !assessment || String(attempt.status || '') !== 'in_progress') return false;
+  const nowMs = isFinite(Number(nowValue)) ? Number(nowValue) : Date.now();
+  const startedAtMs = new Date(attempt.startedAt).getTime();
+  const durationMs = Number(assessment.duration) * 60000;
+  const endAtMs = assessment.endAt ? new Date(assessment.endAt).getTime() : NaN;
+  const expiredByDuration = isFinite(startedAtMs) && isFinite(durationMs) &&
+    durationMs > 0 && nowMs > startedAtMs + durationMs + 30000;
+  const expiredBySchedule = isFinite(endAtMs) && endAtMs > 0 && nowMs > endAtMs;
+  return expiredByDuration || expiredBySchedule;
+}
+
 function listAttempts_(payload) {
   const allQuestions = listRows_('Questions');
   const assessments = listRows_('Assessments');
@@ -1538,10 +1554,15 @@ function listAttempts_(payload) {
     .filter(function (attempt) {
       const matchesAssessment = !payload.assessmentId || attempt.assessmentId === payload.assessmentId;
       const matchesStudent = !payload.studentId || attempt.studentId === payload.studentId;
-      return matchesAssessment && matchesStudent && String(attempt.status) !== 'in_progress';
+      const assessment = assessments.find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+      const expired = isAttemptExpiredByClock_(attempt, assessment);
+      return matchesAssessment && matchesStudent &&
+        (String(attempt.status) !== 'in_progress' || expired);
     })
     .map(function (attempt) {
-      const assessment = assessments.find(function (item) { return item.assessmentId === attempt.assessmentId; });
+      const assessment = assessments.find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
+      const timeExpired = isAttemptExpiredByClock_(attempt, assessment);
+      const effectiveStatus = timeExpired ? 'needs_review' : String(attempt.status || '');
       const viewer = payload.currentUser;
       const canViewInternal = !!(viewer && viewer.role === 'teacher' && assessment &&
         String(assessment.createdBy || '').trim().toLowerCase() === String(viewer.email || '').trim().toLowerCase());
@@ -1589,6 +1610,8 @@ function listAttempts_(payload) {
         });
       }
       return Object.assign({}, attempt, {
+        status: effectiveStatus,
+        timeExpired: timeExpired,
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
         assessmentDate: assessment ? String(assessment.startAt || assessment.createdAt || '') : '',
         assessmentStartAt: assessment ? String(assessment.startAt || '') : '',
@@ -1747,8 +1770,12 @@ function gradeAttempt_(payload) {
     });
     if (!attempt) throw new Error('Pengerjaan tidak ditemukan.');
     const status = String(attempt.status || '').toLowerCase();
-    if (status !== 'needs_review' && status !== 'graded') {
-      throw new Error('Pengerjaan yang masih berlangsung atau belum dikirim tidak dapat dinilai.');
+    const assessmentForExpiry = listRows_('Assessments').find(function (item) {
+      return String(item.assessmentId) === String(attempt.assessmentId);
+    });
+    const expiredAttempt = isAttemptExpiredByClock_(attempt, assessmentForExpiry);
+    if (status !== 'needs_review' && status !== 'graded' && !expiredAttempt) {
+      throw new Error('Pengerjaan yang masih berlangsung atau belum berakhir tidak dapat dinilai.');
     }
 
     const questions = listRows_('Questions').filter(function (q) {
@@ -1868,10 +1895,11 @@ function requestSoloAiAssessment_(payload) {
   }).sort(function (a, b) { return Number(b.version) - Number(a.version); })[0];
   if (!prompt) throw new Error('Belum ada prompt AI Penilaian aktif.');
   const attempt = listRows_('Attempts').find(function (item) { return String(item.attemptId) === attemptId; });
-  if (!attempt || ['needs_review', 'graded'].indexOf(String(attempt.status || '').toLowerCase()) < 0) {
-    throw new Error('AI Penilaian hanya dapat diminta untuk jawaban yang sudah dikirim.');
+  const assessment = attempt ? listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); }) : null;
+  const expiredAttempt = isAttemptExpiredByClock_(attempt, assessment);
+  if (!attempt || (['needs_review', 'graded'].indexOf(String(attempt.status || '').toLowerCase()) < 0 && !expiredAttempt)) {
+    throw new Error('AI Penilaian hanya dapat diminta untuk jawaban yang sudah dikirim atau sesi yang waktunya telah berakhir.');
   }
-  const assessment = listRows_('Assessments').find(function (item) { return String(item.assessmentId) === String(attempt.assessmentId); });
   if (!assessment || String(assessment.classification || '').toUpperCase() !== 'SOLO_TAX') {
     throw new Error('AI Penilaian SOLO hanya berlaku untuk Asesmen SOLO Tax.');
   }
