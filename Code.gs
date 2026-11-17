@@ -1563,8 +1563,17 @@ function listAttempts_(payload) {
     return selectedAttempts.map(function (attempt) {
       const assessment = assessmentById[String(attempt.assessmentId)] || null;
       const timeExpired = isAttemptExpiredByClock_(attempt, assessment);
-      return Object.assign({}, attempt, {
+      return {
+        attemptId: String(attempt.attemptId || ''),
+        assessmentId: String(attempt.assessmentId || ''),
+        studentId: String(attempt.studentId || ''),
+        startedAt: String(attempt.startedAt || ''),
+        submittedAt: String(attempt.submittedAt || ''),
         status: timeExpired ? 'needs_review' : String(attempt.status || ''),
+        score: attempt.score,
+        maxScore: attempt.maxScore,
+        focusLossCount: attempt.focusLossCount,
+        teacherFeedback: String(attempt.teacherFeedback || ''),
         timeExpired: timeExpired,
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
         assessmentDate: assessment ? String(assessment.startAt || assessment.createdAt || '') : '',
@@ -1572,7 +1581,7 @@ function listAttempts_(payload) {
         subject: assessment ? String(assessment.subject || '') : '',
         className: assessment ? String(assessment.className || '') : '',
         assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER'
-      });
+      };
     });
   }
 
