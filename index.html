@@ -350,6 +350,43 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
   #student-login-print .table th{background:#f1f4f8!important;color:#17243a!important}
   #student-login-print tr{break-inside:avoid!important;page-break-inside:avoid!important}
 }
+
+/* Professional bundle library: clear hierarchy, compact metadata, responsive cards. */
+.bundle-library-shell{padding:22px}
+.bundle-library-shell-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
+.bundle-library-shell-heading h3{margin:0 0 6px}
+.bundle-library-shell-heading p{margin:0}
+.bundle-library-tools{display:grid;grid-template-columns:minmax(180px,.9fr) minmax(160px,.75fr) minmax(220px,1.3fr);gap:12px;padding:14px;background:#f7f9fc;border:1px solid var(--line);border-radius:12px}
+.bundle-library-tools .field{margin:0;min-width:0}
+.bundle-library-tools .field label{color:#53647b}
+.bundle-library-tools select,.bundle-library-tools input{min-height:42px}
+.bundle-library-tools select:disabled{background:#eef2f7;color:#8995a6;cursor:not-allowed}
+.bundle-library-resultline{display:flex;justify-content:space-between;gap:12px;margin:14px 2px 20px;color:var(--muted);font-size:11px}
+.bundle-library-resultline span:first-child{font-weight:700;color:var(--blue)}
+.bundle-library-subject-group{padding:4px 0 18px;margin:0 0 18px;border-bottom:1px solid var(--line)}
+.bundle-library-subject-group:last-child{border-bottom:0;margin-bottom:0}
+.bundle-library-subject-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.bundle-library-eyebrow{font-size:9px;letter-spacing:.13em;font-weight:800;color:#8290a4}
+.bundle-library-subject-heading h3{font:800 18px Manrope;margin:3px 0 0;color:var(--navy)}
+.bundle-library-class-group{margin:0 0 15px 10px;padding-left:14px;border-left:2px solid #e8eef6}
+.bundle-library-class-heading{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+.bundle-library-class-heading h4{font:700 13px 'DM Sans',sans-serif;margin:0;color:#33445d}
+.bundle-library-class-mark{display:grid;place-items:center;width:25px;height:25px;border-radius:8px;background:#edf3fb;color:var(--blue);font-size:13px}
+.bundle-library-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.bundle-library-card{display:flex;flex-direction:column;align-items:stretch;gap:12px;min-width:0;text-align:left;padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;color:var(--ink);transition:border-color .16s ease,box-shadow .16s ease,transform .16s ease}
+.bundle-library-card:hover{border-color:#b9cce7;box-shadow:0 7px 20px rgba(20,45,78,.08);transform:translateY(-1px)}
+.bundle-library-card:focus-visible{outline:3px solid #9bbbe8;outline-offset:2px}
+.bundle-library-card-top,.bundle-library-card-meta{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.bundle-library-type{font-size:9px;font-weight:800;border-radius:6px;padding:5px 7px;letter-spacing:.03em}
+.bundle-library-type.regular{background:#eef2f7;color:#526174}
+.bundle-library-type.solo{background:#eaf3ff;color:#285da8}
+.bundle-library-open{font-size:10px;color:#718096}
+.bundle-library-card-title{font:800 13px Manrope;line-height:1.45;color:#20334f;overflow-wrap:anywhere}
+.bundle-library-card-meta{padding-top:9px;border-top:1px solid #edf1f6;color:#78869a;font-size:10px}
+.bundle-library-empty{display:flex;flex-direction:column;align-items:center;gap:7px;padding:34px 16px;color:var(--muted);text-align:center;font-size:12px}
+.bundle-library-empty b{font:800 14px Manrope;color:#33445d}
+.bundle-library-empty-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:#edf3fb;color:var(--blue);font-size:20px}
+@media(max-width:760px){.bundle-library-shell{padding:15px}.bundle-library-tools{grid-template-columns:minmax(0,1fr)}.bundle-library-shell-heading{align-items:flex-start}.bundle-library-resultline{flex-direction:column;gap:4px}.bundle-library-class-group{margin-left:3px;padding-left:10px}.bundle-library-grid{grid-template-columns:minmax(0,1fr)}}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script><script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script><script src="https://unpkg.com/docx@9.14.0/dist/index.iife.js"></script></head><body><div id="app"></div><div class="toast" id="toast"></div><script>
 async function saveSoloDominantVerification(attemptId){
  const attempt=(s.attempts||[]).find(function(item){return String(item.attemptId)===String(attemptId)});
@@ -614,9 +651,9 @@ function bundleDraftRows(){
 }
 function bundlesPage(){
  const detail=s.selectedBundleDetail?bundleDetailPanel():'';
- return head('Perpustakaan soal','Bank soal & bundel','Pilih mata pelajaran, kelas, lalu buka bundel untuk melihat isi soal.','<button class="btn primary" onclick="newBundle()">＋ Buat bundel soal</button>')+
+ return head('Perpustakaan soal','Bank soal & bundel','Kelola koleksi soal dengan pengelompokan mata pelajaran dan kelas.','<button class="btn primary" onclick="newBundle()">＋ Buat bundel soal</button>')+
  (detail?detail:'')+
- '<div class="card"><div class="actions"><h3>Bundel tersimpan</h3><button class="btn section-refresh-button" onclick="loadBundles()"><span aria-hidden="true">↻</span> Muat ulang</button></div>'+(s.bundlesLoaded?bundleRows():'<p class="muted">Memuat bundel soal...</p>')+'</div>'+
+ '<div class="card bundle-library-shell"><div class="bundle-library-shell-heading"><div><h3>Koleksi bundel</h3><p class="muted">Pilih kategori untuk mempersempit koleksi, lalu buka bundel untuk meninjau isinya.</p></div><button class="btn section-refresh-button" onclick="loadBundles()"><span aria-hidden="true">↻</span> Muat ulang</button></div>'+(s.bundlesLoaded?bundleRows():'<p class="muted">Memuat bundel soal...</p>')+'</div>'+
  '<div class="card"><h3>Draf bundel otomatis</h3><p class="muted">Draf hanya dibuat saat guru sedang mengedit bundel. Gunakan Batal Edit untuk membuang perubahan yang belum disimpan.</p>'+bundleDraftRows()+'</div>'+
  (s.bundleEditorOpen&&s.editorMode==='bundle'?editor():'')+'<p class="footnote">Asesmen dari bundel menjadi salinan terpisah; bundel sumber tetap aman.</p>';
 }
@@ -664,22 +701,43 @@ function bundleDetailPanel(){
  '<h4>Daftar soal</h4>'+questions.map(function(q,i){return bundleQuestionDetail(q,i,bundle)}).join('')+
  '<div class="actions"><button class="btn" onclick="useBundle(\''+esc(bundle.bundleId)+'\')">Gunakan untuk asesmen</button>'+(owner?'<button class="btn primary" onclick="editBundle(\''+esc(bundle.bundleId)+'\')">Edit</button><button class="btn danger" onclick="deleteBundle(\''+esc(bundle.bundleId)+'\')">Hapus</button>':'')+'</div></div>';
 }
-function bundleRows(){
- if(!s.bundles.length)return '<p class="muted">Belum ada bundel. Klik Buat bundel soal untuk memulai.</p>';
- const subjects=Array.from(new Set(s.bundles.map(function(x){return String(x.subject||'Mata pelajaran belum diatur').trim()||'Mata pelajaran belum diatur'}))).sort(function(a,b){return a.localeCompare(b,'id')});
- return subjects.map(function(subject){
-  const subjectItems=s.bundles.filter(function(x){return (String(x.subject||'Mata pelajaran belum diatur').trim()||'Mata pelajaran belum diatur')===subject});
-  const classes=Array.from(new Set(subjectItems.map(function(x){return String(x.className||'Kelas belum diatur').trim()||'Kelas belum diatur'}))).sort(function(a,b){return a.localeCompare(b,'id')});
-  const classGroups=classes.map(function(className){
-   const bundles=subjectItems.filter(function(x){return (String(x.className||'Kelas belum diatur').trim()||'Kelas belum diatur')===className}).sort(function(a,b){return String(a.title||'').localeCompare(String(b.title||''),'id')});
-   return '<details class="bundle-class-group"><summary><b>'+esc(className)+'</b><small>'+bundles.length+' bundel</small></summary><div class="bundle-class-items">'+bundles.map(function(x){
-    return '<button type="button" class="bundle-open-row" onclick="viewBundle(\''+esc(x.bundleId)+'\')"><span class="symbol">▣</span><span class="grow"><b>'+esc(x.title||'Tanpa judul')+'</b><small>'+Number(x.questionCount||0)+' soal · '+(String(x.classification||'REGULER')==='SOLO_TAX'?'SOLO Tax':'Reguler')+' · v'+Number(x.latestVersionNumber||0)+'</small></span><span class="muted">Lihat detail ›</span></button>';
-   }).join('')+'</div></details>';
-  }).join('');
-  return '<details class="bundle-subject-group"><summary><b>'+esc(subject)+'</b><small>'+subjectItems.length+' bundel</small></summary><div class="bundle-subject-content">'+classGroups+'</div></details>';
- }).join('');
+function setBundleSubjectFilter(value){s.bundleSubjectFilter=value||'';s.bundleClassFilter='';render()}
+function setBundleClassFilter(value){s.bundleClassFilter=value||'';render()}
+function filterBundleCards(value){
+ const query=String(value||'').trim().toLocaleLowerCase('id');
+ document.querySelectorAll('.bundle-library-card').forEach(function(card){card.style.display=!query||String(card.dataset.search||'').toLocaleLowerCase('id').includes(query)?'':'none'});
+ document.querySelectorAll('.bundle-library-class-group').forEach(function(group){group.style.display=Array.from(group.querySelectorAll('.bundle-library-card')).some(function(card){return card.style.display!=='none'})?'':'none'});
+ document.querySelectorAll('.bundle-library-subject-group').forEach(function(group){group.style.display=Array.from(group.querySelectorAll('.bundle-library-class-group')).some(function(item){return item.style.display!=='none'})?'':'none'});
+ const count=Array.from(document.querySelectorAll('.bundle-library-card')).filter(function(card){return card.style.display!=='none'}).length;
+ const label=document.getElementById('bundleVisibleCount');if(label)label.textContent=count+' bundel ditampilkan';
 }
-
+function bundleRows(){
+ const bundles=s.bundles||[];
+ if(!bundles.length)return '<div class="bundle-library-empty"><span class="bundle-library-empty-icon">▤</span><b>Perpustakaan masih kosong</b><span>Mulai dengan membuat bundel soal pertama.</span></div>';
+ const norm=function(value,fallback){return String(value||'').trim()||fallback};
+ const subjects=Array.from(new Set(bundles.map(function(x){return norm(x.subject,'Mata pelajaran belum diatur')}))).sort(function(a,b){return a.localeCompare(b,'id')});
+ const selectedSubject=s.bundleSubjectFilter||'';
+ const classSource=bundles.filter(function(x){return !selectedSubject||norm(x.subject,'Mata pelajaran belum diatur')===selectedSubject});
+ const classes=Array.from(new Set(classSource.map(function(x){return norm(x.className,'Kelas belum diatur')}))).sort(function(a,b){return a.localeCompare(b,'id')});
+ const selectedClass=s.bundleClassFilter||'';
+ const visible=bundles.filter(function(x){return (!selectedSubject||norm(x.subject,'Mata pelajaran belum diatur')===selectedSubject)&&(!selectedClass||norm(x.className,'Kelas belum diatur')===selectedClass)});
+ const subjectOptions='<option value="">Semua mata pelajaran</option>'+subjects.map(function(x){return '<option value="'+esc(x)+'" '+(x===selectedSubject?'selected':'')+'>'+esc(x)+'</option>'}).join('');
+ const classOptions='<option value="">Semua kelas</option>'+classes.map(function(x){return '<option value="'+esc(x)+'" '+(x===selectedClass?'selected':'')+'>'+esc(x)+'</option>'}).join('');
+ const groups=subjects.filter(function(subject){return !selectedSubject||subject===selectedSubject}).map(function(subject){
+  const subjectItems=visible.filter(function(x){return norm(x.subject,'Mata pelajaran belum diatur')===subject});
+  if(!subjectItems.length)return '';
+  const classGroups=Array.from(new Set(subjectItems.map(function(x){return norm(x.className,'Kelas belum diatur')}))).sort(function(a,b){return a.localeCompare(b,'id')}).map(function(className){
+   const items=subjectItems.filter(function(x){return norm(x.className,'Kelas belum diatur')===className}).sort(function(a,b){return String(a.title||'').localeCompare(String(b.title||''),'id')});
+   return '<section class="bundle-library-class-group"><div class="bundle-library-class-heading"><span class="bundle-library-class-mark">▦</span><h4>'+esc(className)+'</h4><span class="bundle-library-count">'+items.length+' bundel</span></div><div class="bundle-library-grid">'+items.map(function(x){
+    const classification=String(x.classification||'REGULER').toUpperCase()==='SOLO_TAX'?'SOLO Tax':'Reguler';
+    const searchText=[x.title,x.subject,x.className,classification].join(' ');
+    return '<button type="button" class="bundle-library-card" data-search="'+esc(searchText)+'" onclick="viewBundle(\''+esc(x.bundleId)+'\')"><span class="bundle-library-card-top"><span class="bundle-library-type '+(classification==='SOLO Tax'?'solo':'regular')+'">'+classification+'</span><span class="bundle-library-open">Buka detail ↗</span></span><span class="bundle-library-card-title">'+esc(x.title||'Tanpa judul')+'</span><span class="bundle-library-card-meta"><span>▤ '+Number(x.questionCount||0)+' soal</span><span>Versi '+Number(x.latestVersionNumber||0)+'</span></span></button>';
+   }).join('')+'</div></section>';
+  }).join('');
+  return '<section class="bundle-library-subject-group"><div class="bundle-library-subject-heading"><div><span class="bundle-library-eyebrow">MATA PELAJARAN</span><h3>'+esc(subject)+'</h3></div><span class="bundle-library-count">'+subjectItems.length+' bundel</span></div>'+classGroups+'</section>';
+ }).join('');
+ return '<div class="bundle-library-tools"><div class="field"><label for="bundleSubjectFilter">Mata pelajaran</label><select id="bundleSubjectFilter" onchange="setBundleSubjectFilter(this.value)">'+subjectOptions+'</select></div><div class="field"><label for="bundleClassFilter">Kelas</label><select id="bundleClassFilter" onchange="setBundleClassFilter(this.value)" '+(!selectedSubject?'disabled':'')+'>'+classOptions+'</select></div><div class="field bundle-library-search"><label for="bundleLibrarySearch">Cari bundel</label><input id="bundleLibrarySearch" type="search" placeholder="Cari judul atau jenis bundel..." oninput="filterBundleCards(this.value)"></div></div><div class="bundle-library-resultline"><span id="bundleVisibleCount">'+visible.length+' bundel ditampilkan</span><span>Disusun berdasarkan mata pelajaran dan kelas</span></div>'+(groups||'<div class="bundle-library-empty">Tidak ada bundel pada filter ini.</div>');
+}
 function students(){const list=Array.isArray(s.students)?s.students:[];return head('MANAJEMEN KELAS','Daftar siswa','Identitas dan kelas diambil dari daftar pengguna sekolah yang aktif.')+'<div class="card"><div class="actions"><h3>Pengguna siswa</h3><button class="btn" onclick="loadStudents()">Muat ulang</button></div>'+(!s.studentsLoaded?'<p class="muted">Memuat daftar siswa…</p>':!list.length?'<div class="notice">Belum ada akun siswa aktif pada sheet Users. Daftarkan akun melalui administrator sekolah.</div>':'<table class="table"><thead><tr><th>Nama</th><th>Email sekolah</th><th>Kelas</th><th>Status</th></tr></thead><tbody>'+list.map(u=>'<tr><td>'+esc(u.name||'—')+'</td><td>'+esc(u.email||'—')+'</td><td>'+esc(u.className||'Belum ditetapkan')+'</td><td><span class="pill live">Aktif</span></td></tr>').join('')+'</tbody></table>')+'</div>'}
 function reportScoreRecommendation(q,val){
  const type=String(q.type||''),points=Number(q.points)||0,answer=q.answer;
