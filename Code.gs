@@ -74,14 +74,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v43';
+  const cacheKey = 'rumble_frontend_html_v44';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/96a7a0bc56173a3c2bd1bc296d23ab7309d682ab/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/f38b0a9df226bf67c8669146be85794764ccc60f/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -323,7 +323,7 @@ function routeAction_(action, payload) {
         return String(item.role).toLowerCase() === 'student' &&
           (item.active === true || String(item.active).toLowerCase() === 'true' || String(item.active) === '1');
       }).map(function (item) {
-        return { userId: item.userId, name: item.name, email: item.email, className: item.className, active: item.active };
+        return { userId: item.userId, username: String(item.username || ''), name: item.name, email: item.email, className: item.className, active: item.active };
       });
     },
     uploadAnswerImage: function () {
