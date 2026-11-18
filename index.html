@@ -1190,7 +1190,17 @@ function gradebook(){
  }
  const group=groups.find(function(x){return x.id===s.selectedGradebookAssessmentId});
  if(!group){s.selectedGradebookAssessmentId='';return gradebook()}
- const list=group.items,qs=list[0].questionDetails||[],isSoloTax=group.isSolo;
+ const studentById={};students.forEach(function(user){studentById[String(user.userId)]=user});
+ const list=group.items.slice().sort(function(a,b){
+  const userA=studentById[String(a.studentId)]||{},userB=studentById[String(b.studentId)]||{};
+  const nisA=String(userA.username||''),nisB=String(userB.username||'');
+  if(nisA&&nisB){const order=nisA.localeCompare(nisB,'id',{numeric:true,sensitivity:'base'});if(order)return order}
+  else if(nisA)return -1;
+  else if(nisB)return 1;
+  const nameOrder=String(userA.name||a.studentId||'').localeCompare(String(userB.name||b.studentId||''),'id',{numeric:true,sensitivity:'base'});
+  return nameOrder||String(a.studentId||'').localeCompare(String(b.studentId||''));
+ });
+ const qs=list[0].questionDetails||[],isSoloTax=group.isSolo;
  const breadcrumb='<div class="report-breadcrumb"><button onclick="selectGradebookAssessment(&quot;&quot;)">Semua asesmen</button><span>›</span><b>'+esc(group.title)+'</b></div>';
  const table='<div class="table-scroll"><table class="gradebook-table"><thead><tr><th>Nama murid</th>'+qs.map((q,i)=>'<th>Soal '+(i+1)+'<small>'+Number(q.points||0)+' poin</small></th>').join('')+'<th>Nilai akhir</th>'+(isSoloTax?'<th>Level SOLO Murid</th><th>Keterangan</th>':'')+'</tr></thead><tbody>'+list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),scores=a.questionScores||{},solo=isSoloTax?soloGradebookSummary(a):null;return '<tr><td>'+esc(user?user.name:a.studentId)+'</td>'+qs.map(q=>'<td>'+((a.status==='graded'||a.status==='needs_review')&&scores[q.id]!==undefined?esc(scores[q.id]):'—')+'</td>').join('')+'<td><b>'+(a.status==='graded'&&Number(a.maxScore)>0?Math.round(Number(a.score)/Number(a.maxScore)*100):'—')+'</b></td>'+(isSoloTax?'<td>'+esc(solo.level)+'</td><td>'+esc(solo.note)+'</td>':'')+'</tr>'}).join('')+'</tbody></table></div>';
  return head('REKAP NILAI',esc(group.title),esc(group.className)+' · '+esc(group.subject))+breadcrumb+'<div class="card"><div class="actions"><h3>Nilai siswa</h3><span class="muted">'+list.length+' sesi</span><button class="btn primary" onclick="downloadGradebookXlsx()">Ekspor .xlsx</button></div>'+table+'</div>'+(isSoloTax?soloClassReflectionPanel(list[0]):'');
