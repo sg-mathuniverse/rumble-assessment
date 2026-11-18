@@ -1939,6 +1939,22 @@ function gradeAttempt_(payload) {
  * Riwayat disimpan sebagai event append-only agar struktur spreadsheet tetap.
  */
 
+function enrichSoloLearningIndicators_(soloMeta, registryById) {
+  const meta = soloMeta || {};
+  const source = Array.isArray(meta.learningIndicators) && meta.learningIndicators.length
+    ? meta.learningIndicators
+    : (Array.isArray(meta.learningIndicatorIds) ? meta.learningIndicatorIds.map(function (id) { return { indicatorId: id }; }) : []);
+  return source.map(function (indicator) {
+    const id = String(indicator && indicator.indicatorId || '');
+    const registered = registryById && registryById[id] ? registryById[id] : {};
+    return {
+      indicatorId: id,
+      indicatorCode: String(registered.indicatorCode || indicator.indicatorCode || ''),
+      description: String(registered.description || indicator.description || '')
+    };
+  }).filter(function (indicator) { return !!indicator.indicatorId; });
+}
+
 function requestSoloAiAssessment_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const settings = aiSettings_();
@@ -1962,6 +1978,10 @@ function requestSoloAiAssessment_(payload) {
   if (!questions.length || questions.some(function (q) { return String(q.type) !== 'essay'; })) {
     throw new Error('Struktur soal asesmen SOLO Tax tidak valid.');
   }
+  const learningIndicatorById = {};
+  listRows_('LearningIndicators').forEach(function (indicator) {
+    learningIndicatorById[String(indicator.indicatorId || '')] = indicator;
+  });
   const answers = parseJson_(attempt.answersJson, {}) || {};
   const teacherQuestionScores = parseJson_(attempt.questionScoresJson, {}) || {};
   const questionInputs = [], deterministic = [];
@@ -1984,7 +2004,7 @@ function requestSoloAiAssessment_(payload) {
     }
     const meta = parseJson_(question.answerJson, {}) || {};
     const soloMeta = meta.__soloTaxMeta || {};
-    const indicators = Array.isArray(soloMeta.learningIndicators) ? soloMeta.learningIndicators : [];
+    const indicators = enrichSoloLearningIndicators_(soloMeta, learningIndicatorById);
     if (!textResponses.length && !photos.length) {
       deterministic.push({
         questionId: String(question.questionId), order: Number(question.order),
@@ -2065,7 +2085,7 @@ function requestSoloAiAssessment_(payload) {
     const percentage = Math.round((score / maximum) * 100);
     const meta = parseJson_(question.answerJson, {}) || {};
     const solo = meta.__soloTaxMeta || {};
-    const indicators = Array.isArray(solo.learningIndicators) ? solo.learningIndicators : [];
+    const indicators = enrichSoloLearningIndicators_(solo, learningIndicatorById);
     quantitativeQuestions.push({
       questionId: questionId, order: Number(question.order),
       teacherScore: score, maximumScore: maximum, percentage: percentage,
@@ -2095,7 +2115,7 @@ function requestSoloAiAssessment_(payload) {
   };
   let aiResults = [], dominantRecommendation = null, usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, model = '';
   if (questionInputs.length || quantitativeQuestions.length) {
-    const systemPrompt = prompt.content + '\\n\\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown. Ikuti NAMA KEY secara persis dan jangan mengganti nama, menghilangkan, atau memindahkan field wajib. Objek dominantLevel WAJIB memiliki key level, evidenceSummary, keterangan, recommendationBasis, dan questionEvidence. Jangan mengembalikan dominantLevel sebagai objek kosong. Jika bukti kualitatif maupun kuantitatif benar-benar tidak memadai, gunakan dominantLevel:null. Contoh struktur lengkap:  {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","recommendedPercentage":80,"evidence":"alasan berbasis jawaban"}]}],"dominantLevel":{"level":"PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT","evidenceSummary":"ringkasan bukti kualitatif lintas jawaban","keterangan":"narasi singkat yang menghubungkan level SOLO dengan ketercapaian indikator TP","questionEvidence":[{"questionId":"...","evidence":"bukti spesifik dari jawaban"}]}}. Nilai rekomendasi per soal harus 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup; jika tidak cukup, recommendedScore null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban teks. Cocokkan makna dan penalaran dengan panduan jawaban guru serta rubrik; terima cara penyelesaian setara, jangan hanya mencocokkan kata. teacherScore adalah skor sementara dari guru: bandingkan secara independen, jangan otomatis menyalinnya dan jelaskan alasan jika berbeda. Analisis setiap indikator. Untuk setiap indikator dengan bukti cukup, berikan recommendedPercentage 0-100 sebagai estimasi kualitatif berdasarkan bukti dan deskripsi indikator, bukan hasil perhitungan skor; jika bukti tidak cukup, gunakan null dan status insufficient_evidence. Persentase adalah rekomendasi untuk ditinjau guru. Foto tidak dikirim ke AI; foto wajib diperiksa manual. Rekomendasi level SOLO harus mempertimbangkan gabungan analisis kualitatif jawaban teks jika tersedia, rata-rata persentase skor guru per soal, dan rata-rata persentase ketercapaian tiap indikator dalam quantitativeSummary. Data angka boleh menjadi dasar rekomendasi, bukan diabaikan, tetapi jangan menyatakan angka saja membuktikan proses berpikir. Jika jawaban hanya foto atau tidak ada teks yang dapat dibaca AI, berikan rekomendasi level sementara dari pola rata-rata skor dan indikator bila data kuantitatif tersedia; jelaskan bahwa rekomendasi sementara berbasis skor guru dan indikator, bukan pembacaan foto atau bukti kualitatif. Jika data kualitatif dan kuantitatif sama-sama tersedia, pertimbangkan keduanya dan jelaskan bila tidak selaras. Isi recommendationBasis dengan \'qualitative_and_quantitative\' atau \'quantitative_only_provisional\'. questionEvidence harus memuat setiap soal teks yang dianalisis tepat satu kali; jika tidak ada jawaban teks, gunakan array kosong. Jika tidak ada bukti kualitatif maupun data skor guru yang memadai, dominantLevel harus null.';
+    const systemPrompt = prompt.content + '\\n\\nATURAN WAJIB OUTPUT: Kembalikan JSON valid saja tanpa markdown. Ikuti NAMA KEY secara persis dan jangan mengganti nama, menghilangkan, atau memindahkan field wajib. Objek dominantLevel WAJIB memiliki key level, evidenceSummary, keterangan, recommendationBasis, dan questionEvidence. Jangan mengembalikan dominantLevel sebagai objek kosong. Jika bukti kualitatif maupun kuantitatif benar-benar tidak memadai, gunakan dominantLevel:null. Contoh struktur lengkap:  {"questions":[{"questionId":"...","recommendedScore":1,"evidenceSufficient":true,"reason":"...","evidence":["bukti jawaban"],"indicatorAnalysis":[{"indicatorId":"...","status":"mastered|developing|needs_improvement|insufficient_evidence","recommendedPercentage":80,"evidence":"alasan berbasis jawaban"}]}],"dominantLevel":{"level":"PRESTRUCTURAL|UNISTRUKTURAL|MULTISTRUKTURAL|RELATIONAL|EXTENDED_ABSTRACT","evidenceSummary":"ringkasan bukti kualitatif lintas jawaban","keterangan":"narasi singkat yang menghubungkan level SOLO dengan ketercapaian indikator TP","questionEvidence":[{"questionId":"...","evidence":"bukti spesifik dari jawaban"}]}}. Nilai rekomendasi per soal harus 1 sampai nilai maksimal jika jawaban teks ada dan bukti cukup; jika tidak cukup, recommendedScore null dan evidenceSufficient false. Jangan memberi skor 0 untuk jawaban teks. Cocokkan makna dan penalaran dengan panduan jawaban guru serta rubrik; terima cara penyelesaian setara, jangan hanya mencocokkan kata. teacherScore adalah skor sementara dari guru: bandingkan secara independen, jangan otomatis menyalinnya dan jelaskan alasan jika berbeda. Analisis setiap indikator. indicatorId adalah kunci teknis internal untuk pencocokan data, bukan kode yang boleh ditampilkan. Jangan pernah menyalin atau menyebut nilai indicatorId (misalnya IND-... yang merupakan ID internal) di evidenceSummary, keterangan, reason, evidence, atau narasi lain. Jika perlu menyebut indikator, gunakan hanya indicatorCode resmi dari Admin dan/atau deskripsinya. Untuk setiap indikator dengan bukti cukup, berikan recommendedPercentage 0-100 sebagai estimasi kualitatif berdasarkan bukti dan deskripsi indikator, bukan hasil perhitungan skor; jika bukti tidak cukup, gunakan null dan status insufficient_evidence. Persentase adalah rekomendasi untuk ditinjau guru. Foto tidak dikirim ke AI; foto wajib diperiksa manual. Rekomendasi level SOLO harus mempertimbangkan gabungan analisis kualitatif jawaban teks jika tersedia, rata-rata persentase skor guru per soal, dan rata-rata persentase ketercapaian tiap indikator dalam quantitativeSummary. Data angka boleh menjadi dasar rekomendasi, bukan diabaikan, tetapi jangan menyatakan angka saja membuktikan proses berpikir. Jika jawaban hanya foto atau tidak ada teks yang dapat dibaca AI, berikan rekomendasi level sementara dari pola rata-rata skor dan indikator bila data kuantitatif tersedia; jelaskan bahwa rekomendasi sementara berbasis skor guru dan indikator, bukan pembacaan foto atau bukti kualitatif. Jika data kualitatif dan kuantitatif sama-sama tersedia, pertimbangkan keduanya dan jelaskan bila tidak selaras. Isi recommendationBasis dengan \'qualitative_and_quantitative\' atau \'quantitative_only_provisional\'. questionEvidence harus memuat setiap soal teks yang dianalisis tepat satu kali; jika tidak ada jawaban teks, gunakan array kosong. Jika tidak ada bukti kualitatif maupun data skor guru yang memadai, dominantLevel harus null.';
     try {
       const aiInput = 'Nilai data jawaban anonim berikut. Tidak ada identitas siswa. quantitativeSummary berisi rata-rata persentase dari skor guru yang sudah disimpan; gunakan sesuai aturan sistem. Data: ' + JSON.stringify({ questions: questionInputs, quantitativeSummary: quantitativeSummary });
       let response = tokenPortalChatCompletion_([
