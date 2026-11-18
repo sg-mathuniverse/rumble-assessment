@@ -2073,7 +2073,7 @@ function requestSoloAiAssessment_(payload) {
     });
   });
   // Ringkasan kuantitatif dari skor guru tersimpan; tidak menggunakan atau membaca foto.
-  const quantitativeQuestions = [], quantitativeIndicators = {};
+  const quantitativeQuestions = [], quantitativeIndicators = {}, quantitativeIndicatorMeta = {};
   questions.forEach(function (question) {
     const questionId = String(question.questionId);
     const maximum = Number(question.points);
@@ -2096,6 +2096,12 @@ function requestSoloAiAssessment_(payload) {
       if (!id) return;
       if (!quantitativeIndicators[id]) quantitativeIndicators[id] = [];
       quantitativeIndicators[id].push(percentage);
+      if (!quantitativeIndicatorMeta[id]) {
+        quantitativeIndicatorMeta[id] = {
+          indicatorCode: String(indicator.indicatorCode || ''),
+          description: String(indicator.description || '')
+        };
+      }
     });
   });
   const quantitativeSummary = {
@@ -2104,10 +2110,11 @@ function requestSoloAiAssessment_(payload) {
     indicators: Object.keys(quantitativeIndicators).map(function (id) {
       const values = quantitativeIndicators[id];
       const registered = learningIndicatorById[id] || {};
+      const indicatorMeta = quantitativeIndicatorMeta[id] || {};
       return {
         indicatorId: id,
-        indicatorCode: String(registered.indicatorCode || ''),
-        description: String(registered.description || ''),
+        indicatorCode: String(registered.indicatorCode || indicatorMeta.indicatorCode || ''),
+        description: String(registered.description || indicatorMeta.description || ''),
         averagePercentage: Math.round((values.reduce(function (sum, value) { return sum + value; }, 0) / values.length) * 100) / 100,
         questionCount: values.length
       };
