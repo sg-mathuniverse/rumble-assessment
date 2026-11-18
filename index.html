@@ -143,6 +143,10 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 .question-editor-accordion>summary:after,.student-question-accordion>summary:after,.teacher-question-accordion>summary:after{content:"＋";font-size:18px;color:#3157d5}
 .question-editor-accordion[open]>summary:after,.student-question-accordion[open]>summary:after,.teacher-question-accordion[open]>summary:after{content:"−"}
 .question-editor-body,.student-question-body,.teacher-question-body{padding:6px 16px 16px}
+/* Student exam content stays inside its question cell on narrow screens. */
+.student-question-body img,.student-exam-passage img{display:block;max-width:100%!important;height:auto!important;box-sizing:border-box;object-fit:contain}
+.student-question-body,.student-exam-passage,.student-question-body *,.student-exam-passage *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.student-question-body input,.student-question-body textarea,.student-question-body select,.student-question-body [contenteditable="true"]{-webkit-user-select:text!important;user-select:text!important;-webkit-touch-callout:default}
 .student-question-accordion>summary{position:sticky;top:0;z-index:3;min-height:54px}
 .student-question-accordion.answered-question{border-color:#9bdcc5;box-shadow:0 0 0 1px #d4f5e7 inset}
 .student-question-accordion.answered-question>summary{background:#e7fbf2;color:#075f49}
@@ -457,6 +461,48 @@ async function saveSoloVerification(attemptId){
 const s={role:'teacher',page:'overview',adminStudents:[],adminStudentsLoaded:false,adminCredentials:[],aiSettings:null,aiSettingsLoaded:false,aiSettingsError:'',aiModels:[],aiUsage:[],aiPrompts:[],aiPromptTestResult:null,aiTestResult:null,learningObjectives:[],learningIndicators:[],learningRepositoryLoaded:false,learningRepositoryError:'',learningPendingAudits:[],learningObjectiveEdit:null,learningIndicatorEdit:null,learningIndicatorFilter:'',learningIndicatorSubject:'',learningIndicatorClass:'',learningObjectiveListSubject:'',learningObjectiveListClass:'',learningIndicatorListSubject:'',learningIndicatorListClass:'',bundleLearningObjectives:[],bundleLearningIndicators:[],bundleLearningReferencesLoaded:false,bundleLearningReferencesError:'',adminCsvText:'',items:[],loadedFromServer:false,students:[],studentsLoaded:false,attempts:[],attemptSummaries:[],attemptsLoaded:false,reportDetailLoading:false,monitoring:[],monitoringLoaded:false,monitoringUpdatedAt:'',monitoringError:'',selectedMonitoringAttemptId:'',selectedMonitoringAssessmentId:'',monitoringFilter:'all',monitoringExpandedGroups:{},monitoringLoading:false,teacherSummary:[],teacherSummaryLoaded:false,teacherSummaryError:'',selectedAssessmentClass:'',selectedGradebookClass:'',selectedGradebookAssessmentId:'',selectedSummaryClass:'',bundleVisibility:'shared',bundleClassification:'REGULER',assessmentLoadError:'',qs:[],currentAssessment:null,answers:{},bundles:[],bundlesLoaded:false,editorMode:'assessment',editingBundleId:null,assessmentFromBundle:false,assessmentEditorOpen:false,bundleEditorOpen:false,sourceBundleId:'',sourceBundleTitle:'',uploadingImage:false,uploadingLabel:'',pendingImageDeletes:[],passages:[]};
 let monitoringPollInterval=null;
 let examSecurityActive=false,securityEventLastSent={},securityWarningCount=0;
+// Simpan penanda saat dokumen asesmen ditinggalkan; dipakai setelah sesi dipulihkan.
+window.addEventListener('pagehide',function(){
+ if(s.role!=='student'||s.page!=='detail'||!s.activeAttempt||!s.activeAttempt.attemptId)return;
+ try{sessionStorage.setItem('rumblePendingExamReload',JSON.stringify({attemptId:String(s.activeAttempt.attemptId),at:Date.now()}));}catch(error){}
+});
+function examProtectedContent(target){
+ const element=target&&target.nodeType===1?target:(target&&target.parentElement?target.parentElement:null);
+ if(!element||!element.closest)return null;
+ if(element.closest('input,textarea,select,[contenteditable="true"]'))return null;
+ return element.closest('.student-question-body,.student-exam-passage');
+}
+function examSelectionTarget(){
+ try{const selection=window.getSelection();const node=selection&&selection.anchorNode;return node?(node.nodeType===1?node:node.parentElement):null;}catch(error){return null;}
+}
+function blockExamCopyAction(event){
+ if(!examProtectedContent(event.target)&&!examProtectedContent(examSelectionTarget()))return;
+ event.preventDefault();event.stopPropagation();
+}
+function blockExamCopyShortcut(event){
+ const key=String(event.key||'').toLowerCase();
+ const shortcut=(event.ctrlKey||event.metaKey)&&['c','x','a'].includes(key);
+ const legacyShortcut=(event.ctrlKey&&key==='insert')||(event.shiftKey&&key==='delete');
+ if(!shortcut&&!legacyShortcut)return;
+ if(!examProtectedContent(event.target)&&!examProtectedContent(examSelectionTarget()))return;
+ event.preventDefault();event.stopPropagation();
+}
+function startExamQuestionProtection(){
+ document.addEventListener('copy',blockExamCopyAction,true);
+ document.addEventListener('cut',blockExamCopyAction,true);
+ document.addEventListener('contextmenu',blockExamCopyAction,true);
+ document.addEventListener('selectstart',blockExamCopyAction,true);
+ document.addEventListener('dragstart',blockExamCopyAction,true);
+ document.addEventListener('keydown',blockExamCopyShortcut,true);
+}
+function stopExamQuestionProtection(){
+ document.removeEventListener('copy',blockExamCopyAction,true);
+ document.removeEventListener('cut',blockExamCopyAction,true);
+ document.removeEventListener('contextmenu',blockExamCopyAction,true);
+ document.removeEventListener('selectstart',blockExamCopyAction,true);
+ document.removeEventListener('dragstart',blockExamCopyAction,true);
+ document.removeEventListener('keydown',blockExamCopyShortcut,true);
+}
 function sendSecurityEvent(eventType){
  if(!examSecurityActive||!s.activeAttempt||!s.currentAssessment)return;
  const now=Date.now(),last=securityEventLastSent[eventType]||0;
@@ -481,6 +527,7 @@ function handleExamFullscreen(){const control=document.getElementById('examFulls
 function startExamSecurity(){
  if(examSecurityActive)return;
  examSecurityActive=true;securityEventLastSent={};securityWarningCount=0;
+ startExamQuestionProtection();
  document.addEventListener('visibilitychange',handleExamVisibility);
  document.addEventListener('fullscreenchange',handleExamFullscreen);
  window.addEventListener('blur',handleExamBlur);
@@ -491,6 +538,7 @@ function stopExamSecurity(){
  if(!examSecurityActive)return;
  document.removeEventListener('visibilitychange',handleExamVisibility);
  document.removeEventListener('fullscreenchange',handleExamFullscreen);
+ stopExamQuestionProtection();
  window.removeEventListener('blur',handleExamBlur);
  window.removeEventListener('focus',handleExamFocus);
  examSecurityActive=false;
@@ -1592,7 +1640,7 @@ function detailPage(){
  const a=d.assessment||{},qs=d.questions||[],student=s.role==='student';
  const back=student?'':'<button class="btn" onclick="go(\'assessments\')">← Kembali</button>';
  let body='';
- const passage=(a.passageText||a.passageImageUrl)?'<div class="question" style="white-space:pre-wrap"><b>Bacaan / stimulus</b><div class="passage-content">'+esc(a.passageText||'')+'</div>'+(a.passageImageUrl?'<img src="'+esc(a.passageImageUrl)+'" alt="Gambar bacaan" style="display:block;max-width:600px;max-height:380px;margin:8px 0;border-radius:8px">':'')+'</div>':'';
+ const passage=(a.passageText||a.passageImageUrl)?'<div class="question student-exam-passage" style="white-space:pre-wrap"><b>Bacaan / stimulus</b><div class="passage-content">'+esc(a.passageText||'')+'</div>'+(a.passageImageUrl?'<img src="'+esc(a.passageImageUrl)+'" alt="Gambar bacaan" style="display:block;max-width:600px;max-height:380px;margin:8px 0;border-radius:8px">':'')+'</div>':'';
  if(student){
   body='<div class="notice" id="examSecurityWarning" role="status">Pemantauan aktivitas halaman aktif. Perpindahan aplikasi tertentu mungkin tidak terdeteksi oleh browser.</div><div class="exam-sticky-header"><div class="exam-clock-panel"><div><div class="muted">Tanggal dan jam saat ini</div><div class="clock-time" id="examClock">Memuat waktu...</div></div><div style="display:flex;align-items:center;gap:9px"><div><div class="muted">Sisa waktu</div><div class="timer-value" id="examTimer">--:--</div></div><button class="btn exam-fullscreen-btn" id="examFullscreenAction" type="button" onclick="requestExamFullscreen()" '+(document.fullscreenElement?'hidden':'')+'>Layar penuh</button></div></div>';
   body+='<div class="exam-tools"><div class="exam-progress-row"><span>Progres jawaban</span><span><span id="answerCount">0</span> dari '+qs.length+' soal terisi</span></div><div class="exam-progress-track" aria-hidden="true"><i id="answerProgressBar"></i></div><div class="question-nav" aria-label="Navigasi nomor soal">'+qs.map((q,i)=>'<button type="button" class="btn question-jump" data-target="question_'+esc(q.id||'')+'" onclick="jumpToQuestion(this.dataset.target)" aria-label="Ke soal '+(i+1)+'">'+(i+1)+'</button>').join('')+'</div></div></div>';
@@ -1685,7 +1733,13 @@ async function openAssessment(id){
    if(!started||!started.ok)throw Error(started&&started.error?started.error:'Sesi ujian gagal disiapkan');s.activeAttempt=started.data;s.answers=started.data.answers&&typeof started.data.answers==='object'?started.data.answers:{};
    const navigation=performance.getEntriesByType?performance.getEntriesByType('navigation')[0]:null;
    const wasReloaded=navigation?navigation.type==='reload':!!(performance.navigation&&performance.navigation.type===1);
-   if(started.data.resumed&&wasReloaded){api('logEvent',{attemptId:s.activeAttempt.attemptId,eventType:'page_reload',details:{platform:/Android/i.test(navigator.userAgent)?'Android':/iPhone|iPad|iPod/i.test(navigator.userAgent)?'iOS':'',visibilityState:document.visibilityState||'unknown'}}).catch(error=>console.warn('Reload event:',error.message));}
+   let pendingReload=null;
+   try{pendingReload=JSON.parse(sessionStorage.getItem('rumblePendingExamReload')||'null');}catch(error){}
+   const markerMatches=!!(pendingReload&&String(pendingReload.attemptId)===String(s.activeAttempt.attemptId)&&Date.now()-Number(pendingReload.at||0)<10*60*1000);
+   if(started.data.resumed&&(wasReloaded||markerMatches)){
+    try{sessionStorage.removeItem('rumblePendingExamReload');}catch(error){}
+    api('logEvent',{attemptId:s.activeAttempt.attemptId,eventType:'page_reload',details:{platform:/Android/i.test(navigator.userAgent)?'Android':/iPhone|iPad|iPod/i.test(navigator.userAgent)?'iOS':'',visibilityState:document.visibilityState||'unknown',detection:wasReloaded?'navigation_reload':'pagehide_resume'}}).catch(error=>console.warn('Reload event:',error.message));
+   }else if(pendingReload&&Date.now()-Number(pendingReload.at||0)>=10*60*1000){try{sessionStorage.removeItem('rumblePendingExamReload');}catch(error){}}
   }
   s.page='detail';render();if(s.role==='student'){restoreStudentAnswers();if(s.activeAttempt&&s.activeAttempt.expired){toast('Waktu asesmen sudah habis. Jawaban tersimpan akan dikirim otomatis.');await submitAssessment(true)}else{startExamSecurity();startExamClock()}}
  }catch(e){toast('Gagal membuka detail: '+e.message)}
