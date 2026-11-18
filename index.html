@@ -327,6 +327,22 @@ button:disabled{opacity:.55;cursor:not-allowed;transform:none}
 .summary-student-list li{padding:4px 0;font-size:12px}
 .summary-student-list li b{float:right}
 .gradebook-class-list,.gradebook-assessment-list{display:grid;gap:9px}
+.gradebook-assessment-list{grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))}
+.gradebook-readiness-section{margin:18px 0 24px}
+.gradebook-readiness-section>h3{display:flex;align-items:center;gap:9px;margin:0 0 11px;color:#2d3b57;font-size:15px}
+.gradebook-readiness-section>h3 small{font-size:11px;font-weight:500;color:#748096}
+.gradebook-section-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.gradebook-section-dot.ready{background:#218653}.gradebook-section-dot.pending{background:#d28a24}
+.gradebook-assessment-card{background:#fff;transition:border-color .15s,background .15s}
+.gradebook-assessment-card.is-ready{border-color:#a9d8bd;background:#f3fbf6}
+.gradebook-assessment-card.is-ready:hover{border-color:#65b487;background:#eaf7ef}
+.gradebook-assessment-card.is-pending{border-color:#ead5aa;background:#fffaf0}
+.gradebook-assessment-card.is-pending:hover{border-color:#d9b66e;background:#fff5df}
+.gradebook-assessment-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.gradebook-readiness{flex:none;border-radius:20px;padding:4px 9px;font-size:10px;font-weight:800}
+.gradebook-readiness.ready{background:#dff3e7;color:#176b40}
+.gradebook-readiness.pending{background:#fff0d0;color:#895a0a}
+.gradebook-assessment-card .gradebook-readiness-note{font-size:12px;line-height:1.45;color:#58667c}
 .gradebook-class-card,.gradebook-assessment-card{display:grid;gap:5px;width:100%;padding:14px 16px;border:1px solid #e0e6f0;border-radius:10px;background:#f9fbff;text-align:left;color:#2d3b57;cursor:pointer}
 .gradebook-class-card:hover,.gradebook-assessment-card:hover{background:#f0f4ff}
 .gradebook-class-card small,.gradebook-assessment-card small{font-size:11px;color:#6d7890}
@@ -1138,21 +1154,46 @@ function soloGradebookSummary(attempt){
 }
 function gradebook(){
  const attempts=Array.isArray(s.attempts)?s.attempts:[],students=Array.isArray(s.students)?s.students:[];
- if(!s.attemptsLoaded)return head('REKAP NILAI','Rekap nilai per kelas','Memuat hasil pengerjaan...')+'<div class="card">Memuat data...</div>';
- const byClass={};attempts.forEach(a=>{const cls=String(a.className||'Kelas belum diatur');if(!byClass[cls])byClass[cls]=[];const id=String(a.assessmentId||'');let group=byClass[cls].find(x=>x.id===id);if(!group){group={id:id,title:a.assessmentTitle||id,subject:a.subject||'Mata pelajaran lainnya',items:[]};byClass[cls].push(group)}group.items.push(a)});
- const classes=Object.keys(byClass).sort((a,b)=>a.localeCompare(b,'id'));
- if(!classes.length)return head('REKAP NILAI','Rekap nilai per kelas','Belum ada data pengerjaan yang dapat direkap.')+'<div class="card">Belum ada data pengerjaan yang dapat direkap.</div>';
- if(!s.selectedGradebookClass)return head('REKAP NILAI','Rekap nilai per kelas','Pilih kelas untuk melihat daftar asesmen dan tabel nilai.')+'<div class="card gradebook-class-list">'+classes.map(cls=>'<button class="gradebook-class-card" data-class="'+esc(cls)+'" onclick="selectGradebookClass(this.dataset.class)"><b>'+esc(cls)+'</b><small>'+byClass[cls].length+' asesmen · '+byClass[cls].reduce((n,x)=>n+x.items.length,0)+' sesi pengerjaan</small></button>').join('')+'</div>';
- const cls=s.selectedGradebookClass,groups=byClass[cls]||[];
- if(!byClass[cls]){s.selectedGradebookClass='';s.selectedGradebookAssessmentId='';return gradebook()}
- const breadcrumb='<div class="report-breadcrumb"><button onclick="selectGradebookClass(&quot;&quot;)">Semua kelas</button><span>›</span><b>'+esc(cls)+'</b>'+(s.selectedGradebookAssessmentId?'<span>›</span><button onclick="selectGradebookAssessment(&quot;&quot;)">Daftar asesmen</button>':'')+'</div>';
- if(!s.selectedGradebookAssessmentId)return head('REKAP NILAI',esc(cls),'Pilih asesmen untuk membuka tabel rekap nilai.')+breadcrumb+'<div class="card">'+groups.sort((a,b)=>a.title.localeCompare(b.title,'id')).map(g=>'<button class="gradebook-assessment-card" data-assessment-id="'+esc(g.id)+'" onclick="selectGradebookAssessment(this.dataset.assessmentId)"><b>'+esc(g.title)+'</b><small>'+esc(g.subject)+' · '+g.items.length+' sesi · '+g.items.filter(x=>x.status==='graded').length+' sudah dinilai</small></button>').join('')+'</div>';
- const group=groups.find(x=>x.id===s.selectedGradebookAssessmentId);
+ if(!s.attemptsLoaded)return head('REKAP NILAI','Rekap nilai asesmen','Memuat hasil pengerjaan...')+'<div class="card">Memuat data...</div>';
+ const byAssessment={};
+ attempts.forEach(function(a){
+  const id=String(a.assessmentId||'');if(!id)return;
+  if(!byAssessment[id])byAssessment[id]={id:id,title:a.assessmentTitle||id,subject:a.subject||'Mata pelajaran lainnya',className:a.className||'Kelas belum diatur',classification:a.assessmentClassification||'REGULER',items:[]};
+  byAssessment[id].items.push(a);
+ });
+ const groups=Object.keys(byAssessment).map(function(id){
+  const g=byAssessment[id],isSolo=String(g.classification||'').toUpperCase()==='SOLO_TAX';
+  const gradedCount=g.items.filter(function(x){return x.status==='graded'}).length;
+  const indicatorCount=isSolo?g.items.filter(function(x){return x.soloIndicatorVerified===true}).length:g.items.length;
+  const dominantCount=isSolo?g.items.filter(function(x){return x.soloDominantVerified===true}).length:g.items.length;
+  g.isSolo=isSolo;g.gradedCount=gradedCount;g.indicatorCount=indicatorCount;g.dominantCount=dominantCount;
+  g.ready=g.items.length>0&&gradedCount===g.items.length&&(!isSolo||(indicatorCount===g.items.length&&dominantCount===g.items.length));
+  if(g.ready)g.readinessNote=isSolo?'Seluruh nilai, indikator, dan level SOLO telah diverifikasi.':'Seluruh pengerjaan telah dinilai.';
+  else if(gradedCount<g.items.length)g.readinessNote=(g.items.length-gradedCount)+' pengerjaan belum selesai dinilai.';
+  else if(isSolo&&indicatorCount<g.items.length)g.readinessNote=(g.items.length-indicatorCount)+' murid belum menyelesaikan verifikasi indikator.';
+  else if(isSolo&&dominantCount<g.items.length)g.readinessNote=(g.items.length-dominantCount)+' murid belum menyelesaikan verifikasi level SOLO dominan.';
+  else g.readinessNote='Periksa kembali kelengkapan verifikasi.';
+  return g;
+ }).sort(function(a,b){
+  if(a.ready!==b.ready)return a.ready?-1:1;
+  const cls=a.className.localeCompare(b.className,'id');return cls||a.title.localeCompare(b.title,'id');
+ });
+ if(!groups.length)return head('REKAP NILAI','Rekap nilai asesmen','Belum ada data pengerjaan yang dapat direkap.')+'<div class="card">Belum ada data pengerjaan yang dapat direkap.</div>';
+ if(!s.selectedGradebookAssessmentId){
+  const card=function(g){
+   return '<button class="gradebook-assessment-card '+(g.ready?'is-ready':'is-pending')+'" data-assessment-id="'+esc(g.id)+'" onclick="selectGradebookAssessment(this.dataset.assessmentId)"><span class="gradebook-assessment-heading"><b>'+esc(g.title)+'</b><strong class="gradebook-readiness '+(g.ready?'ready':'pending')+'">'+(g.ready?'Siap direkap':'Perlu dilengkapi')+'</strong></span><small>'+esc(g.className)+' · '+esc(g.subject)+' · '+g.items.length+' sesi · '+g.gradedCount+'/'+g.items.length+' dinilai</small><small class="gradebook-readiness-note">'+esc(g.readinessNote)+'</small></button>';
+  };
+  const ready=groups.filter(function(g){return g.ready}),pending=groups.filter(function(g){return !g.ready});
+  return head('REKAP NILAI','Rekap nilai asesmen','Asesmen yang seluruh hasilnya siap direkap ditampilkan lebih dahulu.')+
+   (ready.length?'<section class="gradebook-readiness-section"><h3><span class="gradebook-section-dot ready"></span>Siap direkap <small>'+ready.length+' asesmen</small></h3><div class="gradebook-assessment-list">'+ready.map(card).join('')+'</div></section>':'')+
+   (pending.length?'<section class="gradebook-readiness-section"><h3><span class="gradebook-section-dot pending"></span>Perlu dilengkapi <small>'+pending.length+' asesmen</small></h3><div class="gradebook-assessment-list">'+pending.map(card).join('')+'</div></section>':'');
+ }
+ const group=groups.find(function(x){return x.id===s.selectedGradebookAssessmentId});
  if(!group){s.selectedGradebookAssessmentId='';return gradebook()}
- const list=group.items,qs=list[0].questionDetails||[];
- const isSoloTax=String((list[0]||{}).assessmentClassification||'').toUpperCase()==='SOLO_TAX';
- const table='<div class="table-scroll"><table class="gradebook-table"><thead><tr><th>Nama murid</th>'+qs.map((q,i)=>'<th>Soal '+(i+1)+'<small>'+Number(q.points||0)+' poin</small></th>').join('')+'<th>Nilai akhir</th>'+(isSoloTax?'<th>Level SOLO Murid</th><th>Keterangan</th>':'')+'</tr></thead><tbody>'+list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),scores=a.questionScores||{},solo= isSoloTax?soloGradebookSummary(a):null;return '<tr><td>'+esc(user?user.name:a.studentId)+'</td>'+qs.map(q=>'<td>'+((a.status==='graded'||a.status==='needs_review')&&scores[q.id]!==undefined?esc(scores[q.id]):'—')+'</td>').join('')+'<td><b>'+(a.status==='graded'&&Number(a.maxScore)>0?Math.round(Number(a.score)/Number(a.maxScore)*100):'—')+'</b></td>'+(isSoloTax?'<td>'+esc(solo.level)+'</td><td>'+esc(solo.note)+'</td>':'')+'</tr>'}).join('')+'</tbody></table></div>';
- return head('REKAP NILAI',esc(group.title),esc(cls)+' · '+esc(group.subject))+breadcrumb+'<div class="card"><div class="actions"><h3>Nilai siswa</h3><span class="muted">'+list.length+' sesi</span><button class="btn primary" onclick="downloadGradebookXlsx()">Ekspor .xlsx</button></div>'+table+'</div>'+(isSoloTax?soloClassReflectionPanel(list[0]):'');
+ const list=group.items,qs=list[0].questionDetails||[],isSoloTax=group.isSolo;
+ const breadcrumb='<div class="report-breadcrumb"><button onclick="selectGradebookAssessment(&quot;&quot;)">Semua asesmen</button><span>›</span><b>'+esc(group.title)+'</b></div>';
+ const table='<div class="table-scroll"><table class="gradebook-table"><thead><tr><th>Nama murid</th>'+qs.map((q,i)=>'<th>Soal '+(i+1)+'<small>'+Number(q.points||0)+' poin</small></th>').join('')+'<th>Nilai akhir</th>'+(isSoloTax?'<th>Level SOLO Murid</th><th>Keterangan</th>':'')+'</tr></thead><tbody>'+list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),scores=a.questionScores||{},solo=isSoloTax?soloGradebookSummary(a):null;return '<tr><td>'+esc(user?user.name:a.studentId)+'</td>'+qs.map(q=>'<td>'+((a.status==='graded'||a.status==='needs_review')&&scores[q.id]!==undefined?esc(scores[q.id]):'—')+'</td>').join('')+'<td><b>'+(a.status==='graded'&&Number(a.maxScore)>0?Math.round(Number(a.score)/Number(a.maxScore)*100):'—')+'</b></td>'+(isSoloTax?'<td>'+esc(solo.level)+'</td><td>'+esc(solo.note)+'</td>':'')+'</tr>'}).join('')+'</tbody></table></div>';
+ return head('REKAP NILAI',esc(group.title),esc(group.className)+' · '+esc(group.subject))+breadcrumb+'<div class="card"><div class="actions"><h3>Nilai siswa</h3><span class="muted">'+list.length+' sesi</span><button class="btn primary" onclick="downloadGradebookXlsx()">Ekspor .xlsx</button></div>'+table+'</div>'+(isSoloTax?soloClassReflectionPanel(list[0]):'');
 }
 function selectGradebookClass(name){s.selectedGradebookClass=String(name||'');s.selectedGradebookAssessmentId='';s.attempts=s.attemptSummaries||[];render()}
 async function selectGradebookAssessment(id){
