@@ -3126,8 +3126,17 @@ function saveSoloDominantVerification_(payload) {
     const questionEvidence = Array.isArray(recommendation.questionEvidence) ? recommendation.questionEvidence : [];
     const analyzedQuestionIds = Array.isArray(aiDetails.analyzedQuestionIds) ? aiDetails.analyzedQuestionIds.map(String).sort() : [];
     const receivedEvidenceIds = questionEvidence.map(function (item) { return String(item && item.questionId || ''); }).sort();
-    if (!analyzedQuestionIds.length || questionEvidence.length !== analyzedQuestionIds.length ||
-        analyzedQuestionIds.some(function (id, index) { return id !== receivedEvidenceIds[index]; })) {
+    const quantitativeOnly = String(recommendation.recommendationBasis || '') === 'quantitative_only_provisional';
+    // Pada jalur tanpa jawaban teks (misalnya pekerjaan di kertas/foto),
+    // AI tidak menganalisis soal secara kualitatif sehingga kedua daftar
+    // memang harus kosong. Jangan gagalkan verifikasi hanya karena itu.
+    if (quantitativeOnly && analyzedQuestionIds.length === 0) {
+      if (questionEvidence.length !== 0) {
+        throw new Error('Rekomendasi kuantitatif sementara tidak boleh memuat bukti soal yang tidak dianalisis AI.');
+      }
+    } else if (!analyzedQuestionIds.length || questionEvidence.length !== analyzedQuestionIds.length ||
+        analyzedQuestionIds.some(function (id, index) { return id !== receivedEvidenceIds[index]; }) ||
+        receivedEvidenceIds.some(function (id, index) { return id !== analyzedQuestionIds[index]; })) {
       throw new Error('Bukti level dominan harus mencakup tepat satu bukti untuk setiap soal yang dianalisis AI.');
     }
     const questionIds = {};
