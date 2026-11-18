@@ -395,7 +395,7 @@ async function saveSoloDominantVerification(attemptId){
  if(!recommendation){toast('Rekomendasi AI level dominan belum tersedia.');return}
  const level=document.getElementById('solo_dominant_level_'+attemptId),reason=document.getElementById('solo_dominant_reason_'+attemptId);
  if(!level){toast('Kolom verifikasi level tidak ditemukan.');return}
- if(level.value!==recommendation.level&&(!reason||!String(reason.value||'').trim())){toast('Alasan wajib diisi jika level guru berbeda dari rekomendasi AI.');return}
+ if(normalizeSoloLevel(level.value)!==normalizeSoloLevel(recommendation.level)&&(!reason||!String(reason.value||'').trim())){toast('Alasan wajib diisi jika level guru berbeda dari rekomendasi AI.');return}
  try{
   const response=await api('saveSoloDominantVerification',{attemptId:attemptId,teacherLevel:level.value,teacherReason:reason?reason.value:''});
   if(!response||!response.ok)throw Error(response&&response.error?response.error:'Verifikasi level gagal disimpan');
@@ -424,7 +424,7 @@ async function saveSoloVerification(attemptId){
   if(recommendation){
    const level=document.getElementById('solo_dominant_level_'+attemptId),reason=document.getElementById('solo_dominant_reason_'+attemptId);
    if(!level)throw Error('Kolom verifikasi level SOLO tidak ditemukan.');
-   if(level.value!==recommendation.level&&(!reason||!String(reason.value||'').trim()))throw Error('Alasan wajib diisi jika level guru berbeda dari rekomendasi AI.');
+   if(normalizeSoloLevel(level.value)!==normalizeSoloLevel(recommendation.level)&&(!reason||!String(reason.value||'').trim()))throw Error('Alasan wajib diisi jika level guru berbeda dari rekomendasi AI.');
    const levelResponse=await api('saveSoloDominantVerification',{attemptId:attemptId,teacherLevel:level.value,teacherReason:reason?reason.value:''});
    if(!levelResponse||!levelResponse.ok)throw Error(levelResponse&&levelResponse.error?levelResponse.error:'Verifikasi indikator tersimpan, tetapi verifikasi level gagal. Tekan tombol simpan kembali untuk melanjutkan.');
   }
