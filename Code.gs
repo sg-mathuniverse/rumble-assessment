@@ -1588,6 +1588,14 @@ function listAttempts_(payload) {
   const allQuestions = listRows_('Questions');
   const uploadedFiles = listRows_('Files');
   const allEvents = listRows_('Events');
+  const needsIndicatorLookup = viewer && viewer.role === 'teacher' && selectedAttempts.some(function (attempt) {
+    const assessment = assessmentById[String(attempt.assessmentId)] || null;
+    return assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX';
+  });
+  const learningIndicatorById = {};
+  (needsIndicatorLookup ? listRows_('LearningIndicators') : []).forEach(function (indicator) {
+    learningIndicatorById[String(indicator.indicatorId || '')] = indicator;
+  });
   const questionsByAssessment = {};
   allQuestions.forEach(function (question) {
     const key = String(question.assessmentId || '');
@@ -1715,10 +1723,11 @@ function listAttempts_(payload) {
                   const id = String(indicator.indicatorId || '');
                   if (!id) return;
                   if (!mapped[id]) {
+                    const registeredIndicator = learningIndicatorById[id] || {};
                     mapped[id] = {
                       indicatorId: id,
-                      indicatorCode: String(indicator.indicatorCode || id),
-                      description: String(indicator.description || 'Indikator tersimpan pada snapshot soal'),
+                      indicatorCode: String(registeredIndicator.indicatorCode || indicator.indicatorCode || 'Kode indikator tidak tersedia'),
+                      description: String(registeredIndicator.description || indicator.description || 'Indikator tersimpan pada snapshot soal'),
                       questionIds: [],
                       questionOrders: []
                     };
@@ -3034,7 +3043,9 @@ function requestSoloClassReflection_(payload) {
 function saveSoloDominantVerification_(payload) {
   const attemptId = requiredText_(payload.attemptId, 'ID pengerjaan', 100);
   const allowedLevels = ['PRESTRUCTURAL', 'UNISTRUKTURAL', 'MULTISTRUKTURAL', 'RELATIONAL', 'EXTENDED_ABSTRACT'];
-  const teacherLevel = String(payload.teacherLevel || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+  const teacherLevelRaw = String(payload.teacherLevel || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+  const levelAliases = { UNISTRUCTURAL: 'UNISTRUKTURAL' };
+  const teacherLevel = levelAliases[teacherLevelRaw] || teacherLevelRaw;
   const teacherReason = String(payload.teacherReason || '').trim();
   if (allowedLevels.indexOf(teacherLevel) < 0) {
     throw new Error('Hasil verifikasi guru harus menggunakan salah satu dari lima level SOLO.');
@@ -3076,7 +3087,8 @@ function saveSoloDominantVerification_(payload) {
     if (!recommendation || typeof recommendation !== 'object' || Array.isArray(recommendation)) {
       throw new Error('AI belum menghasilkan rekomendasi level dominan berbasis bukti yang cukup.');
     }
-    const aiLevel = String(recommendation.level || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+    const aiLevelRaw = String(recommendation.level || '').trim().toUpperCase().replace(/[ -]+/g, '_');
+    const aiLevel = levelAliases[aiLevelRaw] || aiLevelRaw;
     if (allowedLevels.indexOf(aiLevel) < 0) throw new Error('Level rekomendasi AI tidak valid.');
     const aiEvidence = String(recommendation.evidenceSummary || '').trim();
     if (!aiEvidence || aiEvidence.length > 5000) throw new Error('Ringkasan bukti kualitatif dari AI tidak valid.');
