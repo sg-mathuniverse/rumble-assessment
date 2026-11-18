@@ -2103,8 +2103,11 @@ function requestSoloAiAssessment_(payload) {
     questions: quantitativeQuestions,
     indicators: Object.keys(quantitativeIndicators).map(function (id) {
       const values = quantitativeIndicators[id];
+      const registered = learningIndicatorById[id] || {};
       return {
         indicatorId: id,
+        indicatorCode: String(registered.indicatorCode || ''),
+        description: String(registered.description || ''),
         averagePercentage: Math.round((values.reduce(function (sum, value) { return sum + value; }, 0) / values.length) * 100) / 100,
         questionCount: values.length
       };
