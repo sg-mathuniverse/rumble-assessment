@@ -74,14 +74,14 @@ function doGet() {
  */
 function getFrontendHtml_() {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'rumble_frontend_html_v42';
+  const cacheKey = 'rumble_frontend_html_v43';
   const cached = cache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/43826640df73a59c7825f3b4e3afbb1c05538a72/index.html';
+  const url = 'https://raw.githubusercontent.com/sg-mathuniverse/rumble-assessment/96a7a0bc56173a3c2bd1bc296d23ab7309d682ab/index.html';
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true
@@ -1560,9 +1560,47 @@ function listAttempts_(payload) {
       (String(attempt.status) !== 'in_progress' || expired);
   });
   if (payload.summaryOnly === true) {
+    const hasSoloAttempts = viewer && viewer.role === 'teacher' && selectedAttempts.some(function (attempt) {
+      const assessment = assessmentById[String(attempt.assessmentId)] || null;
+      return assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX';
+    });
+    const summaryEventsByAttempt = {};
+    if (hasSoloAttempts) {
+      const selectedIds = {};
+      selectedAttempts.forEach(function (attempt) { selectedIds[String(attempt.attemptId)] = true; });
+      listRows_('Events').forEach(function (event) {
+        const id = String(event.attemptId || '');
+        if (!selectedIds[id]) return;
+        if (!summaryEventsByAttempt[id]) summaryEventsByAttempt[id] = [];
+        summaryEventsByAttempt[id].push(event);
+      });
+    }
+    function latestSummaryEvent(events, predicate) {
+      return events.filter(predicate).sort(function (a, b) {
+        return String(a.eventAt || '').localeCompare(String(b.eventAt || ''));
+      }).pop() || null;
+    }
     return selectedAttempts.map(function (attempt) {
       const assessment = assessmentById[String(attempt.assessmentId)] || null;
       const timeExpired = isAttemptExpiredByClock_(attempt, assessment);
+      const isSoloTax = !!(assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX');
+      const attemptEvents = summaryEventsByAttempt[String(attempt.attemptId)] || [];
+      const latestIndicator = isSoloTax ? latestSummaryEvent(attemptEvents, function (event) {
+        return String(event.eventType || '').indexOf('SOLO_INDICATOR_VERIFICATION') === 0;
+      }) : null;
+      const latestAi = isSoloTax ? latestSummaryEvent(attemptEvents, function (event) {
+        return String(event.eventType || '') === 'AI_SOLO_SCORING_RECOMMENDATION';
+      }) : null;
+      const latestDominant = isSoloTax ? latestSummaryEvent(attemptEvents, function (event) {
+        return String(event.eventType || '').indexOf('SOLO_DOMINANT_LEVEL_') === 0;
+      }) : null;
+      const soloIndicatorVerified = !!(latestIndicator && String(latestIndicator.eventType) === 'SOLO_INDICATOR_VERIFICATION');
+      const soloDominantVerified = !!(
+        latestDominant && String(latestDominant.eventType) === 'SOLO_DOMINANT_LEVEL_VERIFICATION' &&
+        soloIndicatorVerified &&
+        String(latestDominant.eventAt || '') >= String(latestIndicator.eventAt || '') &&
+        (!latestAi || String(latestDominant.eventAt || '') >= String(latestAi.eventAt || ''))
+      );
       return {
         attemptId: String(attempt.attemptId || ''),
         assessmentId: String(attempt.assessmentId || ''),
@@ -1580,7 +1618,9 @@ function listAttempts_(payload) {
         assessmentStartAt: assessment ? String(assessment.startAt || '') : '',
         subject: assessment ? String(assessment.subject || '') : '',
         className: assessment ? String(assessment.className || '') : '',
-        assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER'
+        assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
+        soloIndicatorVerified: soloIndicatorVerified,
+        soloDominantVerified: soloDominantVerified
       };
     });
   }
@@ -2924,6 +2964,49 @@ function adminListAiUsage_() {
   });
 }
 
+/**
+ * Mengambil objek JSON dari respons AI, termasuk bila dibungkus Markdown
+ * atau didahului teks pengantar. Kurung kurawal di dalam string diabaikan.
+ */
+function parseAiJsonObject_(content) {
+  const raw = String(content || '').replace(/^\\uFEFF/, '').trim();
+  const candidates = [];
+  const fence = String.fromCharCode(96, 96, 96);
+  const fenced = new RegExp(fence + '(?:json)?\\s*([\\s\\S]*?)' + fence, 'ig');
+  let match;
+  while ((match = fenced.exec(raw)) !== null) {
+    if (match[1]) candidates.push(String(match[1]).trim());
+  }
+  let depth = 0, start = -1, inString = false, escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw.charAt(i);
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}' && depth > 0) {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        candidates.push(raw.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  for (let i = 0; i < candidates.length; i++) {
+    try {
+      const parsed = JSON.parse(candidates[i]);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch (error) {}
+  }
+  throw new Error('Tidak ditemukan objek JSON valid pada respons AI.');
+}
+
 function requestSoloClassReflection_(payload) {
   const assessmentId = requiredText_(payload.assessmentId, 'ID asesmen', 100);
   const settings = aiSettings_();
@@ -3038,15 +3121,34 @@ function requestSoloClassReflection_(payload) {
   const systemPrompt = prompt.content + '\n\nATURAN WAJIB: Gunakan hanya data agregat berikut. Jangan menebak kesalahan spesifik yang tidak dapat dibuktikan oleh distribusi skor; nyatakan keterbatasan jika jawaban rinci tidak dianalisis. Jangan mengarang persentase. Bahas: (1) persentase ketercapaian TP kelas, (2) capaian Multistruktural untuk pemahaman konsep, Relational untuk menghubungkan konsep, Extended Abstract untuk penerapan pada situasi baru, (3) analisis butir, pola skor rendah/tinggi, dan kualitas soal dengan catatan keterbatasan bukti, (4) refleksi pembelajaran, (5) rekomendasi tindak lanjut bagi guru. Bedakan level SOLO yang sudah diverifikasi guru dari yang belum diverifikasi. Kembalikan JSON valid saja dengan bentuk {"tpAchievement":"...","abilityAnalysis":"...","errorAndItemQuality":"...","learningReflection":"...","teacherRecommendations":["..."],"limitations":"..."}; setiap bagian berupa teks Bahasa Indonesia.';
   const started = new Date().getTime();
   try {
-    const response = tokenPortalChatCompletion_([
+    let response = tokenPortalChatCompletion_([
       {role:'system',content:systemPrompt},
       {role:'user',content:'Buat refleksi pembelajaran kelas berdasarkan rekap hasil akhir SOLO Tax berikut. Data anonim dan agregat: '+JSON.stringify(data)}
     ], settings.model, settings.maxOutputTokens);
     let parsed;
     try {
-      const clean=response.content.replace(/^\s*```(?:json)?/i,'').replace(/```\s*$/,'').trim();
-      parsed=JSON.parse(clean);
-    } catch (error) { throw new Error('AI Refleksi tidak mengembalikan JSON valid. Periksa prompt REFLECTION aktif.'); }
+      parsed = parseAiJsonObject_(response.content);
+    } catch (parseError) {
+      if (String(response.finishReason || '').toLowerCase() === 'length') {
+        throw new Error('Respons refleksi AI terpotong karena batas token keluaran. Admin perlu menaikkan batas token atau meringkas prompt REFLECTION.');
+      }
+      const firstResponse = response;
+      const repairResponse = tokenPortalChatCompletion_([
+        {role:'system',content:'Tugas Anda hanya memperbaiki format JSON. Kembalikan tepat satu objek JSON valid tanpa Markdown, tanpa pengantar, dan tanpa teks tambahan. Pertahankan isi respons semaksimal mungkin. Skema wajib: tpAchievement (string), abilityAnalysis (string), errorAndItemQuality (string), learningReflection (string), teacherRecommendations (array string), limitations (string). Jangan menambahkan fakta atau angka baru.'},
+        {role:'user',content:'Perbaiki respons AI berikut agar menjadi JSON valid sesuai skema. Respons asli:\\n'+String(firstResponse.content || '').slice(0,12000)}
+      ], settings.model, settings.maxOutputTokens);
+      try {
+        parsed = parseAiJsonObject_(repairResponse.content);
+      } catch (repairError) {
+        throw new Error('Respons refleksi AI tetap tidak valid setelah satu kali perbaikan otomatis. Periksa prompt REFLECTION aktif dan batas token keluaran. (finish_reason: '+String(repairResponse.finishReason || 'tidak diketahui')+').');
+      }
+      const firstUsage = firstResponse.usage || {}, repairUsage = repairResponse.usage || {};
+      response = Object.assign({}, repairResponse, {usage:{
+        promptTokens:(Number(firstUsage.promptTokens)||0)+(Number(repairUsage.promptTokens)||0),
+        completionTokens:(Number(firstUsage.completionTokens)||0)+(Number(repairUsage.completionTokens)||0),
+        totalTokens:(Number(firstUsage.totalTokens)||0)+(Number(repairUsage.totalTokens)||0)
+      }});
+    }
     const required=['tpAchievement','abilityAnalysis','errorAndItemQuality','learningReflection','limitations'];
     required.forEach(function (key) { if (typeof parsed[key] !== 'string' || !parsed[key].trim()) throw new Error('Bagian refleksi AI belum lengkap: '+key+'.'); });
     if (!Array.isArray(parsed.teacherRecommendations) || !parsed.teacherRecommendations.length) throw new Error('Rekomendasi tindak lanjut guru belum tersedia.');
