@@ -232,15 +232,42 @@ function routeAction_(action, payload) {
         delete trusted.assessmentId;
         trusted.summaryOnly = true;
         const attempts = listAttempts_(trusted);
-        const releasedAttemptIds = {};
+        // Hasil SOLO Tax tersedia setelah nilai selesai dinilai dan dua
+        // verifikasi guru terbaru masih valid. Sebelumnya filter menunggu
+        // SOLO_RESULT_RELEASED, tetapi tidak ada alur yang pernah membuat event itu.
+        const attemptIds = {};
+        attempts.forEach(function (attempt) { attemptIds[String(attempt.attemptId)] = true; });
+        const eventsByAttempt = {};
         listRows_('Events').forEach(function (event) {
-          if (String(event.eventType) === 'SOLO_RESULT_RELEASED') {
-            releasedAttemptIds[String(event.attemptId)] = true;
-          }
+          const id = String(event.attemptId || '');
+          if (!attemptIds[id]) return;
+          if (!eventsByAttempt[id]) eventsByAttempt[id] = [];
+          eventsByAttempt[id].push(event);
         });
+        function latestStudentEvent(events, predicate) {
+          return events.filter(predicate).sort(function (a, b) {
+            return String(a.eventAt || '').localeCompare(String(b.eventAt || ''));
+          }).pop() || null;
+        }
         return attempts.filter(function (attempt) {
-          return String(attempt.assessmentClassification || '').toUpperCase() !== 'SOLO_TAX' ||
-            !!releasedAttemptIds[String(attempt.attemptId)];
+          if (String(attempt.assessmentClassification || '').toUpperCase() !== 'SOLO_TAX') return true;
+          if (String(attempt.status || '').toLowerCase() !== 'graded') return false;
+          const events = eventsByAttempt[String(attempt.attemptId)] || [];
+          const latestIndicator = latestStudentEvent(events, function (event) {
+            return String(event.eventType || '').indexOf('SOLO_INDICATOR_VERIFICATION') === 0;
+          });
+          const latestAi = latestStudentEvent(events, function (event) {
+            return String(event.eventType || '') === 'AI_SOLO_SCORING_RECOMMENDATION';
+          });
+          const latestDominant = latestStudentEvent(events, function (event) {
+            return String(event.eventType || '').indexOf('SOLO_DOMINANT_LEVEL_') === 0;
+          });
+          return !!(
+            latestIndicator && String(latestIndicator.eventType) === 'SOLO_INDICATOR_VERIFICATION' &&
+            latestDominant && String(latestDominant.eventType) === 'SOLO_DOMINANT_LEVEL_VERIFICATION' &&
+            String(latestDominant.eventAt || '') >= String(latestIndicator.eventAt || '') &&
+            (!latestAi || String(latestDominant.eventAt || '') >= String(latestAi.eventAt || ''))
+          );
         });
       }
       return listAttempts_(trusted);
