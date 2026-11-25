@@ -1067,7 +1067,7 @@ function updateAssessment_(payload) {
     questions.forEach(function (question, index) {
       const type = String(question.type || 'multiple_choice');
       const points = Number(question.points);
-      const allowedTypes = ['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'];
+      const allowedTypes = ['multiple_choice','true_false','true_false_multi','multi_select','matching','essay','data_sufficiency'];
       if (allowedTypes.indexOf(type) === -1) throw new Error('Tipe soal tidak valid pada soal nomor ' + (index + 1));
       if (!isFinite(points) || points < 0 || points > 1000) throw new Error('Bobot soal tidak valid pada soal nomor ' + (index + 1));
       appendRow_('Questions', {
@@ -3955,7 +3955,8 @@ function validateBundleSnapshot_(snapshot){
   snapshot.questions.forEach(function(q,i){
     if(classification==='SOLO_TAX'){validateSoloTaxQuestion_(q,i);return;}
     const type=String(q&&q.type||'multiple_choice'),points=Number(q&&q.points);
-    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal snapshot tidak valid pada nomor '+(i+1));
+    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay','data_sufficiency'].indexOf(type)<0)throw new Error('Tipe soal snapshot tidak valid pada nomor '+(i+1));
+    if(type==='data_sufficiency'){const statements=Array.isArray(q.subquestions)?q.subquestions:[];if(!String(q.text||'').trim()||statements.length!==2||statements.some(function(value){return !String(value||'').trim();})||q.answer===null||q.answer===undefined||String(q.answer).trim()===''||!Number.isInteger(Number(q.answer))||Number(q.answer)<0||Number(q.answer)>4)throw new Error('Soal Kecukupan Data pada snapshot nomor '+(i+1)+' belum lengkap.');}
     if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal snapshot tidak valid pada nomor '+(i+1));
   });
   return true;
