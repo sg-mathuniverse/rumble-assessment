@@ -1060,7 +1060,7 @@ async function saveGrade(id){
   questionScores[q.id]=value;
  }
  const feedbackEl=document.getElementById('gradeFeedback_'+id);
- try{const r=await api('gradeAttempt',{attemptId:id,questionScores,feedback:feedbackEl?feedbackEl.value:''});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Nilai gagal disimpan');toast('Skor per butir berhasil disimpan.');await loadAttempts({summaryOnly:true});await loadAttempts({attemptId:id});}
+ try{const r=await api('gradeAttempt',{attemptId:id,questionScores,feedback:feedbackEl?feedbackEl.value:''});if(!r||!r.ok)throw Error(r&&r.error?r.error:'Nilai gagal disimpan');toast('Skor per butir berhasil disimpan.');await clearReportAttempt();}
  catch(e){toast('Gagal menyimpan nilai: '+e.message)}
 }
 
