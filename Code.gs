@@ -1578,9 +1578,14 @@ function calculateObjectiveQuestionScores_(questions, answers) {
         if (values[String(index)] !== undefined && String(values[String(index)]) === String(key)) score += points / expected.length;
       });
     } else if (String(question.type) === 'multi_select') {
-      const expected = (Array.isArray(correct) ? correct : []).map(String).sort().join(',');
-      const values = (Array.isArray(answer) ? answer : []).map(String).sort().join(',');
-      if (expected && expected === values) score = points;
+      const expected = (Array.isArray(correct) ? correct : []).map(String);
+      const values = (Array.isArray(answer) ? answer : []).map(String);
+      if (expected.length) {
+        const unit = points / expected.length;
+        const correctCount = values.filter(function (value) { return expected.indexOf(value) >= 0; }).length;
+        const wrongCount = values.filter(function (value) { return expected.indexOf(value) < 0; }).length;
+        score = Math.max(0, Math.min(points, (correctCount - wrongCount) * unit));
+      }
     } else if (String(correct) === String(answer)) {
       score = points;
     }
@@ -1663,9 +1668,8 @@ function listAttempts_(payload) {
       const summaryQuestions = summaryQuestionsByAssessment[String(attempt.assessmentId)] || [];
       const storedQuestionScoresRaw = parseJson_(attempt.questionScoresJson, {});
       const storedQuestionScores = storedQuestionScoresRaw && typeof storedQuestionScoresRaw === 'object' ? storedQuestionScoresRaw : {};
-      const summaryQuestionScores = Object.keys(storedQuestionScores).length
-        ? storedQuestionScores
-        : calculateObjectiveQuestionScores_(summaryQuestions, parseJson_(attempt.answersJson, {}));
+      const automaticQuestionScores = calculateObjectiveQuestionScores_(summaryQuestions, parseJson_(attempt.answersJson, {}));
+      const summaryQuestionScores = Object.assign({}, automaticQuestionScores, storedQuestionScores);
       return {
         attemptId: String(attempt.attemptId || ''),
         assessmentId: String(attempt.assessmentId || ''),
@@ -1769,7 +1773,8 @@ function listAttempts_(payload) {
         });
       const storedAttemptScoresRaw = parseJson_(attempt.questionScoresJson, {});
       const storedAttemptScores = storedAttemptScoresRaw && typeof storedAttemptScoresRaw === 'object' ? storedAttemptScoresRaw : {};
-      const attemptQuestionScores = Object.keys(storedAttemptScores).length ? storedAttemptScores : calculateObjectiveQuestionScores_(questionsByAssessment[String(attempt.assessmentId)] || [], parseJson_(attempt.answersJson, {}));
+      const automaticAttemptScores = calculateObjectiveQuestionScores_(questionsByAssessment[String(attempt.assessmentId)] || [], parseJson_(attempt.answersJson, {}));
+       const attemptQuestionScores = Object.assign({}, automaticAttemptScores, storedAttemptScores);
       if (canViewInternal) {
         (filesByAttempt[String(attempt.attemptId)] || []).filter(function (file) { return file.driveFileId; }).forEach(function (file) {
           try {
