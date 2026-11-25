@@ -1582,7 +1582,7 @@ function listAttempts_(payload) {
     {
       const selectedIds = {};
       selectedAttempts.forEach(function (attempt) { selectedIds[String(attempt.attemptId)] = true; });
-      listRows_('Events').forEach(function (event) {
+      if (viewer && viewer.role === 'teacher') listRows_('Events').forEach(function (event) {
         const id = String(event.attemptId || '');
         if (!selectedIds[id]) return;
         if (!summaryEventsByAttempt[id]) summaryEventsByAttempt[id] = [];
@@ -1625,7 +1625,7 @@ function listAttempts_(payload) {
         score: attempt.score,
         maxScore: attempt.maxScore,
         focusLossCount: attempt.focusLossCount,
-        questionScores: parseJson_(attempt.questionScoresJson, {}),
+        questionScores: viewer && viewer.role === 'teacher' ? parseJson_(attempt.questionScoresJson, {}) : {},
         teacherFeedback: String(attempt.teacherFeedback || ''),
         timeExpired: timeExpired,
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
@@ -1636,7 +1636,7 @@ function listAttempts_(payload) {
         assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
         soloIndicatorVerified: soloIndicatorVerified,
         soloDominantVerified: soloDominantVerified,
-        teacherReviewed: attemptEvents.some(function (event) { return String(event.eventType || '') === 'TEACHER_GRADING_SAVED'; })
+        teacherReviewed: !!(viewer && viewer.role === 'teacher' && attemptEvents.some(function (event) { return String(event.eventType || '') === 'TEACHER_GRADING_SAVED'; }))
       };
     });
   }
