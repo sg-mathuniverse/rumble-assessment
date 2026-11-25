@@ -1070,6 +1070,7 @@ function updateAssessment_(payload) {
       const allowedTypes = ['multiple_choice','true_false','true_false_multi','multi_select','matching','essay','data_sufficiency'];
       if (allowedTypes.indexOf(type) === -1) throw new Error('Tipe soal tidak valid pada soal nomor ' + (index + 1));
       if (!isFinite(points) || points < 0 || points > 1000) throw new Error('Bobot soal tidak valid pada soal nomor ' + (index + 1));
+      if(type==='data_sufficiency'){const statements=Array.isArray(question.subquestions)?question.subquestions:[];if(!String(question.text||'').trim()||statements.length!==2||statements.some(function(value){return !String(value||'').trim();})||question.answer===null||question.answer===undefined||String(question.answer).trim()===''||!Number.isInteger(Number(question.answer))||Number(question.answer)<0||Number(question.answer)>4)throw new Error('Soal Kecukupan Data nomor '+(index+1)+' belum lengkap.');}
       appendRow_('Questions', {
         questionId: makeId_('Q'), assessmentId: assessmentId, order: index + 1, type: type,
         text: String(question.text || ''), points: points,
