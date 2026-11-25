@@ -809,7 +809,6 @@ function reportScoreRecommendation(q,val){
  const type=String(q.type||''),points=Number(q.points)||0,answer=q.answer;
  if(type==='essay')return null;
   if(type==='data_sufficiency')return String(answer)===String(val)?points:0;
-  if(type==='data_sufficiency')return String(answer)===String(val)?points:0;
  if(type==='multi_select'){
   const expected=(Array.isArray(answer)?answer:[]).map(String),selected=(Array.isArray(val)?val:[]).map(String);
   if(!expected.length)return 0;
@@ -852,7 +851,6 @@ function reportDisplayAnswer(q,val){
 function reportAnswerPhotos(val){return val&&typeof val==='object'&&Array.isArray(val.photos)?val.photos:[]}
 function reportCorrectAnswer(q){
  if(q.type==='essay')return String(q.rubric||'');
-  if(q.type==='data_sufficiency')return q.answer===undefined?'':String.fromCharCode(65+Number(q.answer));
   if(q.type==='data_sufficiency')return q.answer===undefined?'':String.fromCharCode(65+Number(q.answer));
  if(q.type==='matching')return '';
  if(q.type==='multi_select')return (Array.isArray(q.answer)?q.answer:[]).map(x=>String.fromCharCode(65+Number(x))).join(', ');
@@ -998,7 +996,7 @@ function reports(){
   return head('ANALITIK','Skor perbutir · '+esc(studentName),'Periksa jawaban dan sesuaikan skor rekomendasi sistem.')+breadcrumb+'<div class="report-questions">'+rows+'</div><div class="report-final-summary"><div><small>Nilai akhir murid</small><strong>'+total.toFixed(2)+' / '+max+' poin</strong></div><div class="field"><label>Umpan balik guru</label><textarea id="gradeFeedback_'+esc(active.attemptId)+'" rows="3">'+esc(active.teacherFeedback||'')+'</textarea></div><button class="btn primary" onclick="saveGrade(\''+esc(active.attemptId)+'\')">Simpan skor dan umpan balik</button></div>'+soloVerificationPanel(active)+soloAiPanel(active)+'<div class="actions" style="justify-content:flex-start;margin:18px 0 4px"><button class="btn" onclick="clearReportAttempt()">← Kembali ke daftar murid</button><small class="muted">Pastikan skor dan verifikasi indikator sudah disimpan sebelum kembali.</small></div>';
  }
  if(aid){
-  const studentRows=list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),name=user?user.name:a.studentId,score=a.status==='graded'&&Number(a.maxScore)>0?Number(a.score)+' / '+Number(a.maxScore)+' poin':'Belum dinilai';return '<button class="report-student-row '+(a.teacherReviewed?'is-teacher-reviewed':'is-awaiting-review')+'" onclick="chooseReportAttempt(\''+esc(a.attemptId)+'\')"><span><b>'+esc(name||'Murid')+'</b><small>'+esc(a.studentId||'')+' · '+esc(formatLocalDateTime(a.submittedAt))+'</small></span><span class="pill '+(a.teacherReviewed?'live':'')+'"'+(a.teacherReviewed?'Skor guru tersimpan':(score==='Belum dinilai'?'Perlu diperiksa':'Rekomendasi sistem'))+'</span></button>'}).join('');
+  const studentRows=list.map(a=>{const user=students.find(u=>String(u.userId)===String(a.studentId)),name=user?user.name:a.studentId,score=a.status==='graded'&&Number(a.maxScore)>0?Number(a.score)+' / '+Number(a.maxScore)+' poin':'Belum dinilai';return '<button class="report-student-row '+(a.teacherReviewed?'is-teacher-reviewed':'is-awaiting-review')+'" onclick="chooseReportAttempt(\''+esc(a.attemptId)+'\')"><span><b>'+esc(name||'Murid')+'</b><small>'+esc(a.studentId||'')+' · '+esc(formatLocalDateTime(a.submittedAt))+'</small></span><span class="pill '+(a.teacherReviewed?'live':'')+'">'+(a.teacherReviewed?'Skor guru tersimpan':(score==='Belum dinilai'?'Perlu diperiksa':'Rekomendasi sistem'))+'</span></button>'}).join('');
   return head('ANALITIK',esc(title),'Pilih murid yang ingin diperiksa.')+breadcrumb+'<div class="card"><div class="actions"><h3>Daftar murid</h3><button class="btn" onclick="clearReportAssessment()">← Daftar asesmen</button></div>'+(studentRows||'<p class="muted">Belum ada murid yang mengerjakan asesmen ini.</p>')+'</div>';
  }
  const byClass={};ids.forEach(id=>{const group=groups[id],a=group[0],cls=String(a.className||'Kelas belum diatur');if(!byClass[cls])byClass[cls]=[];byClass[cls].push({id:id,group:group})});
