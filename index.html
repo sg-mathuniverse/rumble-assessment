@@ -831,6 +831,7 @@ function reportScoreRecommendation(q,val){
 }
 function reportDisplayAnswer(q,val){
  if(val===undefined||val===null||val==='')return '(Tidak dijawab)';
+ if(q.type==='data_sufficiency')return 'Data (1): '+String((q.subquestions||[])[0]||'')+'\nData (2): '+String((q.subquestions||[])[1]||'')+'\nJawaban: '+String.fromCharCode(65+Number(val));
  if(q.type==='matching'){const pairs=Array.isArray(q.pairs)?q.pairs:[],obj=val&&typeof val==='object'?val:{};return pairs.map((p,i)=>(i+1)+'. '+(obj[String(i)]===undefined?'—':String.fromCharCode(65+Number(obj[String(i)])))).join('\n')}
  if(q.type==='true_false_multi'){const items=Array.isArray(q.subquestions)?q.subquestions:[],obj=val&&typeof val==='object'?val:{};return items.map((item,i)=>(i+1)+'. '+String(obj[String(i)]||'—')).join('\n')}
  if(q.type==='essay'&&val&&typeof val==='object'){
