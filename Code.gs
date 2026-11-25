@@ -1556,6 +1556,39 @@ function isAttemptExpiredByClock_(attempt, assessment, nowValue) {
   return expiredByDuration || expiredBySchedule;
 }
 
+function calculateObjectiveQuestionScores_(questions, answers) {
+  const result = {}, submitted = answers && typeof answers === 'object' ? answers : {};
+  (Array.isArray(questions) ? questions : []).forEach(function (question) {
+    const id = String(question.questionId || '');
+    if (!id || String(question.type || '') === 'essay') return;
+    const points = Number(question.points) || 0;
+    const correct = parseJson_(question.answerJson, null);
+    const answer = submitted[id];
+    let score = 0;
+    if (String(question.type) === 'matching') {
+      const pairs = parseJson_(question.pairsJson, []);
+      const values = answer && typeof answer === 'object' ? answer : {};
+      if (pairs.length) pairs.forEach(function (pair, index) {
+        if (values[String(index)] !== undefined && String(values[String(index)]) === String(index)) score += points / pairs.length;
+      });
+    } else if (String(question.type) === 'true_false_multi') {
+      const expected = Array.isArray(correct) ? correct : [];
+      const values = answer && typeof answer === 'object' ? answer : {};
+      if (expected.length) expected.forEach(function (key, index) {
+        if (values[String(index)] !== undefined && String(values[String(index)]) === String(key)) score += points / expected.length;
+      });
+    } else if (String(question.type) === 'multi_select') {
+      const expected = (Array.isArray(correct) ? correct : []).map(String).sort().join(',');
+      const values = (Array.isArray(answer) ? answer : []).map(String).sort().join(',');
+      if (expected && expected === values) score = points;
+    } else if (String(correct) === String(answer)) {
+      score = points;
+    }
+    result[id] = score;
+  });
+  return result;
+}
+
 function listAttempts_(payload) {
   payload = payload || {};
   const assessments = listRows_('Assessments');
@@ -1590,15 +1623,15 @@ function listAttempts_(payload) {
         summaryEventsByAttempt[id].push(event);
       });
     }
-    const summaryQuestionIdsByAssessment = {};
+    const summaryQuestionsByAssessment = {};
     if (viewer && viewer.role === 'teacher') {
       const selectedAssessmentIds = {};
       selectedAttempts.forEach(function (attempt) { selectedAssessmentIds[String(attempt.assessmentId)] = true; });
       listRows_('Questions').forEach(function (question) {
         const assessmentId = String(question.assessmentId || '');
         if (!selectedAssessmentIds[assessmentId]) return;
-        if (!summaryQuestionIdsByAssessment[assessmentId]) summaryQuestionIdsByAssessment[assessmentId] = [];
-        summaryQuestionIdsByAssessment[assessmentId].push(String(question.questionId || ''));
+        if (!summaryQuestionsByAssessment[assessmentId]) summaryQuestionsByAssessment[assessmentId] = [];
+        summaryQuestionsByAssessment[assessmentId].push(question);
       });
     }
     function latestSummaryEvent(events, predicate) {
@@ -1627,6 +1660,11 @@ function listAttempts_(payload) {
         String(latestDominant.eventAt || '') >= String(latestIndicator.eventAt || '') &&
         (!latestAi || String(latestDominant.eventAt || '') >= String(latestAi.eventAt || ''))
       );
+      const summaryQuestions = summaryQuestionsByAssessment[String(attempt.assessmentId)] || [];
+      const storedQuestionScores = parseJson_(attempt.questionScoresJson, {});
+      const summaryQuestionScores = Object.keys(storedQuestionScores).length
+        ? storedQuestionScores
+        : calculateObjectiveQuestionScores_(summaryQuestions, parseJson_(attempt.answersJson, {}));
       return {
         attemptId: String(attempt.attemptId || ''),
         assessmentId: String(attempt.assessmentId || ''),
@@ -1637,8 +1675,8 @@ function listAttempts_(payload) {
         score: attempt.score,
         maxScore: attempt.maxScore,
         focusLossCount: attempt.focusLossCount,
-        questionScores: viewer && viewer.role === 'teacher' ? parseJson_(attempt.questionScoresJson, {}) : {},
-        questionIds: viewer && viewer.role === 'teacher' ? (summaryQuestionIdsByAssessment[String(attempt.assessmentId)] || []) : [],
+        questionScores: viewer && viewer.role === 'teacher' ? summaryQuestionScores : {},
+        questionIds: viewer && viewer.role === 'teacher' ? summaryQuestions.map(function (question) { return String(question.questionId || ''); }) : [],
         teacherFeedback: String(attempt.teacherFeedback || ''),
         timeExpired: timeExpired,
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
@@ -1728,6 +1766,8 @@ function listAttempts_(payload) {
             optionImages: parseJson_(question.optionImagesJson, [])
           };
         });
+      const storedAttemptScores = parseJson_(attempt.questionScoresJson, {});
+      const attemptQuestionScores = Object.keys(storedAttemptScores).length ? storedAttemptScores : calculateObjectiveQuestionScores_(questionsByAssessment[String(attempt.assessmentId)] || [], parseJson_(attempt.answersJson, {}));
       if (canViewInternal) {
         (filesByAttempt[String(attempt.attemptId)] || []).filter(function (file) { return file.driveFileId; }).forEach(function (file) {
           try {
@@ -1768,7 +1808,7 @@ function listAttempts_(payload) {
           });
           return answers;
         })(),
-        questionScores: assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && !canViewInternal ? {} : parseJson_(attempt.questionScoresJson, {}),
+        questionScores: assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && !canViewInternal ? {} : attemptQuestionScores,
         teacherReviewed: (eventsByAttempt[String(attempt.attemptId)] || []).some(function (event) { return String(event.eventType || '') === 'TEACHER_GRADING_SAVED'; }),
         questionDetails: details,
         assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
