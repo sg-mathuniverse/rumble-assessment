@@ -618,6 +618,8 @@ function saveQuestionBundle_(payload) {
     const type=String(q.type||'multiple_choice'),points=Number(q.points);
     if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay','data_sufficiency'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(i+1));
     if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot nilai tidak valid pada soal nomor '+(i+1));
+    if(type==='data_sufficiency'){const statements=Array.isArray(q.subquestions)?q.subquestions:[];if(!String(q.text||'').trim()||statements.length!==2||statements.some(function(value){return !String(value||'').trim();})||!Number.isInteger(Number(q.answer))||Number(q.answer)<0||Number(q.answer)>4)throw new Error('Soal Kecukupan Data nomor '+(i+1)+' belum lengkap. Isi pertanyaan, Data (1), Data (2), dan kunci A–E.');}
+
   });
   const now=currentTimestamp_();
   const snapshot={schemaVersion:1,bundleId:bundleId,classification:classification,title:title,subject:String(payload.subject||''),className:String(payload.className||''),description:String(payload.description||''),tpCode:String(payload.tpCode||'').trim().toUpperCase(),learningObjectiveId:String(payload.learningObjectiveId||'').trim(),learningIndicatorId:String(payload.learningIndicatorId||'').trim(),passageText:String(payload.passageText||''),passageImageUrl:String(payload.passageImageUrl||''),passages:Array.isArray(payload.passages)?payload.passages:[],questions:questions};
@@ -840,6 +842,7 @@ function createAssessment_(payload) {
     const type=String(question.type||'multiple_choice'),points=Number(question.points);
     if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay','data_sufficiency'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(index+1));
     if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal tidak valid pada soal nomor '+(index+1));
+    if(type==='data_sufficiency'){const statements=Array.isArray(question.subquestions)?question.subquestions:[];if(!String(question.text||'').trim()||statements.length!==2||statements.some(function(value){return !String(value||'').trim();})||!Number.isInteger(Number(question.answer))||Number(question.answer)<0||Number(question.answer)>4)throw new Error('Soal Kecukupan Data nomor '+(index+1)+' belum lengkap. Isi pertanyaan, Data (1), Data (2), dan kunci A–E.');}
   });
   const lock=LockService.getScriptLock();lock.waitLock(10000);
   try{
