@@ -616,7 +616,7 @@ function saveQuestionBundle_(payload) {
   if (classification === 'SOLO_TAX') questions.forEach(function(q,i){ validateSoloTaxQuestion_(q,i); });
   else questions.forEach(function(q,i){
     const type=String(q.type||'multiple_choice'),points=Number(q.points);
-    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(i+1));
+    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay','data_sufficiency'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(i+1));
     if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot nilai tidak valid pada soal nomor '+(i+1));
   });
   const now=currentTimestamp_();
@@ -838,7 +838,7 @@ function createAssessment_(payload) {
   if(!questions.length||questions.length>200)throw new Error('Versi Bundel Soal harus memiliki 1 sampai 200 soal.');
   questions.forEach(function(question,index){
     const type=String(question.type||'multiple_choice'),points=Number(question.points);
-    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(index+1));
+    if(['multiple_choice','true_false','true_false_multi','multi_select','matching','essay','data_sufficiency'].indexOf(type)<0)throw new Error('Tipe soal tidak valid pada soal nomor '+(index+1));
     if(!isFinite(points)||points<0||points>1000)throw new Error('Bobot soal tidak valid pada soal nomor '+(index+1));
   });
   const lock=LockService.getScriptLock();lock.waitLock(10000);
@@ -1439,6 +1439,7 @@ function submitAttempt_(payload) {
   let score = 0;
   let maxScore = 0;
   let needsReview = false;
+  const autoQuestionScores = {};
 
   questions.forEach(function (question) {
     const points = Number(question.points) || 0;
@@ -1452,52 +1453,34 @@ function submitAttempt_(payload) {
       return;
     }
 
+    let questionScore = 0;
     if (question.type === 'matching') {
       const pairs = parseJson_(question.pairsJson, []);
       const submitted = studentAnswer && typeof studentAnswer === 'object' ? studentAnswer : {};
       if (pairs.length > 0) {
         const perPair = points / pairs.length;
         pairs.forEach(function (pair, index) {
-          if (submitted[String(index)] !== undefined && String(submitted[String(index)]) === String(index)) score += perPair;
+          if (submitted[String(index)] !== undefined && String(submitted[String(index)]) === String(index)) questionScore += perPair;
         });
       }
-      return;
-    }
-
-    if (question.type === 'true_false_multi') {
+    } else if (question.type === 'true_false_multi') {
       const expected = Array.isArray(correctAnswer) ? correctAnswer : [];
       const submitted = studentAnswer && typeof studentAnswer === 'object' ? studentAnswer : {};
-      const count = expected.length;
-      if (count > 0) {
-        const perStatement = points / count;
+      if (expected.length > 0) {
+        const perStatement = points / expected.length;
         expected.forEach(function (key, index) {
-          if (submitted[String(index)] !== undefined && String(submitted[String(index)]) === String(key)) score += perStatement;
+          if (submitted[String(index)] !== undefined && String(submitted[String(index)]) === String(key)) questionScore += perStatement;
         });
       }
-      return;
+    } else if (question.type === 'multi_select') {
+      const expected = (Array.isArray(correctAnswer) ? correctAnswer : []).map(String).sort().join(',');
+      const submitted = (Array.isArray(studentAnswer) ? studentAnswer : []).map(String).sort().join(',');
+      if (expected && expected === submitted) questionScore = points;
+    } else if (String(correctAnswer) === String(studentAnswer)) {
+      questionScore = points;
     }
-
-    if (question.type === 'multi_select') {
-      const expected = (Array.isArray(correctAnswer) ? correctAnswer : [])
-        .map(String)
-        .sort()
-        .join(',');
-
-      const submitted = (Array.isArray(studentAnswer) ? studentAnswer : [])
-        .map(String)
-        .sort()
-        .join(',');
-
-      if (expected && expected === submitted) {
-        score += points;
-      }
-
-      return;
-    }
-
-    if (String(correctAnswer) === String(studentAnswer)) {
-      score += points;
-    }
+    score += questionScore;
+    autoQuestionScores[String(question.questionId)] = questionScore;
   });
 
   // Sesi aktif boleh dikirim setelah jam jadwal berakhir selama durasi pengerjaan belum habis.
@@ -1528,13 +1511,14 @@ function submitAttempt_(payload) {
     attemptsSheet.getRange(rowNumber, col('maxScore') + 1).setValue(maxScore);
     attemptsSheet.getRange(rowNumber, col('focusLossCount') + 1).setValue(Math.max(0, Number(payload.focusLossCount) || 0));
     attemptsSheet.getRange(rowNumber, col('answersJson') + 1).setValue(JSON.stringify(finalAnswers));
+    if (col('questionScoresJson') >= 0) attemptsSheet.getRange(rowNumber, col('questionScoresJson') + 1).setValue(JSON.stringify(autoQuestionScores));
   } else {
     appendRow_('Attempts', {
       attemptId: attemptId, assessmentId: assessmentId, studentId: studentId,
       startedAt: currentTimestamp_(), submittedAt: submittedAt, status: finalStatus,
       score: score, maxScore: maxScore,
       focusLossCount: Math.max(0, Number(payload.focusLossCount) || 0),
-      answersJson: JSON.stringify(finalAnswers), teacherFeedback: ''
+      answersJson: JSON.stringify(finalAnswers), questionScoresJson: JSON.stringify(autoQuestionScores), teacherFeedback: ''
     });
   }
 
@@ -1592,7 +1576,7 @@ function listAttempts_(payload) {
       return assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX';
     });
     const summaryEventsByAttempt = {};
-    if (hasSoloAttempts) {
+    {
       const selectedIds = {};
       selectedAttempts.forEach(function (attempt) { selectedIds[String(attempt.attemptId)] = true; });
       listRows_('Events').forEach(function (event) {
@@ -1638,6 +1622,7 @@ function listAttempts_(payload) {
         score: attempt.score,
         maxScore: attempt.maxScore,
         focusLossCount: attempt.focusLossCount,
+        questionScores: parseJson_(attempt.questionScoresJson, {}),
         teacherFeedback: String(attempt.teacherFeedback || ''),
         timeExpired: timeExpired,
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
@@ -1647,7 +1632,8 @@ function listAttempts_(payload) {
         className: assessment ? String(assessment.className || '') : '',
         assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
         soloIndicatorVerified: soloIndicatorVerified,
-        soloDominantVerified: soloDominantVerified
+        soloDominantVerified: soloDominantVerified,
+        teacherReviewed: attemptEvents.some(function (event) { return String(event.eventType || '') === 'TEACHER_GRADING_SAVED'; })
       };
     });
   }
@@ -1767,6 +1753,7 @@ function listAttempts_(payload) {
           return answers;
         })(),
         questionScores: assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX' && !canViewInternal ? {} : parseJson_(attempt.questionScoresJson, {}),
+        teacherReviewed: (eventsByAttempt[String(attempt.attemptId)] || []).some(function (event) { return String(event.eventType || '') === 'TEACHER_GRADING_SAVED'; }),
         questionDetails: details,
         assessmentClassification: assessment ? String(assessment.classification || 'REGULER') : 'REGULER',
         soloClassReflection: canViewInternal && assessment && String(assessment.classification || '').toUpperCase() === 'SOLO_TAX'
@@ -1975,6 +1962,11 @@ function gradeAttempt_(payload) {
           .setValue(String(payload.feedback || ''));
         sheet.getRange(rowIndex + 1, columnIndex('questionScoresJson') + 1)
           .setValue(JSON.stringify(savedScores));
+        appendRow_('Events', {
+          eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
+          eventType: 'TEACHER_GRADING_SAVED', eventAt: currentTimestamp_(),
+          detailsJson: JSON.stringify({ questionCount: questions.length, score: score, maxScore: maxScore })
+        });
         if (isSoloTax) {
           appendRow_('Events', {
             eventId: makeId_('EVT'), attemptId: attemptId, studentId: String(attempt.studentId || ''),
