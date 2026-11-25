@@ -1222,7 +1222,7 @@ function gradebook(){
   const gradedCount=g.items.filter(function(x){return x.status==='graded'}).length;
   const indicatorCount=isSolo?g.items.filter(function(x){return x.soloIndicatorVerified===true}).length:g.items.length;
   const dominantCount=isSolo?g.items.filter(function(x){return x.soloDominantVerified===true}).length:g.items.length;
-  const missingCount=g.items.filter(function(attempt){const details=Array.isArray(attempt.questionDetails)?attempt.questionDetails:[],scores=attempt.questionScores||{};return !details.length||details.some(function(q){const key=String(q.id);return !Object.prototype.hasOwnProperty.call(scores,key)||scores[key]===null||scores[key]===undefined||String(scores[key]).trim()===''});}).length;
+  const missingCount=g.items.filter(function(attempt){const details=Array.isArray(attempt.questionDetails)?attempt.questionDetails:[],ids=Array.isArray(attempt.questionIds)&&attempt.questionIds.length?attempt.questionIds.map(String):details.map(function(q){return String(q.id)}),scores=attempt.questionScores||{};return !ids.length||ids.some(function(key){return !Object.prototype.hasOwnProperty.call(scores,key)||scores[key]===null||scores[key]===undefined||String(scores[key]).trim()===''});}).length;
   const reviewedCount=g.items.filter(function(x){return x.teacherReviewed===true}).length;
   g.isSolo=isSolo;g.gradedCount=gradedCount;g.indicatorCount=indicatorCount;g.dominantCount=dominantCount;g.missingCount=missingCount;g.reviewedCount=reviewedCount;
   g.ready=g.items.length>0&&missingCount===0&&reviewedCount===g.items.length&&(!isSolo||(indicatorCount===g.items.length&&dominantCount===g.items.length));
