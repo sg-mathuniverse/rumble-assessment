@@ -842,7 +842,6 @@ function reportDisplayAnswer(q,val){
   if(Array.isArray(val.photos)&&val.photos.length)return 'Foto terlampir ('+val.photos.length+' berkas)';
   return '(Tidak dijawab)';
  }
- if(q.type==='data_sufficiency')return 'Data (1): '+String((q.subquestions||[])[0]||'')+'\nData (2): '+String((q.subquestions||[])[1]||'')+'\nJawaban: '+(val===undefined?'—':String.fromCharCode(65+Number(val)));
    if(Array.isArray(val)&&q.type==='multi_select')return val.map(x=>String.fromCharCode(65+Number(x))).join(', ')||'(Tidak dijawab)';
  if(q.type==='multiple_choice')return String.fromCharCode(65+Number(val));
  if(val&&typeof val==='object')return String(val.text||'(Jawaban tersimpan)');
