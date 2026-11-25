@@ -1616,7 +1616,7 @@ function listAttempts_(payload) {
     {
       const selectedIds = {};
       selectedAttempts.forEach(function (attempt) { selectedIds[String(attempt.attemptId)] = true; });
-      if (viewer && viewer.role === 'teacher') listRows_('Events').forEach(function (event) {
+      if (viewer && viewer.role === 'teacher' && selectedAttempts.length) listRows_('Events').forEach(function (event) {
         const id = String(event.attemptId || '');
         if (!selectedIds[id]) return;
         if (!summaryEventsByAttempt[id]) summaryEventsByAttempt[id] = [];
@@ -1624,7 +1624,7 @@ function listAttempts_(payload) {
       });
     }
     const summaryQuestionsByAssessment = {};
-    if (viewer && viewer.role === 'teacher') {
+    if (viewer && viewer.role === 'teacher' && selectedAttempts.length) {
       const selectedAssessmentIds = {};
       selectedAttempts.forEach(function (attempt) { selectedAssessmentIds[String(attempt.assessmentId)] = true; });
       listRows_('Questions').forEach(function (question) {
@@ -1661,7 +1661,8 @@ function listAttempts_(payload) {
         (!latestAi || String(latestDominant.eventAt || '') >= String(latestAi.eventAt || ''))
       );
       const summaryQuestions = summaryQuestionsByAssessment[String(attempt.assessmentId)] || [];
-      const storedQuestionScores = parseJson_(attempt.questionScoresJson, {});
+      const storedQuestionScoresRaw = parseJson_(attempt.questionScoresJson, {});
+      const storedQuestionScores = storedQuestionScoresRaw && typeof storedQuestionScoresRaw === 'object' ? storedQuestionScoresRaw : {};
       const summaryQuestionScores = Object.keys(storedQuestionScores).length
         ? storedQuestionScores
         : calculateObjectiveQuestionScores_(summaryQuestions, parseJson_(attempt.answersJson, {}));
@@ -1766,7 +1767,8 @@ function listAttempts_(payload) {
             optionImages: parseJson_(question.optionImagesJson, [])
           };
         });
-      const storedAttemptScores = parseJson_(attempt.questionScoresJson, {});
+      const storedAttemptScoresRaw = parseJson_(attempt.questionScoresJson, {});
+      const storedAttemptScores = storedAttemptScoresRaw && typeof storedAttemptScoresRaw === 'object' ? storedAttemptScoresRaw : {};
       const attemptQuestionScores = Object.keys(storedAttemptScores).length ? storedAttemptScores : calculateObjectiveQuestionScores_(questionsByAssessment[String(attempt.assessmentId)] || [], parseJson_(attempt.answersJson, {}));
       if (canViewInternal) {
         (filesByAttempt[String(attempt.attemptId)] || []).filter(function (file) { return file.driveFileId; }).forEach(function (file) {
