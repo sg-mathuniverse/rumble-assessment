@@ -1589,6 +1589,17 @@ function listAttempts_(payload) {
         summaryEventsByAttempt[id].push(event);
       });
     }
+    const summaryQuestionIdsByAssessment = {};
+    if (viewer && viewer.role === 'teacher') {
+      const selectedAssessmentIds = {};
+      selectedAttempts.forEach(function (attempt) { selectedAssessmentIds[String(attempt.assessmentId)] = true; });
+      listRows_('Questions').forEach(function (question) {
+        const assessmentId = String(question.assessmentId || '');
+        if (!selectedAssessmentIds[assessmentId]) return;
+        if (!summaryQuestionIdsByAssessment[assessmentId]) summaryQuestionIdsByAssessment[assessmentId] = [];
+        summaryQuestionIdsByAssessment[assessmentId].push(String(question.questionId || ''));
+      });
+    }
     function latestSummaryEvent(events, predicate) {
       return events.filter(predicate).sort(function (a, b) {
         return String(a.eventAt || '').localeCompare(String(b.eventAt || ''));
@@ -1626,6 +1637,7 @@ function listAttempts_(payload) {
         maxScore: attempt.maxScore,
         focusLossCount: attempt.focusLossCount,
         questionScores: viewer && viewer.role === 'teacher' ? parseJson_(attempt.questionScoresJson, {}) : {},
+        questionIds: viewer && viewer.role === 'teacher' ? (summaryQuestionIdsByAssessment[String(attempt.assessmentId)] || []) : [],
         teacherFeedback: String(attempt.teacherFeedback || ''),
         timeExpired: timeExpired,
         assessmentTitle: assessment ? assessment.title : attempt.assessmentId,
